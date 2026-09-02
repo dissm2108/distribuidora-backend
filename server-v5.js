@@ -62,7 +62,13 @@ async function avisarAdmin(msg){
 }
 async function evento(tipo,titulo,desc,ref){await db.from("eventos").insert({tipo,titulo,descripcion:desc,ref:String(ref||""),visto:false});}
 async function avisoA(para,txt){await db.from("avisos").insert({para,txt,hora:horaPE()});}
-async function tiendaPorNombre(n){const{data}=await db.from("tiendas").select("*").ilike("nombre",n).maybeSingle();return data;}
+async function tiendaPorNombre(n){
+  if(!n)return null;
+  const{data}=await db.from("tiendas").select("*").ilike("nombre",String(n).trim()).maybeSingle();
+  if(data)return data;
+  const{data:ap}=await db.from("tiendas").select("*").ilike("nombre","%"+String(n).trim().slice(0,20)+"%").limit(1);
+  return (ap||[])[0]||null;
+}
 async function getParams(){const{data}=await db.from("params").select("*").eq("id",1).maybeSingle();return (data&&data.kv)||{};}
 
 function pipSrv(lat,lon,poly){let d=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const yi=poly[i][0],xi=poly[i][1],yj=poly[j][0],xj=poly[j][1];if(((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi)+xi))d=!d;}return d;}
@@ -72,7 +78,15 @@ function zonaDeCond(lat,lon,u){if(lat==null||lon==null)return undefined;for(cons
 
 // ── auth middlewares ──
 function authC(req,res,next){try{req.cond=jwt.verify(req.headers["x-token"]||"",SECRET);if(req.cond.a||!USR_RE.test(req.cond.u||""))throw 0;next();}catch(e){res.status(401).json({ok:false,error:"Sesión inválida"});}}
-function authA(req,res,next){try{const t=jwt.verify(req.headers["x-admin"]||"",SECRET);if(!t.a)throw 0;next();}catch(e){res.status(401).json({ok:false,error:"Admin no autenticado"});}}
+function authA(req,res,next){
+  try{
+    const t=jwt.verify(req.headers["x-admin"]||"",SECRET);
+    if(!t.a)throw 0;
+    req.ro=!!t.ro;
+    if(req.ro&&req.method!=="GET")return res.status(403).json({ok:false,error:"Modo solo lectura: no puedes hacer cambios"});
+    next();
+  }catch(e){res.status(401).json({ok:false,error:"Admin no autenticado"});}
+}
 
 // ════════ SALUD ════════
 app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString()}));
@@ -81,9 +95,12 @@ app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString
 app.post("/auth/admin",authLimiter,(req,res)=>{
   const k="A|"+kIP(req);
   if(bloqueado(k))return res.status(429).json({ok:false,error:"Demasiados intentos. Espera 15 minutos."});
-  if(!safeEq(req.body.clave||"",process.env.ADMIN_PASS)){falla(k);return res.status(401).json({ok:false,error:"Clave incorrecta"});}
+  const cl=req.body.clave||"";
+  const esAdmin=safeEq(cl,process.env.ADMIN_PASS);
+  const esLector=!!process.env.VIEWER_PASS&&safeEq(cl,process.env.VIEWER_PASS);
+  if(!esAdmin&&!esLector){falla(k);return res.status(401).json({ok:false,error:"Clave incorrecta"});}
   limpiaFallo(k);
-  res.json({ok:true,token:jwt.sign({a:1},SECRET,{expiresIn:"60d"})});
+  res.json({ok:true,solo_lectura:esLector,token:jwt.sign(esLector?{a:1,ro:1}:{a:1},SECRET,{expiresIn:"1d"})});
 });
 app.post("/auth/login",authLimiter,async(req,res)=>{
   const u=String(req.body.usuario||"").toLowerCase().trim(),p=String(req.body.pass||"");
@@ -126,7 +143,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
   const{data:tds}=await db.from("tiendas").select("*").eq("act",true);
   const{data:vHoy}=await db.from("visitas").select("*").eq("fecha",hoy());
   const{data:peds}=await db.from("pedidos").select("*").eq("fecha",hoy()).eq("conductor",u).eq("estado","pendiente");
-  const{data:ultV}=await db.from("ventas").select("tienda_id,creado,total,resumen").order("creado",{ascending:false}).limit(400);
+  const{data:ultV}=await db.from("ventas").select("tienda_id,creado,total,resumen,items").order("creado",{ascending:false}).limit(400);
   const tiendas=(tds||[]).map(t=>{
     const vs=(ultV||[]).filter(v=>v.tienda_id===t.id).slice(0,5);
     const UMB=num(params.umbral_repo,1,100000)||40, RESTA=num(params.repo_resta_parcial,0,30)||2;
@@ -138,13 +155,14 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     const dr=Math.max(0,diasBase-RESTA*nBajas-(t.dr_ajuste||0));
     const ultBaja=(vsAll.length&&Number(vsAll[0].total||0)<UMB)?Number(vsAll[0].total||0):null;
     const vo=(vHoy||[]).find(v=>v.tienda_id===t.id&&v.conductor!==u&&v.tipo==="venta");
-    const pd=(peds||[]).find(p=>p.tienda_id===t.id);
+    const pd=(peds||[]).find(p=>(p.tienda_id&&p.tienda_id===t.id)||(p.tienda&&String(p.tienda).toLowerCase().trim()===String(t.nombre).toLowerCase().trim()));
     return {n:t.nombre,z:t.zona||"—",tp:t.tipo||"bodega",d:t.dueno||"—",tel:t.tel||"—",
       e:vs.length&&vs[0].creado.slice(0,10)===hoy()?"completada":"pendiente",
       cr:!!t.cr,sa:Number(t.sa||0),li:Number(t.li||params.limite_credito||230),di:"—",
       no:t.notas||"",ab:true,lat:t.lat,lon:t.lon,dr,vip:!!t.vip,act:true,
       nueva:!!t.nueva,verificada:!!t.verificada,foto:t.foto||null,id:t.id,
       h:vs.map(v=>({f:new Date(v.creado).toLocaleDateString("es-PE"),p:v.resumen||"",m:Number(v.total)})),
+      ultima_compra:(vs[0]&&Array.isArray(vs[0].items))?vs[0].items.filter(x=>x&&x.id).map(x=>({id:x.id,n:x.n,c:num(x.c,0,9999)})):[],
       pedido:pd?{items:pd.items,hora:pd.hora,nota:pd.nota||""}:undefined,
       pedidoHoy:!!pd,
       visitadaPor:vo?{n:vo.conductor,h:vo.hora}:undefined,
@@ -159,14 +177,16 @@ app.get("/conductor/datos",authC,async(req,res)=>{
   const{data:leidos}=await db.from("avisos_leidos").select("aviso_id").eq("usuario",u);
   const setL=new Set((leidos||[]).map(x=>x.aviso_id));
   const avisos=(avs||[]).map(a=>({id:a.id,txt:a.txt,hora:a.hora,leido:setL.has(a.id)}));
+  const{data:yo}=await db.from("conductores").select("lat,lon,gps_fuente,gps_hora").eq("usuario",u).maybeSingle();
   const{data:cg}=await db.from("cargas").select("*").eq("conductor",u).eq("estado","pendiente").order("id",{ascending:false}).limit(1).maybeSingle();
   const{data:trs}=await db.from("traspasos").select("*").eq("para",u).in("estado",["pendiente","parcial"]);
   const{data:trsOut}=await db.from("traspasos").select("*").eq("de",u).in("estado",["pendiente","parcial"]);
   const lim3=new Date(Date.now()-3*86400000).toISOString();
   const{data:trsOk}=await db.from("traspasos").select("*").eq("estado","completado").gte("creado",lim3).or(`de.eq.${u},para.eq.${u}`);
-  const{data:cat}=await db.from("catalogo").select("id,cat,nombre,precio,costo,activo").or("activo.is.null,activo.eq.true");
+  const{data:cat}=await db.from("catalogo").select("id,cat,nombre,precio,precios,costo,activo").or("activo.is.null,activo.eq.true");
   const{data:cats}=await db.from("categorias").select("*").eq("activa",true).order("orden");
   res.json({ok:true,params,catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
+    gps_camion:(yo&&yo.lat&&yo.gps_fuente&&yo.gps_fuente!=="celular")?{lat:yo.lat,lon:yo.lon,fuente:yo.gps_fuente,hora:yo.gps_hora}:null,
     carga_pendiente:cg?{id:cg.id,items:cg.items,detalle:cg.detalle||null}:null,
     traspasos_entrantes:(trs||[]).map(t=>({id:String(t.id),de:t.de_nombre||t.de,items:t.items,estado:t.estado,yo_confirme:!!t.conf_para,otro_confirmo:!!t.conf_de})),
     traspasos_completados:(trsOk||[]).map(t=>({id:String(t.id),items:t.items,rol:t.para===u?"recibe":"entrega",otro:t.para===u?(t.de_nombre||t.de):t.para})),
@@ -236,6 +256,8 @@ app.post("/traspasos/estado",authC,async(req,res)=>{
   await db.from("traspasos").update(upd).eq("id",t.id);
   if(cDe&&cPara){
     const det=JSON.stringify(t.items);
+    if(t.de==="almacen")await db.from("kardex").insert({conductor:"almacen",tipo:"almacen_salida",detalle:det+" · entregado a "+t.para});
+    if(t.para==="almacen")await db.from("kardex").insert({conductor:"almacen",tipo:"almacen_retorno",detalle:det+" · recibido de "+t.de});
     await db.from("kardex").insert({conductor:t.para,tipo:"traspaso_in",detalle:"De "+(t.de_nombre||t.de)+": "+det});
     await db.from("kardex").insert({conductor:t.de,tipo:"traspaso_out",detalle:"Hacia "+t.para+": "+det});
     await avisoA(t.de,"✓ Traspaso completado con "+t.para+": ambos confirmaron.");
@@ -330,12 +352,24 @@ app.post("/admin/conductores",authA,async(req,res)=>{
   if(error)return res.status(409).json({ok:false,error:"Ese usuario ya existe"});
   res.json({ok:true});
 });
+app.post("/admin/conductores/:u/editar",authA,async(req,res)=>{
+  const upd={};
+  if(req.body.nombre)upd.nombre=limpia(req.body.nombre,60);
+  if(req.body.camion!=null)upd.camion=limpia(req.body.camion,20);
+  if(req.body.gps_id!=null)upd.gps_id=limpia(req.body.gps_id,40)||null;
+  if(req.body.tipo)upd.tipo=(req.body.tipo==="paso"?"paso":"fijo");
+  if(!Object.keys(upd).length)return res.status(400).json({ok:false,error:"Nada que cambiar"});
+  await db.from("conductores").update(upd).eq("usuario",req.params.u);
+  await db.from("logs").insert({tipo:"admin",detalle:"Editó al conductor @"+req.params.u+": "+Object.keys(upd).join(", ")});
+  res.json({ok:true});
+});
 app.post("/admin/conductores/:u/reset",authA,async(req,res)=>{await db.from("conductores").update({pass_hash:null}).eq("usuario",req.params.u);
   await db.from("logs").insert({tipo:"admin",detalle:"Reseteó contraseña de @"+req.params.u});res.json({ok:true});});
 app.post("/admin/conductores/:u/activo",authA,async(req,res)=>{await db.from("conductores").update({activo:!!req.body.activo}).eq("usuario",req.params.u);res.json({ok:true});});
 app.post("/avisos",authA,async(req,res)=>{await avisoA((req.body.para==="todos"||USR_RE.test(req.body.para||""))?req.body.para:"todos",String(req.body.txt||""));res.json({ok:true});});
 app.post("/pedidos",authA,async(req,res)=>{
-  const t=await tiendaPorNombre(req.body.tienda||"");
+  let t=await tiendaPorNombre(req.body.tienda||"");
+  if(!t&&req.body.tienda){const{data:aprox}=await db.from("tiendas").select("id,nombre").ilike("nombre","%"+String(req.body.tienda).slice(0,20)+"%").limit(1);t=(aprox||[])[0]||null;}
   await db.from("pedidos").insert({tienda_id:t?t.id:null,tienda:req.body.tienda,conductor:req.body.conductor,items:(Array.isArray(req.body.items)?req.body.items.slice(0,60):[]).map(x=>({p:String(x.p||"").slice(0,60),c:num(x.c,1,999)})),nota:req.body.nota||"",hora:req.body.hora||horaPE(),fecha:hoy(),estado:"pendiente"});
   res.json({ok:true});
 });
@@ -396,6 +430,29 @@ app.get("/liquidaciones/sugerencia",authA,async(req,res)=>{
     vendido_por_categoria:conCat?vendCat:null,
     nota:conCat?"Base = mediana de tus cargas confirmadas; la tendencia usa la mitad más reciente. Ya hay ventas con categoría: en los próximos viajes el cálculo usará lo vendido real."
       :"Base = mediana de tus cargas confirmadas (lo básico que suele llevar). Aún no hay ventas con categoría registrada: se afinará solo con el uso."});
+});
+app.post("/admin/tiendas/:id/editar",authA,async(req,res)=>{
+  const{data:ant}=await db.from("tiendas").select("*").eq("id",req.params.id).maybeSingle();
+  if(!ant)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
+  const campos={nombre:60,zona:40,tipo:20,dueno:60,tel:15,notas:200,hora_ini:5,hora_fin:5,dias_no:30};
+  const upd={},cambios=[];
+  Object.keys(campos).forEach(k=>{
+    if(req.body[k]==null)return;
+    const v=(k==="tel")?String(req.body[k]).replace(/\D/g,"").slice(0,15):limpia(req.body[k],campos[k]);
+    if(String(ant[k]||"")!==String(v||"")){upd[k]=v;cambios.push(k+': "'+(ant[k]||"—")+'" → "'+(v||"—")+'"');}
+  });
+  ["lat","lon"].forEach(k=>{ if(req.body[k]!=null){const v=num(req.body[k],k==="lat"?-90:-180,k==="lat"?90:180);
+    if(Number(ant[k])!==v){upd[k]=v;cambios.push(k+": "+(ant[k]??"—")+" → "+v);} }});
+  if(req.body.vip!=null&&!!ant.vip!==!!req.body.vip){upd.vip=!!req.body.vip;cambios.push("VIP: "+(req.body.vip?"sí":"no"));}
+  if(req.body.act!=null&&!!ant.act!==!!req.body.act){upd.act=!!req.body.act;cambios.push("Activa: "+(req.body.act?"sí":"no"));}
+  if(!cambios.length)return res.json({ok:true,sin_cambios:true});
+  await db.from("tiendas").update(upd).eq("id",req.params.id);
+  await db.from("logs").insert({tipo:"tienda",detalle:"#"+req.params.id+" "+(ant.nombre||"")+" · "+cambios.join(" · ")});
+  res.json({ok:true,cambios:cambios.length});
+});
+app.get("/admin/tiendas/:id/historial",authA,async(req,res)=>{
+  const{data}=await db.from("logs").select("*").eq("tipo","tienda").ilike("detalle","#"+req.params.id+" %").order("id",{ascending:false}).limit(40);
+  res.json({ok:true,filas:data||[]});
 });
 app.post("/tiendas/:id/verificar",authA,async(req,res)=>{await db.from("tiendas").update({verificada:true,nueva:false}).eq("id",req.params.id);res.json({ok:true});});
 app.post("/tiendas/:id/credito",authA,async(req,res)=>{await db.from("tiendas").update({cr:!!req.body.habilitado,li:num(req.body.limite,0,100000)||230}).eq("id",req.params.id);
@@ -472,7 +529,8 @@ app.post("/admin/catalogo",authA,async(req,res)=>{
   const arr=Array.isArray(req.body.productos)?req.body.productos.slice(0,400):[];
   if(!arr.length)return res.status(400).json({ok:false,error:"Sin productos"});
   const filas=arr.map(p=>({id:limpia(p.id,20),cat:limpia(p.cat,20),nombre:limpia(p.nombre,60),
-    precio:num(p.precio,0,10000),costo:num(p.costo,0,10000)})).filter(p=>p.id);
+    precio:num(p.precio,0,10000),costo:num(p.costo,0,10000),
+    precios:(function(o){const r={};Object.keys(o||{}).slice(0,12).forEach(k=>{const v=num(o[k],0,10000);if(v)r[limpia(k,20)]=v;});return r;})(p.precios)})).filter(p=>p.id);
   await db.from("logs").insert({tipo:"admin",detalle:"Editó precios/costos de "+filas.length+" producto(s)"});
   const{error}=await db.from("catalogo").upsert(filas);
   if(error)return res.status(500).json({ok:false,error:error.message});
@@ -544,9 +602,62 @@ app.get("/admin/exportar",authA,async(req,res)=>{
     res.send(texto);
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
+app.get("/admin/diagnostico",authA,async(req,res)=>{
+  const out={};
+  for(const t of ["conductores","tiendas","ventas","pedidos","cargas","visitas","kardex","posiciones","eventos","catalogo","categorias"]){
+    try{const{count}=await db.from(t).select("*",{count:"exact",head:true});out[t]=count??0;}catch(e){out[t]="error: "+e.message;}
+  }
+  const{data:ult}=await db.from("tiendas").select("id,nombre,zona,lat,lon,nueva,verificada,conductor_reg,conductor_asig,creado").order("id",{ascending:false}).limit(10);
+  const{data:pds}=await db.from("pedidos").select("id,tienda,tienda_id,conductor,fecha,estado").order("id",{ascending:false}).limit(10);
+  res.json({ok:true,conteos:out,ultimas_tiendas:ult||[],ultimos_pedidos:pds||[]});
+});
+app.post("/almacen",authC,async(req,res)=>{
+  const items=catsOK(req.body.items);
+  if(!items)return res.status(400).json({ok:false,error:"Sin productos"});
+  const tipo=(req.body.tipo==="salida")?"salida":"retorno";
+  await db.from("kardex").insert({conductor:req.cond.u,tipo:"almacen_"+tipo,detalle:JSON.stringify(items)+(req.body.nota?" · "+limpia(req.body.nota,120):"")});
+  await evento("almacen","🏬 "+(tipo==="retorno"?"Sobrante al almacén":"Salida de almacén")+" — "+req.cond.u,
+    Object.keys(items).map(k=>k+" "+items[k]).join(", "),"");
+  res.json({ok:true});
+});
+app.post("/admin/almacen/enviar",authA,async(req,res)=>{
+  const items=catsOK(req.body.items),para=String(req.body.conductor||"");
+  if(!items||!USR_RE.test(para))return res.status(400).json({ok:false,error:"Faltan datos"});
+  const{data:t}=await db.from("traspasos").insert({de:"almacen",de_nombre:"Almacén",para,items,conf_de:true,estado:"parcial"}).select().single();
+  await avisoA(para,"🏬 El almacén te envía: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confírmalo al recibirlo.");
+  res.json({ok:true,id:t.id});
+});
+app.post("/admin/almacen/pedir",authA,async(req,res)=>{
+  const items=catsOK(req.body.items),de=String(req.body.conductor||"");
+  if(!items||!USR_RE.test(de))return res.status(400).json({ok:false,error:"Faltan datos"});
+  const{data:t}=await db.from("traspasos").insert({de,de_nombre:de,para:"almacen",items,conf_para:true,estado:"parcial"}).select().single();
+  await avisoA(de,"🏬 Debes entregar al almacén: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confirma cuando lo dejes.");
+  res.json({ok:true,id:t.id});
+});
+app.get("/admin/almacen",authA,async(req,res)=>{
+  const{data}=await db.from("kardex").select("*").like("tipo","almacen_%").order("id",{ascending:false}).limit(300);
+  const stock={};
+  (data||[]).forEach(k=>{
+    let it={};try{it=JSON.parse(String(k.detalle).split(" · ")[0])}catch(e){}
+    const signo=(k.tipo==="almacen_retorno")?1:-1;
+    Object.keys(it).forEach(cat=>{stock[cat]=(stock[cat]||0)+signo*Number(it[cat]||0)});
+  });
+  res.json({ok:true,stock,movimientos:(data||[]).slice(0,60)});
+});
+app.post("/admin/almacen/ajuste",authA,async(req,res)=>{
+  const items=catsOK(req.body.items);
+  if(!items)return res.status(400).json({ok:false,error:"Sin productos"});
+  const tipo=(req.body.tipo==="salida")?"salida":"retorno";
+  await db.from("kardex").insert({conductor:"admin",tipo:"almacen_"+tipo,detalle:JSON.stringify(items)+" · ajuste del dueño"+(req.body.nota?": "+limpia(req.body.nota,120):"")});
+  res.json({ok:true});
+});
 app.get("/admin/kardex",authA,async(req,res)=>{
-  const{data}=await db.from("kardex").select("*").order("id",{ascending:false}).limit(150);
-  res.json({ok:true,rows:data||[]});
+  const{data:kx}=await db.from("kardex").select("*").order("id",{ascending:false}).limit(150);
+  const{data:vt}=await db.from("ventas").select("*").order("id",{ascending:false}).limit(150);
+  const rows=(kx||[]).concat((vt||[]).map(v=>({conductor:v.conductor,tipo:"venta",
+    detalle:v.tienda+" · S/"+Number(v.total||0).toFixed(2)+" ("+(v.metodo||"")+")"+(v.resumen?" · "+v.resumen:""),creado:v.creado})))
+    .sort((a,b)=>new Date(b.creado)-new Date(a.creado)).slice(0,250);
+  res.json({ok:true,rows});
 });
 app.post("/admin/params",authA,async(req,res)=>{
   await db.from("logs").insert({tipo:"admin",detalle:"Cambió parámetros del sistema"});
@@ -559,8 +670,10 @@ app.post("/admin/params",authA,async(req,res)=>{
   kv.dup_radio_m=num(b.dup_radio_m,1,200)||15;
   kv.tope_gastos=num(b.tope_gastos,0,100000)||350;
   kv.inactiva_dias=num(b.inactiva_dias,1,365)||10;
+  kv.almacen={nombre:limpia(b.almacen&&b.almacen.nombre,60),ref:limpia(b.almacen&&b.almacen.ref,120),lat:(b.almacen&&b.almacen.lat!=null)?num(b.almacen.lat,-90,90):null,lon:(b.almacen&&b.almacen.lon!=null)?num(b.almacen.lon,-180,180):null};
   kv.gasto_cats=['combustible','comida','peaje','mecanico','hospedaje','otros'];
   kv.precio_tipo={};["bodega","minimarket","puesto","cafetería","mayorista","otro"].forEach(t=>kv.precio_tipo[t]=num(b.precio_tipo&&b.precio_tipo[t],-50,100));
+  kv.tipos_tienda=(Array.isArray(b.tipos_tienda)?b.tipos_tienda.slice(0,12):[]).map(t=>limpia(t,20)).filter(Boolean);
   kv.precio_conductor={};Object.keys((b.precio_conductor)||{}).slice(0,20).forEach(u=>{if(USR_RE.test(u))kv.precio_conductor[u]=num(b.precio_conductor[u],-50,100)});
   kv.zonas=(Array.isArray(b.zonas)?b.zonas.slice(0,12):[]).map(z=>({
     id:num(z.id,0),nombre:limpia(z.nombre,40)||"Zona",ajuste:num(z.ajuste,-50,100),
@@ -631,10 +744,12 @@ if(GPS_PLAT){
 app.post("/conductor/posicion",authC,async(req,res)=>{
   const lat=num(req.body.lat,-90,90),lon=num(req.body.lon,-180,180);
   if(!lat||!lon)return res.status(400).json({ok:false});
-  const{data:c}=await db.from("conductores").select("gps_id").eq("usuario",req.cond.u).maybeSingle();
-  if(GPS_PLAT&&c&&c.gps_id)return res.json({ok:true,nota:"plataforma activa"}); // no pisa el tracker del camión
+  const{data:c}=await db.from("conductores").select("gps_id,gps_fuente,gps_hora").eq("usuario",req.cond.u).maybeSingle();
+  await db.from("posiciones").insert({conductor:req.cond.u,lat,lon,vel:num(req.body.vel,0,300),fuente:"celular"}).catch(()=>{});
+  // el tracker del camión manda solo si reportó hace menos de 10 min; si no, vale el celular
+  const fresca=c&&c.gps_fuente&&c.gps_fuente!=="celular"&&c.gps_hora&&(Date.now()-new Date(c.gps_hora).getTime())<10*60000;
+  if(fresca)return res.json({ok:true,nota:"tracker del camión activo"});
   await db.from("conductores").update({lat,lon,gps_fuente:"celular",gps_hora:new Date().toISOString()}).eq("usuario",req.cond.u);
-  await db.from("posiciones").insert({conductor:req.cond.u,lat,lon,vel:num(req.body.vel,0,300),fuente:"celular"});
   res.json({ok:true});
 });
 // Panel: posiciones actuales + recorrido del día
@@ -697,6 +812,7 @@ cron.schedule("*/20 * * * *",async()=>{
     const HORAS=num(process.env.ALERTA_QUIETO_H,1,12)||3;
     const desde=new Date(Date.now()-HORAS*3600000).toISOString();
     const{data:cs}=await db.from("conductores").select("usuario,nombre").eq("activo",true);
+    const quietos=[];
     for(const c of (cs||[])){
       const hoyKey=c.usuario+"|"+hoy();
       if(ALERTA_QUIETO.get(hoyKey))continue;
@@ -711,8 +827,13 @@ cron.schedule("*/20 * * * *",async()=>{
       const{data:vts}=await db.from("ventas").select("id").eq("conductor",c.usuario).gte("creado",desde).limit(1);
       if(vts&&vts.length)continue;             // vendió: no hay problema
       ALERTA_QUIETO.set(hoyKey,true);
-      await evento("camion_detenido","🛑 Camión detenido — "+c.nombre,"Lleva "+HORAS+" h en el mismo lugar y sin registrar ventas. Puede ser avería, bloqueo de vía o un problema.",c.usuario);
-      avisarAdmin("🛑 "+c.nombre+": "+HORAS+" h detenido y sin ventas. Revisa si hay problema con el camión.");
+      quietos.push(c.nombre);
+    }
+    if(quietos.length){
+      const lista=quietos.join(", ");
+      await evento("camion_detenido","🛑 "+(quietos.length>1?quietos.length+" camiones detenidos":"Camión detenido — "+lista),
+        lista+": "+HORAS+" h en el mismo lugar y sin registrar ventas. Puede ser avería, bloqueo de vía o un problema.","");
+      avisarAdmin("🛑 "+HORAS+" h detenido(s) y sin ventas: "+lista);
     }
   }catch(e){console.error("cron quieto:",e.message);}
 },{timezone:"America/Lima"});
