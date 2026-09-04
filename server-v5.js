@@ -24,8 +24,12 @@ const MODELO_IA="claude-sonnet-4-6";
 const app=express();
 app.use(express.json({limit:"2mb"})); // 2mb: fotos de fachada comprimidas
 app.use(helmet());
-const ORIG=(process.env.CORS_ORIGINS||"*").split(",").map(s=>s.trim());
-app.use(cors({origin:ORIG.includes("*")?true:ORIG}));
+const ORIG=(process.env.CORS_ORIGINS||"*").split(",").map(s=>s.trim()).filter(Boolean)
+  .map(s=>s.replace(/\/+$/,"")).map(s=>/^https?:\/\//.test(s)?s:"https://"+s);
+app.use(cors({origin:(o,cb)=>{
+  if(!o||ORIG.includes("*")||!ORIG.length)return cb(null,true);
+  cb(null,ORIG.includes(String(o).replace(/\/+$/,"")));
+}}));
 app.use(rateLimit({windowMs:15*60*1000,max:400}));
 const NO_TOCAR=new Set(["pass","actual","nueva","clave","foto"]);
 function sanea(o,prof){if(prof>4)return null;
@@ -294,7 +298,12 @@ app.get("/admin/boletas",authA,async(req,res)=>{
 app.post("/admin/boletas/:id/enviada",authA,async(req,res)=>{
   await db.from("boletas").update({estado:"enviada"}).eq("id",req.params.id);res.json({ok:true});
 });
-app.post("/conductor/turno",authC,async(req,res)=>{await db.from("logs").insert({tipo:"turno",detalle:req.cond.u});res.json({ok:true});});
+app.post("/conductor/turno",authC,async(req,res)=>{
+  const on=req.body.activo!==false;
+  await db.from("logs").insert({tipo:"turno",detalle:req.cond.u+" "+(on?"inicia":"termina")});
+  await db.from("conductores").update({en_turno:on,turno_hora:new Date().toISOString()}).eq("usuario",req.cond.u);
+  res.json({ok:true});
+});
 app.post("/rutas/armada",authC,async(req,res)=>{await db.from("rutas").insert({conductor:req.cond.u,tienda:req.body.tienda,en_ruta:!!req.body.enRuta,fecha:hoy()});res.json({ok:true});});
 app.post("/perdidas",authC,async(req,res)=>{
   const motivo=limpia(req.body.motivo,40)||"otro";
@@ -338,6 +347,10 @@ app.get("/admin/datos",authA,async(req,res)=>{
   const _ult={};(vAd||[]).forEach(v=>{if(v.tienda_id&&!( v.tienda_id in _ult))_ult[v.tienda_id]=v.creado;});
   const _diasT=(id,aj)=>Math.max(0,(_ult[id]?Math.round((Date.now()-new Date(_ult[id]).getTime())/86400000):3)-(aj||0));
   res.json({ok:true,
+    resumen:{tiendas:(tds||[]).length,conductores:(us||[]).length,
+      en_turno:(us||[]).filter(x=>x.en_turno).length,
+      pedidos_hoy:(pds||[]).filter(p=>String(p.fecha||p.creado||"").slice(0,10)===hoy()).length,
+      pedidos_pendientes:(pds||[]).filter(p=>p.estado!=="entregado").length},
     usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:u.tipo,camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||""})),
     eventos:(evs||[]).map(e=>({tipo:e.tipo,titulo:e.titulo,desc:e.descripcion,ref:e.tipo==="tienda_nueva"||e.tipo==="correccion"?e.ref:String(e.id)})),
     tiendas:(tds||[]).map(t=>({id:t.id,n:t.nombre,z:t.zona,d:_diasT(t.id,t.dr_ajuste),sa:Number(t.sa||0),cr:!!t.cr,li:Number(t.li||0),vip:!!t.vip,act:t.act,nueva:!!t.nueva,verificada:!!t.verificada,conductor:t.conductor_reg,lat:t.lat,lon:t.lon,tel:t.tel,due:t.dueno,falta:[],mov:[]})),
@@ -395,7 +408,30 @@ app.post("/admin/cargas/leer",authA,async(req,res)=>{
     res.json({ok:true,items,no_reconocido:(j.no_reconocido||[]).slice(0,30).map(s=>String(s).slice(0,60))});
   }catch(e){res.json({ok:false,error:"Error al leer: "+e.message});}
 });
-app.post("/cargas",authA,async(req,res)=>{await db.from("cargas").insert({conductor:req.body.conductor,items:req.body.items||{},detalle:req.body.detalle||null,estado:"pendiente"});res.json({ok:true});});
+app.post("/cargas",authA,async(req,res)=>{
+  const cond=String(req.body.conductor||"").trim();
+  if(!USR_RE.test(cond))return res.status(400).json({ok:false,error:"Elige el conductor antes de asignar la carga"});
+  const{data:ex}=await db.from("conductores").select("usuario").eq("usuario",cond).maybeSingle();
+  if(!ex)return res.status(400).json({ok:false,error:"Ese conductor no existe: "+cond});
+  const items=catsOK(req.body.items);
+  if(!items)return res.status(400).json({ok:false,error:"La carga no tiene productos"});
+  const{data:nc}=await db.from("cargas").insert({conductor:cond,items,detalle:req.body.detalle||null,estado:"pendiente"}).select().single();
+  await avisoA(cond,"📦 Tienes una carga asignada: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confírmala antes de salir.");
+  res.json({ok:true,id:nc?nc.id:null});
+});
+app.post("/admin/cargas/:id/reasignar",authA,async(req,res)=>{
+  const cond=String(req.body.conductor||"").trim();
+  if(!USR_RE.test(cond))return res.status(400).json({ok:false,error:"Conductor inválido"});
+  await db.from("cargas").update({conductor:cond}).eq("id",req.params.id);
+  await avisoA(cond,"📦 Se te reasignó una carga. Confírmala antes de salir.");
+  await db.from("logs").insert({tipo:"admin",detalle:"Reasignó la carga #"+req.params.id+" a @"+cond});
+  res.json({ok:true});
+});
+app.post("/admin/cargas/:id/cancelar",authA,async(req,res)=>{
+  await db.from("cargas").update({estado:"cancelada"}).eq("id",req.params.id);
+  await db.from("logs").insert({tipo:"admin",detalle:"Canceló la carga #"+req.params.id});
+  res.json({ok:true});
+});
 app.get("/liquidaciones/sugerencia",authA,async(req,res)=>{
   const u=String(req.query.conductor||"");
   // 1) historial de cargas realmente confirmadas por ese conductor
@@ -602,6 +638,15 @@ app.get("/admin/exportar",authA,async(req,res)=>{
     res.send(texto);
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
+app.get("/admin/gps/probar",authA,async(req,res)=>{
+  const pos=await obtenerGPS();
+  const{data:cs}=await db.from("conductores").select("usuario,nombre,gps_id");
+  res.json({ok:true,plataforma:GPS_PLAT||"(ninguna)",url:process.env.GPS_API_URL||"(vacía)",
+    vehiculos:pos.length,error:GPS_ULTIMO_ERROR||null,
+    ids_plataforma:pos.slice(0,20).map(p=>p.gps_id),
+    conductores:(cs||[]).map(c=>({usuario:c.usuario,nombre:c.nombre,gps_id:c.gps_id||null,
+      coincide:!!(c.gps_id&&pos.some(p=>p.gps_id===String(c.gps_id)))}))});
+});
 app.get("/admin/diagnostico",authA,async(req,res)=>{
   const out={};
   for(const t of ["conductores","tiendas","ventas","pedidos","cargas","visitas","kardex","posiciones","eventos","catalogo","categorias"]){
@@ -609,7 +654,8 @@ app.get("/admin/diagnostico",authA,async(req,res)=>{
   }
   const{data:ult}=await db.from("tiendas").select("id,nombre,zona,lat,lon,nueva,verificada,conductor_reg,conductor_asig,creado").order("id",{ascending:false}).limit(10);
   const{data:pds}=await db.from("pedidos").select("id,tienda,tienda_id,conductor,fecha,estado").order("id",{ascending:false}).limit(10);
-  res.json({ok:true,conteos:out,ultimas_tiendas:ult||[],ultimos_pedidos:pds||[]});
+  const{data:cgs}=await db.from("cargas").select("id,conductor,estado,items,creado").order("id",{ascending:false}).limit(20);
+  res.json({ok:true,conteos:out,ultimas_tiendas:ult||[],ultimos_pedidos:pds||[],ultimas_cargas:cgs||[],gps_error:GPS_ULTIMO_ERROR||null});
 });
 app.post("/almacen",authC,async(req,res)=>{
   const items=catsOK(req.body.items);
@@ -688,43 +734,36 @@ app.post("/admin/params",authA,async(req,res)=>{
 // Fuente externa opcional (GPS_PLATFORM) + respaldo por celular del conductor.
 const GPS_PLAT=(process.env.GPS_PLATFORM||"").toLowerCase();
 const GPS_MIN=num(process.env.GPS_TIMEOUT_MIN,1,120)||15;   // sin señal tras X min = inactivo
+let GPS_ULTIMO_ERROR="";
 const GPS_SEG=num(process.env.GPS_INTERVALO_SEG,20,600)||60; // cada cuánto consulta la plataforma
 
 async function obtenerGPS(){
   try{
-    if(GPS_PLAT==="traccar"){
-      const auth=Buffer.from(`${process.env.GPS_USER}:${process.env.GPS_PASSWORD}`).toString("base64");
-      const r=await fetch(`${process.env.GPS_API_URL}/api/positions`,{headers:{Authorization:`Basic ${auth}`}});
-      if(!r.ok)throw new Error("Traccar "+r.status);
-      return (await r.json()).map(d=>({gps_id:String(d.deviceId),lat:d.latitude,lon:d.longitude,vel:d.speed||0,ts:new Date(d.fixTime).getTime()}));
+    let base=String(process.env.GPS_API_URL||"").trim().replace(/\/+$/,"");
+    if(!base)throw new Error("Falta GPS_API_URL");
+    if(!/^https?:\/\//.test(base))base="https://"+base;
+    if(/\/api$/.test(base))base=base.replace(/\/api$/,"");
+    const ctrl=new AbortController();
+    const tmr=setTimeout(()=>ctrl.abort(),12000);
+    const auth="Basic "+Buffer.from(`${process.env.GPS_USER||""}:${process.env.GPS_PASSWORD||""}`).toString("base64");
+    let r;
+    try{
+      r=await fetch(base+"/api/positions",{headers:{Authorization:auth,Accept:"application/json"},signal:ctrl.signal});
+    }finally{clearTimeout(tmr);}
+    if(!r.ok){
+      const cuerpo=await r.text().catch(()=>"");
+      throw new Error("Traccar respondió "+r.status+" "+(r.statusText||"")+(cuerpo?" · "+cuerpo.slice(0,120):""));
     }
-    if(GPS_PLAT==="wialon"){
-      const base=process.env.GPS_API_URL||"https://hst-api.wialon.com/wialon/ajax.html";
-      const lr=await fetch(`${base}?svc=token/login&params=${encodeURIComponent(JSON.stringify({token:process.env.GPS_API_KEY}))}`);
-      const ld=await lr.json(); if(!ld.eid)throw new Error("Wialon login");
-      const p={spec:{itemsType:"avl_unit",propName:"sys_name",propValueMask:"*",sortType:"sys_name"},force:1,flags:1025,from:0,to:0};
-      const sr=await fetch(`${base}?svc=core/search_items&params=${encodeURIComponent(JSON.stringify(p))}&sid=${ld.eid}`);
-      const sd=await sr.json();
-      return (sd.items||[]).filter(u=>u.pos).map(u=>({gps_id:String(u.id),lat:u.pos.y,lon:u.pos.x,vel:u.pos.s||0,ts:u.pos.t*1000}));
-    }
-    if(GPS_PLAT==="navixy"){
-      const base=process.env.GPS_API_URL||"https://api.navixy.com/v2",hash=process.env.GPS_API_KEY;
-      const lr=await fetch(`${base}/tracker/list?hash=${hash}`); const ld=await lr.json();
-      if(!ld.success)throw new Error("Navixy list");
-      const pr=await fetch(`${base}/tracker/get_states`,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({hash,trackers:ld.list.map(t=>t.id),list_blocked:false})});
-      const st=(await pr.json()).states||{};
-      return ld.list.map(t=>({gps_id:String(t.id),lat:st[t.id]?.gps?.lat,lon:st[t.id]?.gps?.lng,vel:st[t.id]?.gps?.speed||0,ts:Date.now()})).filter(x=>x.lat&&x.lon);
-    }
-    if(GPS_PLAT==="generic"){
-      const h=process.env.GPS_API_KEY?{Authorization:`Bearer ${process.env.GPS_API_KEY}`}:{};
-      const d=await (await fetch(process.env.GPS_API_URL,{headers:h})).json();
-      const arr=Array.isArray(d)?d:(d.data||d.vehicles||d.units||[]);
-      return arr.map(x=>({gps_id:String(x.id||x.device_id||x.unit_id),lat:Number(x.lat||x.latitude),lon:Number(x.lon||x.lng||x.longitude),vel:Number(x.speed||0),ts:Date.now()})).filter(x=>x.lat&&x.lon);
-    }
+    const d=await r.json();
+    if(!Array.isArray(d))throw new Error("Respuesta inesperada de Traccar");
+    return d.map(p=>({gps_id:String(p.deviceId),lat:p.latitude,lon:p.longitude,vel:p.speed?Math.round(p.speed*1.852):0,ts:p.fixTime||p.deviceTime}));
+  }catch(e){
+    GPS_ULTIMO_ERROR=e.name==="AbortError"?"La plataforma GPS no respondió en 12 segundos":e.message;
+    console.error("GPS("+GPS_PLAT+"): "+GPS_ULTIMO_ERROR);
     return [];
-  }catch(e){console.error("GPS("+GPS_PLAT+"):",e.message);return [];}
+  }
 }
+
 async function refrescarGPS(){
   const pos=await obtenerGPS(); if(!pos.length)return;
   const{data:cs}=await db.from("conductores").select("usuario,gps_id").not("gps_id","is",null);
