@@ -351,7 +351,7 @@ app.get("/admin/datos",authA,async(req,res)=>{
       en_turno:(us||[]).filter(x=>x.en_turno).length,
       pedidos_hoy:(pds||[]).filter(p=>String(p.fecha||p.creado||"").slice(0,10)===hoy()).length,
       pedidos_pendientes:(pds||[]).filter(p=>p.estado!=="entregado").length},
-    usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:u.tipo,camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||""})),
+    usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:u.tipo,camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||"",en_turno:!!u.en_turno})),
     eventos:(evs||[]).map(e=>({tipo:e.tipo,titulo:e.titulo,desc:e.descripcion,ref:e.tipo==="tienda_nueva"||e.tipo==="correccion"?e.ref:String(e.id)})),
     tiendas:(tds||[]).map(t=>({id:t.id,n:t.nombre,z:t.zona,d:_diasT(t.id,t.dr_ajuste),sa:Number(t.sa||0),cr:!!t.cr,li:Number(t.li||0),vip:!!t.vip,act:t.act,nueva:!!t.nueva,verificada:!!t.verificada,conductor:t.conductor_reg,lat:t.lat,lon:t.lon,tel:t.tel,due:t.dueno,falta:[],mov:[]})),
     pedidos_hoy:(pds||[]).map(p=>({tienda:p.tienda,conductor:p.conductor,items:p.items,nota:p.nota,hora:p.hora})),
