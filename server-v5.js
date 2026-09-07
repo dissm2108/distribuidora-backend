@@ -70,8 +70,8 @@ async function tiendaPorNombre(n){
   if(!n)return null;
   const{data}=await db.from("tiendas").select("*").ilike("nombre",String(n).trim()).maybeSingle();
   if(data)return data;
-  const{data:ap}=await db.from("tiendas").select("*").ilike("nombre","%"+String(n).trim().slice(0,20)+"%").limit(1);
-  return (ap||[])[0]||null;
+  const{data:ap}=await db.from("tiendas").select("*").ilike("nombre","%"+String(n).trim().slice(0,20)+"%").limit(2);
+  return (ap&&ap.length===1)?ap[0]:null;   // solo si es inequívoca
 }
 async function getParams(){const{data}=await db.from("params").select("*").eq("id",1).maybeSingle();return (data&&data.kv)||{};}
 
@@ -200,16 +200,22 @@ app.get("/conductor/datos",authC,async(req,res)=>{
 // ════════ OPERACIÓN DEL CONDUCTOR ════════
 app.post("/ventas",authC,async(req,res)=>{
   const{tienda,items,total,metodo}=req.body;
-  const t=await tiendaPorNombre(tienda||"");
+  let t=null;
+  if(req.body.tienda_id){const{data:x}=await db.from("tiendas").select("*").eq("id",req.body.tienda_id).maybeSingle();t=x||null;}
+  if(!t){const{data:x}=await db.from("tiendas").select("*").ilike("nombre",String(tienda||"").trim()).maybeSingle();t=x||null;}
+  if(!t)return res.status(400).json({ok:false,error:"No identifiqué la tienda: "+tienda});
   const resumen=(items||[]).map(x=>`${x.n} x${x.c}`).join(", ");
   const{data:v}=await db.from("ventas").insert({tienda_id:t?t.id:null,tienda:tienda,conductor:req.cond.u,items:items||[],total:num(total,0,999999),metodo:(["efectivo","yape","credito","mixto"].includes(metodo)?metodo:"efectivo"),resumen}).select().single();
   if(t)await db.from("visitas").insert({tienda_id:t.id,tienda:t.nombre,conductor:req.cond.u,tipo:"venta",fecha:hoy(),hora:horaPE()});
   if(t&&t.dr_ajuste)await db.from("tiendas").update({dr_ajuste:0}).eq("id",t.id);
-  if(t&&/credito|mixto/.test(metodo||"")){
-    // v1: en mixto el desglose exacto llega en la liquidación; aquí registra el movimiento
-    await db.from("creditos_mov").insert({tienda_id:t.id,tipo:"cargo",monto:num(total,0,999999),detalle:"Venta ("+metodo+") #"+v.id,por:req.cond.u});
-    if(metodo==="credito")await db.from("tiendas").update({sa:Number(t.sa||0)+Number(total||0)}).eq("id",t.id);
+  const fiado=(metodo==="credito")?num(total,0,999999):num(req.body.credito,0,999999);
+  if(fiado>0){
+    await db.from("creditos_mov").insert({tienda_id:t.id,tipo:"cargo",monto:fiado,
+      detalle:"Venta "+(metodo==="mixto"?"mixta":"a crédito")+" #"+v.id,por:req.cond.u});
+    await db.from("tiendas").update({sa:Number(t.sa||0)+fiado}).eq("id",t.id);
   }
+  await db.from("kardex").insert({conductor:req.cond.u,tipo:"venta_detalle",
+    detalle:t.nombre+" · S/"+Number(total||0).toFixed(2)+" ("+(metodo||"efectivo")+")"+(fiado>0?" · fiado S/"+fiado.toFixed(2):"")}).catch(()=>{});
   res.json({ok:true,id:v.id});
 });
 app.post("/visitas",authC,async(req,res)=>{
@@ -490,7 +496,8 @@ app.get("/admin/tiendas/:id/historial",authA,async(req,res)=>{
   const{data}=await db.from("logs").select("*").eq("tipo","tienda").ilike("detalle","#"+req.params.id+" %").order("id",{ascending:false}).limit(40);
   res.json({ok:true,filas:data||[]});
 });
-app.post("/tiendas/:id/verificar",authA,async(req,res)=>{await db.from("tiendas").update({verificada:true,nueva:false}).eq("id",req.params.id);res.json({ok:true});});
+app.post("/tiendas/:id/verificar",authA,async(req,res)=>{
+  await db.from("eventos").update({visto:true}).eq("tipo","tienda_nueva").eq("ref",String(req.params.id)).catch(()=>{});await db.from("tiendas").update({verificada:true,nueva:false}).eq("id",req.params.id);res.json({ok:true});});
 app.post("/tiendas/:id/credito",authA,async(req,res)=>{await db.from("tiendas").update({cr:!!req.body.habilitado,li:num(req.body.limite,0,100000)||230}).eq("id",req.params.id);
   await db.from("logs").insert({tipo:"admin",detalle:"Crédito tienda #"+req.params.id+" → S/"+num(req.body.limite,0,100000)});res.json({ok:true});});
 app.post("/admin/tiendas",authA,async(req,res)=>{
