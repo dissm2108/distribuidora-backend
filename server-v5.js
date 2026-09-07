@@ -216,8 +216,8 @@ app.post("/ventas",authC,async(req,res)=>{
       detalle:"Venta "+(metodo==="mixto"?"mixta":"a crédito")+" #"+v.id,por:req.cond.u});
     await db.from("tiendas").update({sa:Number(t.sa||0)+fiado}).eq("id",t.id);
   }
-  await db.from("kardex").insert({conductor:req.cond.u,tipo:"venta_detalle",
-    detalle:t.nombre+" · S/"+Number(total||0).toFixed(2)+" ("+(metodo||"efectivo")+")"+(fiado>0?" · fiado S/"+fiado.toFixed(2):"")}).catch(()=>{});
+  try{await db.from("kardex").insert({conductor:req.cond.u,tipo:"venta_detalle",
+    detalle:t.nombre+" · S/"+Number(total||0).toFixed(2)+" ("+(metodo||"efectivo")+")"+(fiado>0?" · fiado S/"+fiado.toFixed(2):"")});}catch(e){}
   res.json({ok:true,id:v.id});
 });
 app.post("/visitas",authC,async(req,res)=>{
@@ -499,7 +499,7 @@ app.get("/admin/tiendas/:id/historial",authA,async(req,res)=>{
   res.json({ok:true,filas:data||[]});
 });
 app.post("/tiendas/:id/verificar",authA,async(req,res)=>{
-  await db.from("eventos").update({visto:true}).eq("tipo","tienda_nueva").eq("ref",String(req.params.id)).catch(()=>{});await db.from("tiendas").update({verificada:true,nueva:false}).eq("id",req.params.id);res.json({ok:true});});
+  try{await db.from("eventos").update({visto:true}).eq("tipo","tienda_nueva").eq("ref",String(req.params.id));}catch(e){}await db.from("tiendas").update({verificada:true,nueva:false}).eq("id",req.params.id);res.json({ok:true});});
 app.post("/tiendas/:id/credito",authA,async(req,res)=>{await db.from("tiendas").update({cr:!!req.body.habilitado,li:num(req.body.limite,0,100000)||230}).eq("id",req.params.id);
   await db.from("logs").insert({tipo:"admin",detalle:"Crédito tienda #"+req.params.id+" → S/"+num(req.body.limite,0,100000)});res.json({ok:true});});
 app.post("/admin/tiendas",authA,async(req,res)=>{
@@ -812,7 +812,7 @@ app.post("/conductor/posicion",authC,async(req,res)=>{
   const lat=num(req.body.lat,-90,90),lon=num(req.body.lon,-180,180);
   if(!lat||!lon)return res.status(400).json({ok:false});
   const{data:c}=await db.from("conductores").select("gps_id,gps_fuente,gps_hora").eq("usuario",req.cond.u).maybeSingle();
-  await db.from("posiciones").insert({conductor:req.cond.u,lat,lon,vel:num(req.body.vel,0,300),fuente:"celular"}).catch(()=>{});
+  try{await db.from("posiciones").insert({conductor:req.cond.u,lat,lon,vel:num(req.body.vel,0,300),fuente:"celular"});}catch(e){}
   // el tracker del camión manda solo si reportó hace menos de 10 min; si no, vale el celular
   const fresca=c&&c.gps_fuente&&c.gps_fuente!=="celular"&&c.gps_hora&&(Date.now()-new Date(c.gps_hora).getTime())<10*60000;
   if(fresca)return res.json({ok:true,nota:"tracker del camión activo"});
