@@ -209,6 +209,8 @@ app.post("/ventas",authC,async(req,res)=>{
   if(t)await db.from("visitas").insert({tienda_id:t.id,tienda:t.nombre,conductor:req.cond.u,tipo:"venta",fecha:hoy(),hora:horaPE()});
   if(t&&t.dr_ajuste)await db.from("tiendas").update({dr_ajuste:0}).eq("id",t.id);
   const fiado=(metodo==="credito")?num(total,0,999999):num(req.body.credito,0,999999);
+  if(fiado>0&&!t.cr)await evento("credito_sin_permiso","⚠️ Venta al crédito en tienda sin crédito habilitado",
+    t.nombre+" · S/"+fiado.toFixed(2)+" · conductor "+req.cond.u,String(t.id));
   if(fiado>0){
     await db.from("creditos_mov").insert({tienda_id:t.id,tipo:"cargo",monto:fiado,
       detalle:"Venta "+(metodo==="mixto"?"mixta":"a crédito")+" #"+v.id,por:req.cond.u});
@@ -686,6 +688,25 @@ app.post("/admin/almacen/pedir",authA,async(req,res)=>{
   const{data:t}=await db.from("traspasos").insert({de,de_nombre:de,para:"almacen",items,conf_para:true,estado:"parcial"}).select().single();
   await avisoA(de,"🏬 Debes entregar al almacén: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confirma cuando lo dejes.");
   res.json({ok:true,id:t.id});
+});
+app.get("/admin/creditos",authA,async(req,res)=>{
+  const{data:mov}=await db.from("creditos_mov").select("*").order("id",{ascending:false}).limit(200);
+  const{data:tds}=await db.from("tiendas").select("id,nombre,sa,li,cr");
+  const map={};(tds||[]).forEach(t=>map[t.id]=t.nombre);
+  res.json({ok:true,
+    movimientos:(mov||[]).map(m=>({...m,tienda:map[m.tienda_id]||("#"+m.tienda_id)})),
+    saldos:(tds||[]).filter(t=>Number(t.sa||0)>0).sort((a,b)=>Number(b.sa)-Number(a.sa)),
+    total:(tds||[]).reduce((s,t)=>s+Number(t.sa||0),0)});
+});
+app.post("/admin/creditos/abono",authA,async(req,res)=>{
+  const id=req.body.tienda_id, monto=num(req.body.monto,0.1,999999);
+  if(!id||!monto)return res.status(400).json({ok:false,error:"Falta tienda o monto"});
+  const{data:t}=await db.from("tiendas").select("nombre,sa").eq("id",id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
+  await db.from("creditos_mov").insert({tienda_id:id,tipo:"abono",monto,detalle:limpia(req.body.detalle,120)||"Abono registrado por el dueño",por:"admin"});
+  await db.from("tiendas").update({sa:Math.max(0,Number(t.sa||0)-monto)}).eq("id",id);
+  await db.from("logs").insert({tipo:"admin",detalle:"Abono S/"+monto.toFixed(2)+" de "+t.nombre});
+  res.json({ok:true,nuevo_saldo:Math.max(0,Number(t.sa||0)-monto)});
 });
 app.get("/admin/almacen",authA,async(req,res)=>{
   const{data}=await db.from("kardex").select("*").like("tipo","almacen_%").order("id",{ascending:false}).limit(300);
