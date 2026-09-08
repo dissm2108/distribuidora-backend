@@ -357,7 +357,16 @@ app.post("/avisos/leido",authC,async(req,res)=>{await db.from("avisos_leidos").u
 
 // ════════ ADMINISTRADOR ════════
 app.get("/admin/datos",authA,async(req,res)=>{
-  const{data:us}=await db.from("conductores").select("usuario,nombre,tipo,camion,activo,pass_hash,gps_id");
+  const{data:us}=await db.from("conductores").select("usuario,nombre,tipo,camion,activo,pass_hash,gps_id,en_turno,turno_hora");
+  // quién está en turno según los logs (respaldo si la columna aún no existe)
+  const turnoDe={};
+  try{
+    const{data:lgT}=await db.from("logs").select("detalle,creado").eq("tipo","turno").order("id",{ascending:true}).limit(400);
+    (lgT||[]).forEach(l=>{
+      const d=String(l.detalle||"");const u=d.split(" ")[0];
+      if(u)turnoDe[u]=/inicia/.test(d);
+    });
+  }catch(e){}
   const{data:evs}=await db.from("eventos").select("*").eq("visto",false).order("id",{ascending:false}).limit(50);
   const{data:tds}=await db.from("tiendas").select("*").order("id");
   const{data:pds}=await db.from("pedidos").select("*").eq("fecha",hoy()).order("id",{ascending:false});
