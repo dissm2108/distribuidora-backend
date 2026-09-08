@@ -442,7 +442,7 @@ app.post("/cargas",authA,async(req,res)=>{
   if(!ex)return res.status(400).json({ok:false,error:"Ese conductor no existe: "+cond});
   const items=catsOK(req.body.items);
   if(!items)return res.status(400).json({ok:false,error:"La carga no tiene productos"});
-  const{data:nc}=await db.from("cargas").insert({conductor:cond,items,detalle:req.body.detalle||null,estado:"pendiente"}).select().single();
+  const{data:nc}=await db.from("cargas").insert({conductor:cond,items,prods:(req.body.prods&&typeof req.body.prods==="object")?req.body.prods:null,detalle:req.body.detalle||null,estado:"pendiente"}).select().single();
   await avisoA(cond,"📦 Tienes una carga asignada: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confírmala antes de salir.");
   res.json({ok:true,id:nc?nc.id:null});
 });
