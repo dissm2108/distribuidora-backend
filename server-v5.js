@@ -181,6 +181,9 @@ app.get("/conductor/datos",authC,async(req,res)=>{
   const{data:leidos}=await db.from("avisos_leidos").select("aviso_id").eq("usuario",u);
   const setL=new Set((leidos||[]).map(x=>x.aviso_id));
   const avisos=(avs||[]).map(a=>({id:a.id,txt:a.txt,hora:a.hora,leido:setL.has(a.id)}));
+  const{data:movHoy}=await db.from("creditos_mov").select("tipo,monto,por,creado").eq("por",u).gte("creado",hoy()+"T00:00:00");
+  const fiadoHoy=(movHoy||[]).filter(m=>m.tipo==="cargo").reduce((s,m)=>s+Number(m.monto||0),0);
+  const cobradoHoy=(movHoy||[]).filter(m=>m.tipo==="abono").reduce((s,m)=>s+Number(m.monto||0),0);
   const{data:yo}=await db.from("conductores").select("lat,lon,gps_fuente,gps_hora").eq("usuario",u).maybeSingle();
   const{data:cg}=await db.from("cargas").select("*").eq("conductor",u).eq("estado","pendiente").order("id",{ascending:false}).limit(1).maybeSingle();
   const{data:trs}=await db.from("traspasos").select("*").eq("para",u).in("estado",["pendiente","parcial"]);
@@ -190,6 +193,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
   const{data:cat}=await db.from("catalogo").select("id,cat,nombre,precio,precios,costo,activo").or("activo.is.null,activo.eq.true");
   const{data:cats}=await db.from("categorias").select("*").eq("activa",true).order("orden");
   res.json({ok:true,params,catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
+    dia:{fiado:fiadoHoy,cobrado:cobradoHoy},
     gps_camion:(yo&&yo.lat&&yo.gps_fuente&&yo.gps_fuente!=="celular")?{lat:yo.lat,lon:yo.lon,fuente:yo.gps_fuente,hora:yo.gps_hora}:null,
     carga_pendiente:cg?{id:cg.id,items:cg.items,detalle:cg.detalle||null}:null,
     traspasos_entrantes:(trs||[]).map(t=>({id:String(t.id),de:t.de_nombre||t.de,items:t.items,estado:t.estado,yo_confirme:!!t.conf_para,otro_confirmo:!!t.conf_de})),
@@ -205,16 +209,22 @@ app.post("/ventas",authC,async(req,res)=>{
   if(!t){const{data:x}=await db.from("tiendas").select("*").ilike("nombre",String(tienda||"").trim()).maybeSingle();t=x||null;}
   if(!t)return res.status(400).json({ok:false,error:"No identifiqué la tienda: "+tienda});
   const resumen=(items||[]).map(x=>`${x.n} x${x.c}`).join(", ");
-  const{data:v}=await db.from("ventas").insert({tienda_id:t?t.id:null,tienda:tienda,conductor:req.cond.u,items:items||[],total:num(total,0,999999),metodo:(["efectivo","yape","credito","mixto"].includes(metodo)?metodo:"efectivo"),resumen}).select().single();
+  const{data:v}=await db.from("ventas").insert({efectivo:num(req.body.efectivo,0,999999),credito:num(req.body.credito,0,999999),abono:num(req.body.abono,0,999999),tienda_id:t?t.id:null,tienda:tienda,conductor:req.cond.u,items:items||[],total:num(total,0,999999),metodo:(["efectivo","yape","credito","mixto"].includes(metodo)?metodo:"efectivo"),resumen}).select().single();
   if(t)await db.from("visitas").insert({tienda_id:t.id,tienda:t.nombre,conductor:req.cond.u,tipo:"venta",fecha:hoy(),hora:horaPE()});
   if(t&&t.dr_ajuste)await db.from("tiendas").update({dr_ajuste:0}).eq("id",t.id);
-  const fiado=(metodo==="credito")?num(total,0,999999):num(req.body.credito,0,999999);
+  const fiado=num(req.body.credito,0,999999)||((metodo==="credito")?num(total,0,999999):0);
+  const abono=num(req.body.abono,0,999999);
+  if(abono>0){
+    await db.from("creditos_mov").insert({tienda_id:t.id,tipo:"abono",monto:abono,detalle:"Cobro en visita #"+v.id,por:req.cond.u});
+    await db.from("tiendas").update({sa:Math.max(0,Number(t.sa||0)-abono)}).eq("id",t.id);
+  }
   if(fiado>0&&!t.cr)await evento("credito_sin_permiso","⚠️ Venta al crédito en tienda sin crédito habilitado",
     t.nombre+" · S/"+fiado.toFixed(2)+" · conductor "+req.cond.u,String(t.id));
   if(fiado>0){
+    const{data:t2}=await db.from("tiendas").select("sa").eq("id",t.id).maybeSingle();
     await db.from("creditos_mov").insert({tienda_id:t.id,tipo:"cargo",monto:fiado,
       detalle:"Venta "+(metodo==="mixto"?"mixta":"a crédito")+" #"+v.id,por:req.cond.u});
-    await db.from("tiendas").update({sa:Number(t.sa||0)+fiado}).eq("id",t.id);
+    await db.from("tiendas").update({sa:Number((t2&&t2.sa)||t.sa||0)+fiado}).eq("id",t.id);
   }
   try{await db.from("kardex").insert({conductor:req.cond.u,tipo:"venta_detalle",
     detalle:t.nombre+" · S/"+Number(total||0).toFixed(2)+" ("+(metodo||"efectivo")+")"+(fiado>0?" · fiado S/"+fiado.toFixed(2):"")});}catch(e){}
@@ -356,10 +366,10 @@ app.get("/admin/datos",authA,async(req,res)=>{
   const _diasT=(id,aj)=>Math.max(0,(_ult[id]?Math.round((Date.now()-new Date(_ult[id]).getTime())/86400000):3)-(aj||0));
   res.json({ok:true,
     resumen:{tiendas:(tds||[]).length,conductores:(us||[]).length,
-      en_turno:(us||[]).filter(x=>x.en_turno).length,
+      en_turno:(us||[]).filter(x=>(x.en_turno!==undefined&&x.en_turno!==null)?x.en_turno:turnoDe[x.usuario]).length,
       pedidos_hoy:(pds||[]).filter(p=>String(p.fecha||p.creado||"").slice(0,10)===hoy()).length,
       pedidos_pendientes:(pds||[]).filter(p=>p.estado!=="entregado").length},
-    usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:u.tipo,camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||"",en_turno:!!u.en_turno})),
+    usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:u.tipo,camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||"",en_turno:(u.en_turno!==undefined&&u.en_turno!==null)?!!u.en_turno:!!turnoDe[u.usuario]})),
     eventos:(evs||[]).map(e=>({tipo:e.tipo,titulo:e.titulo,desc:e.descripcion,ref:e.tipo==="tienda_nueva"||e.tipo==="correccion"?e.ref:String(e.id)})),
     tiendas:(tds||[]).map(t=>({id:t.id,n:t.nombre,z:t.zona,d:_diasT(t.id,t.dr_ajuste),sa:Number(t.sa||0),cr:!!t.cr,li:Number(t.li||0),vip:!!t.vip,act:t.act,nueva:!!t.nueva,verificada:!!t.verificada,conductor:t.conductor_reg,lat:t.lat,lon:t.lon,tel:t.tel,due:t.dueno,falta:[],mov:[]})),
     pedidos_hoy:(pds||[]).map(p=>({tienda:p.tienda,conductor:p.conductor,items:p.items,nota:p.nota,hora:p.hora})),
@@ -614,8 +624,8 @@ app.get("/admin/exportar",authA,async(req,res)=>{
     if(tipo==="ventas"){
       let q=db.from("ventas").select("*").order("creado",{ascending:false}).limit(5000);
       if(cond)q=q.eq("conductor",cond); const{data}=await rango(q);
-      cab=["Fecha","Hora","Tienda","Conductor","Productos","Metodo","Total S/"];
-      filas=(data||[]).map(v=>{const d=new Date(v.creado);return [d.toLocaleDateString("es-PE"),d.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"}),v.tienda,v.conductor,v.resumen||"",v.metodo,Number(v.total||0).toFixed(2)];});
+      cab=["Fecha","Hora","Tienda","Conductor","Productos","Metodo","Efectivo S/","Fiado S/","Abono S/","Total S/"];
+      filas=(data||[]).map(v=>{const d=new Date(v.creado);return [d.toLocaleDateString("es-PE"),d.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"}),v.tienda,v.conductor,v.resumen||"",v.metodo,Number(v.efectivo||0).toFixed(2),Number(v.credito||0).toFixed(2),Number(v.abono||0).toFixed(2),Number(v.total||0).toFixed(2)];});
     }else if(tipo==="deudas"){
       const{data}=await db.from("tiendas").select("nombre,zona,dueno,tel,sa,li,cr").gt("sa",0).order("sa",{ascending:false});
       cab=["Tienda","Zona","Dueño","Teléfono","Deuda S/","Límite S/","Al tope"];
@@ -729,7 +739,10 @@ app.get("/admin/kardex",authA,async(req,res)=>{
   const{data:kx}=await db.from("kardex").select("*").order("id",{ascending:false}).limit(150);
   const{data:vt}=await db.from("ventas").select("*").order("id",{ascending:false}).limit(150);
   const rows=(kx||[]).concat((vt||[]).map(v=>({conductor:v.conductor,tipo:"venta",
-    detalle:v.tienda+" · S/"+Number(v.total||0).toFixed(2)+" ("+(v.metodo||"")+")"+(v.resumen?" · "+v.resumen:""),creado:v.creado})))
+    detalle:v.tienda+" · S/"+Number(v.total||0).toFixed(2)+" · "+({efectivo:"💵 efectivo",credito:"📋 crédito",mixto:"🔀 mixto",yape:"📱 Yape"}[v.metodo]||v.metodo||"")
+      +(Number(v.credito||0)>0?" · fiado S/"+Number(v.credito).toFixed(2):"")
+      +(Number(v.abono||0)>0?" · cobró S/"+Number(v.abono).toFixed(2):"")
+      +(v.resumen?" · "+v.resumen:""),creado:v.creado})))
     .sort((a,b)=>new Date(b.creado)-new Date(a.creado)).slice(0,250);
   res.json({ok:true,rows});
 });
