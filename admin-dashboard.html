@@ -1,0 +1,2218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Panel del administrador</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+ --papel:#F4F3EE;--carta:#FFF;--tinta:#20241E;--mut:#6E7268;--linea:#E0DED4;
+ --trigo:#B97A1F;--trigo-l:#F7EDD9;--verde:#2F6B4F;--verde-l:#E7F1EB;
+ --rojo:#B23B2E;--rojo-l:#F9E9E6;--azul:#33608F;--azul-l:#E9F0F7;--morado:#6C4E8E;
+ --r1:#2F7D4F;--r2:#63A05E;--r3:#A9AE45;--r4:#D9A32F;--r5:#DF7A2B;--r6:#C74E2C;--r7:#8E3040;--r8:#54222E;
+ --sombra:0 1px 3px rgba(32,36,30,.07),0 3px 12px rgba(32,36,30,.05);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--papel);color:var(--tinta);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13.5px;line-height:1.45;min-height:100vh}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#C9C6B8;border-radius:4px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.eyebrow{font-size:9.5px;letter-spacing:2.2px;text-transform:uppercase;font-weight:800;color:var(--mut)}
+
+/* ═══ LAYOUT ═══ */
+.shell{display:flex;min-height:100vh}
+.side{width:216px;background:var(--tinta);color:#D8D6CB;flex-shrink:0;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.logo{padding:20px 18px 16px;border-bottom:1px solid rgba(255,255,255,.07)}
+.logo b{font-size:15px;color:#F0EEE6;letter-spacing:.3px}
+.logo span{display:block;font-size:8.5px;letter-spacing:2.4px;color:#8A8E80;text-transform:uppercase;margin-top:3px}
+.nav{flex:1;padding:10px;overflow-y:auto}
+.ni{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px 12px;border-radius:9px;font-size:12.5px;font-weight:600;color:#A9AC9E;margin-bottom:2px;transition:.13s}
+.ni:hover{background:rgba(255,255,255,.06);color:#F0EEE6}
+.ni.on{background:var(--trigo);color:#fff}
+.ni .ic{width:18px;text-align:center}
+.ni .bd{margin-left:auto;background:var(--rojo);color:#fff;font-size:10px;font-weight:800;border-radius:9px;padding:1px 7px}
+.ni.on .bd{background:rgba(255,255,255,.25)}
+.side-f{padding:12px 16px;border-top:1px solid rgba(255,255,255,.07);font-size:10px;color:#8A8E80;line-height:1.6}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{background:var(--carta);border-bottom:1px solid var(--linea);padding:12px 22px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:500}
+.top h1{font-size:16px;font-weight:800}
+.top .st{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--mut);background:var(--papel);border:1px solid var(--linea);border-radius:8px;padding:5px 10px}
+.content{padding:20px 22px 60px;max-width:1240px;width:100%;margin:0 auto}
+.sec{display:none}.sec.on{display:block}
+
+/* ═══ COMPONENTES ═══ */
+.card{background:var(--carta);border:1px solid var(--linea);border-radius:12px;box-shadow:var(--sombra);margin-bottom:16px}
+.ch{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--linea)}
+.ch h3{font-size:13.5px;font-weight:800}
+.ch .eyebrow{margin-left:auto}
+.cb{padding:14px 16px}
+.g2{display:grid;grid-template-columns:1.15fr .85fr;gap:16px}
+.g3{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+@media(max-width:980px){.g2{grid-template-columns:1fr}}
+.kpi{background:var(--carta);border:1px solid var(--linea);border-radius:12px;padding:14px 16px;box-shadow:var(--sombra)}
+.kpi .v{font-size:22px;font-weight:800;margin-top:3px}
+.kpi .s{font-size:10.5px;color:var(--mut);margin-top:3px;line-height:1.5}
+.kpi.lock{background:repeating-linear-gradient(45deg,var(--carta),var(--carta) 8px,#FAF9F5 8px,#FAF9F5 16px)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.p-ve{background:var(--verde-l);color:var(--verde)}.p-ro{background:var(--rojo-l);color:var(--rojo)}
+.p-tr{background:var(--trigo-l);color:var(--trigo)}.p-az{background:var(--azul-l);color:var(--azul)}
+.p-gr{background:#EFEEE8;color:var(--mut)}.p-mo{background:#F0EAF7;color:var(--morado)}
+.pend{border:1px dashed var(--trigo);background:#FFFDF7;color:var(--trigo);font-size:9.5px;font-weight:800;padding:2px 7px;border-radius:6px;display:inline-flex;gap:4px;align-items:center}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;font-size:9.5px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mut);padding:8px 10px;border-bottom:2px solid var(--linea);font-weight:800;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #EFEDE5;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+tr.clk{cursor:pointer}tr.clk:hover td{background:#FCFBF7}
+.btn{padding:8px 13px;border-radius:9px;font-size:12px;font-weight:700;border:1px solid transparent;transition:.12s;min-height:36px}
+.btn:active{transform:scale(.97)}
+.b-p{background:var(--tinta);color:#fff}.b-p:hover{background:#000}
+.b-v{background:var(--verde);color:#fff}
+.b-r{background:var(--rojo-l);color:var(--rojo);border-color:#EBC7C2}
+.b-l{background:#fff;border-color:var(--linea)}.b-l:hover{border-color:var(--tinta)}
+.b-t{background:var(--trigo);color:#fff}
+.bj{border:1px solid var(--linea);border-left:4px solid var(--trigo);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#FFFEFA}
+.bj.ro{border-left-color:var(--rojo)}.bj.az{border-left-color:var(--azul)}.bj.ve{border-left-color:var(--verde)}.bj.mo{border-left-color:var(--morado)}
+.bj .t{font-size:12.5px;font-weight:800;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bj .d{font-size:11.5px;color:var(--mut);margin:5px 0 9px;line-height:1.55}
+.bj .a{display:flex;gap:8px;flex-wrap:wrap}
+.fil{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.fc{padding:6px 12px;border-radius:20px;border:1.5px solid var(--linea);background:#fff;font-size:11.5px;font-weight:700;color:var(--mut)}
+.fc.on{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+.bar{height:6px;background:#EFEDE5;border-radius:3px;overflow:hidden;min-width:70px}
+.bar i{display:block;height:100%;border-radius:3px}
+#map{height:430px;border-radius:12px;z-index:1}
+.mk{width:22px;height:22px;border-radius:50%;border:2.5px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;position:relative}
+.mk.vip:after{content:'★';position:absolute;top:-9px;right:-7px;font-size:11px;color:var(--trigo);text-shadow:0 1px 2px #fff}
+.mkc{width:30px;height:30px;border-radius:9px;background:var(--tinta);color:#fff;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+.rleg{display:flex;flex-wrap:wrap;gap:5px;font-size:10px;color:var(--mut)}
+.rleg span{display:inline-flex;align-items:center;gap:4px;background:#FAF9F5;border:1px solid var(--linea);border-radius:6px;padding:2px 7px}
+.ruta-i{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #EFEDE5}
+.ruta-i:last-child{border-bottom:none}
+.rn{width:22px;height:22px;border-radius:50%;background:var(--tinta);color:#fff;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.aviso{border-radius:9px;padding:9px 12px;font-size:11.5px;line-height:1.55;margin:8px 0}
+.a-am{background:#FDF6E4;border:1px solid #EFDCA8;color:#8A6410}
+.a-ro{background:var(--rojo-l);border:1px solid #EBC7C2;color:var(--rojo)}
+.a-az{background:var(--azul-l);border:1px solid #C7D6E6;color:var(--azul)}
+.a-ve{background:var(--verde-l);border:1px solid #C6DECF;color:var(--verde)}
+
+/* modal ficha */
+#mbg{position:fixed;inset:0;background:rgba(20,22,18,.42);z-index:900;display:none;align-items:center;justify-content:center;padding:20px}
+#mbg.on{display:flex}
+.modal{background:var(--carta);border-radius:14px;width:560px;max-width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.mh{padding:16px 18px;border-bottom:1px solid var(--linea);display:flex;align-items:center;gap:10px}
+.mh h3{font-size:15px;font-weight:800;flex:1}
+.mx{width:34px;height:34px;border-radius:9px;background:var(--papel);font-size:15px}
+.mb{padding:16px 18px}
+#toast{position:fixed;left:18px;bottom:18px;z-index:1200;display:flex;flex-direction:column;gap:8px;max-width:340px}
+.tst{background:var(--tinta);color:#F0EEE6;padding:11px 15px;border-radius:11px;font-size:12.5px;box-shadow:0 6px 20px rgba(0,0,0,.35);border-left:4px solid var(--trigo);animation:ti .25s}
+@keyframes ti{from{opacity:0;transform:translateY(8px)}to{opacity:1}}
+
+/* móvil */
+.menu-btn{display:none}
+@media(max-width:860px){
+ .side{position:fixed;left:-230px;z-index:800;transition:left .25s}
+ .side.on{left:0}
+ .menu-btn{display:flex;width:38px;height:38px;border-radius:9px;background:var(--papel);border:1px solid var(--linea);align-items:center;justify-content:center;font-size:16px}
+ .content{padding:14px 14px 60px}
+ #map{height:340px}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+ <aside class="side" id="side">
+  <div class="logo"><b>Panel del administrador</b></div>
+  <nav class="nav" id="nav"></nav>
+  <div class="side-f"><span class="dot" style="background:#63A05E"></span> Servidor en línea · GPS hace 28 s<br>Última sincronización: hoy 09:41</div>
+ </aside>
+ <div class="main">
+  <div class="top">
+   <button class="menu-btn" onclick="document.getElementById('side').classList.toggle('on')">☰</button>
+   <h1 id="top-t">Resumen</h1>
+   <div style="flex:1"></div>
+   <div class="st" id="bar-fecha"><span class="dot" style="background:#63A05E"></span> <span id="bar-txt">—</span></div>
+<button class="st" id="bar-salir" onclick="admSalir()" style="cursor:pointer;border:1px solid var(--linea);background:var(--carta);color:inherit">Cerrar sesión</button>
+  </div>
+  <div class="content" id="content"></div>
+ </div>
+</div>
+<div id="mbg" onclick="if(event.target===this)cerrarModal()"><div class="modal" id="modal"></div></div>
+<div id="toast"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ═══════ DATOS FALSOS (coherentes con la operación real) ═══════ */
+const LIMITE=230,UMBRAL=30,MARGEN=null,VIDA=null; // ⏳ margen y vida útil: pendientes
+const money=v=>'S/ '+Number(v||0).toFixed(2);
+const rep=d=>d<=1?{i:1,l:'Hoy',c:'var(--r1)',h:'#2F7D4F'}:d===2?{i:2,l:'Reciente',c:'var(--r2)',h:'#63A05E'}:d===3?{i:3,l:'Reponer no necesario',c:'var(--r3)',h:'#A9AE45'}:d===4?{i:4,l:'Reponer imprescindible',c:'var(--r4)',h:'#D9A32F'}:d===5?{i:5,l:'Posible desabastecimiento',c:'var(--r5)',h:'#DF7A2B'}:d<=10?{i:6,l:'Visitar necesariamente',c:'var(--r6)',h:'#C74E2C'}:d<30?{i:7,l:'Posible cliente perdido',c:'var(--r7)',h:'#8E3040'}:{i:8,l:'Cliente perdido',c:'var(--r8)',h:'#54222E'};
+
+const TIENDAS=[];
+const COND={};
+let BANDEJA=[];
+const KX=[];
+const PERD=[];
+const CIERRES=[];
+const PEND=[];
+
+/* ═══════ NAVEGACIÓN Y RENDERS ═══════ */
+const SECS=[['resumen','◫','Resumen'],['bandeja','📥','Bandeja'],['mapa','🗺️','Mapa y rutas'],['tiendas','🏪','Tiendas'],['creditos','💳','Créditos'],['kardex','📒','Kardex'],['perdidas','📉','Pérdidas'],['cierres','💰','Cierres de viaje'],['conductores','🚛','Conductores'],['informe','📊','Informe diario'],['config','⚙️','Configuración']];
+let CUR='resumen',FILTRO='todas',KSEL='general';
+const $=id=>document.getElementById(id);
+function toast(m){const t=document.createElement('div');t.className='tst';t.textContent=m;$('toast').appendChild(t);setTimeout(()=>t.remove(),3800);}
+function nav(){$('nav').innerHTML=SECS.map(s=>`<button class="ni ${CUR===s[0]?'on':''}" onclick="ir('${s[0]}')"><span class="ic">${s[1]}</span>${s[2]}${s[0]==='bandeja'&&BANDEJA.length?`<span class="bd">${BANDEJA.length}</span>`:''}</button>`).join('');}
+function ir(s){CUR=s;$('top-t').textContent=SECS.find(x=>x[0]===s)[2];$('side').classList.remove('on');nav();render();if(s==='mapa')setTimeout(initMap,80);}
+function render(){$('content').innerHTML=({resumen:rResumen,bandeja:rBandeja,mapa:rMapa,tiendas:rTiendas,creditos:rCreditos,kardex:rKardex,perdidas:rPerdidas,cierres:rCierres,conductores:rConductores,informe:rInforme,config:rConfig})[CUR]();if(CUR==='mapa')setTimeout(initMap,80);}
+
+function puntos(t){const d=t.d;if(d>10)return{sc:0,why:rep(d).l+' — alerta, no entra a ruta'};let b=d>=6?80:({1:5,2:12,3:22,4:45,5:65})[Math.min(d,5)]||0;const w=[rep(d).l+` (${d}d)`];if(t.vip&&d>=4){b=Math.round(b*1.5);w.push('★ VIP ×1.5 (desde 4d)');}else if(t.vip)w.push('VIP sin efecto (<4d)');if(t.pedidoHoy){b+=100;w.push('📩 pedido — garantizado hoy');}return{sc:b,why:w.join(' · ')};}
+function rutaDe(cid){return COND[cid].tiendas.map(i=>TIENDAS.find(t=>t.id===i)).filter(t=>t&&t.act&&((t.d>=3&&t.d<=10)||t.pedidoHoy)).map(t=>({t,...puntos(t)})).filter(x=>x.sc>0).sort((a,b)=>b.sc-a.sc);}
+
+function rResumen(){return ''}
+
+function bjHTML(b){return `<div class="bj ${b.c}"><div class="t">${b.t}</div><div class="d">${b.d}</div><div class="a">${b.a.map(a=>`<button class="btn ${a.cl||'b-l'}" onclick="acc(${b.id},'${a.fn}')">${a.l}</button>`).join('')}</div></div>`;}
+function rBandeja(){return `<div class="aviso a-am" style="margin-top:0">Todo lo que requiere TU decisión llega aquí. Nada de esta lista se resuelve solo.</div>${BANDEJA.map(bjHTML).join('')||'<div class="card"><div class="cb" style="text-align:center;color:var(--mut)">Bandeja vacía.</div></div>'}`;}
+function acc(id,fn){const b=BANDEJA.find(x=>x.id===id);BANDEJA=BANDEJA.filter(x=>x.id!==id);({waReg(){const t=TIENDAS.find(x=>x.id===1);t.pedidoHoy=true;toast('Pedido registrado a mano — entra a la ruta de HOY (+100, garantizado)');},okCorr(){toast('Corrección aprobada: stock devuelto, deuda −S/23.50, rastro guardado');},okRobo(){toast('Hecho');},noRobo(){toast('Hecho');},okVip(){const t=TIENDAS.find(x=>x.id===3);if(t)t.vip=true;toast('Tienda confirmada VIP');},okEnt(){toast('Recepción confirmada — el ciclo del dinero cerró');},difEnt(){toast('Diferencia registrada en el historial — mismo trato que el margen');},res(){toast('Resuelto y archivado');}})[fn]();nav();render();}
+
+let MAP=null,LT=null,LR=null;
+function rMapa(){
+ const rj=rutaDe('juan'),rc=rutaDe('carlos');
+ return `<div class="card"><div class="ch"><h3>🗺️ Espinar — tiendas por reposición y rutas de hoy</h3></div>
+ <div class="cb" style="padding:10px"><div id="map"></div>
+ <div class="rleg" style="margin-top:9px">${[1,2,3,4,5,6,7,8].map(i=>{const L=['1d','2d','3d','4d','5d','6-10d','>10d','30d+'][i-1];return `<span><span class="dot" style="background:var(--r${i})"></span>${L}</span>`;}).join('')}<span>★ VIP</span><span><span></div></div></div>
+ <div class="g2">
+  ${(USRS.filter(function(u){return u.activo}).map(function(u){return [u.nombre,[],u.usuario]})).map(([n,r])=>`<div class="card"><div class="ch"><h3>Ruta de ${n} — hoy</h3><span class="eyebrow">urgencia · VIP desde 4d · pedido garantizado <span class="pend">⏳ pesos: punto de partida</span></span></div><div class="cb">
+  ${r.length?r.map((x,i)=>`<div class="ruta-i"><div class="rn">${i+1}</div><span class="dot" style="background:${rep(x.t.d).c}"></span><div style="flex:1"><b style="font-size:12.5px">${x.t.n} ${x.t.vip?'<span style="color:var(--trigo)">★</span>':''}</b><div style="font-size:10.5px;color:var(--mut)">${x.why}${x.t.sa>0?' · 💳 cobrar de paso '+money(x.t.sa):''}</div></div><span class="pill p-gr mono">${x.sc} pts</span></div>`).join(''):'<div style="color:var(--mut);font-size:12px">Sin paradas en rango hoy.</div>'}
+  </div></div>`).join('')}
+ </div>
+ <div class="aviso a-az">La ruta se genera la noche anterior y se refresca sola al arrancar el día. El desempate fino por cercanía corre en el servidor.</div>`;
+}
+function initMap(){const dv=$('map');if(!dv||typeof L==='undefined')return;
+ if(MAP){MAP.invalidateSize();pinta();return;}
+ MAP=L.map('map').setView([-14.7935,-71.4110],14);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(MAP);
+ LT=L.layerGroup().addTo(MAP);LR=L.layerGroup().addTo(MAP);pinta();}
+function pinta(){LT.clearLayers();LR.clearLayers();
+ TIENDAS.filter(t=>t.act).forEach(t=>{const r=rep(t.d);
+  const ic=L.divIcon({className:'',html:`<div class="mk ${t.vip?'vip':''}" style="background:${r.h}">${t.d}</div>`,iconSize:[22,22],iconAnchor:[11,11]});
+  L.marker([t.lat,t.lon],{icon:ic}).addTo(LT).bindPopup(`<b>${t.n}</b><br>${r.l} · ${t.d} días${t.vip?' · ★ VIP':''}${t.sa?'<br>Deuda: '+money(t.sa):''}`);});
+ [['juan','#B97A1F'],['carlos','#33608F']].forEach(([k,col])=>{const r=rutaDe(k);if(r.length)L.polyline(r.map(x=>[x.t.lat,x.t.lon]),{color:col,weight:3.5,dashArray:'8 6',opacity:.85}).addTo(LR);});
+}
+function rTiendas(){
+ const fs=[['todas','Todas'],['alerta','En alerta (≥5d)'],['limite','Al límite'],['vip','VIP ★'],['faltan','Datos incompletos'],['inactivas','Inactivas']];
+ let L2=TIENDAS.filter(t=>FILTRO==='inactivas'?!t.act:t.act);
+ if(FILTRO==='alerta')L2=L2.filter(t=>t.d>=5);if(FILTRO==='limite')L2=L2.filter(t=>t.sa>=LIMITE);
+ if(FILTRO==='vip')L2=L2.filter(t=>t.vip);if(FILTRO==='faltan')L2=L2.filter(t=>t.falta.length);
+ return `<div class="fil">${fs.map(f=>`<button class="fc ${FILTRO===f[0]?'on':''}" onclick="FILTRO='${f[0]}';render()">${f[1]}</button>`).join('')}</div>
+ <div class="card"><div class="cb" style="overflow-x:auto"><table>
+ <tr><th></th><th>Tienda</th><th>Reposición</th><th>Deuda / ${LIMITE}</th><th>Datos</th><th></th></tr>
+ ${L2.map(t=>{const r=rep(t.d);const pct=Math.min(100,t.sa/LIMITE*100);return `<tr class="clk" onclick="ficha(${t.id})">
+  <td><span class="dot" style="background:${r.c};width:11px;height:11px"></span></td>
+  <td><b>${t.n}</b> ${t.vip?'<span style="color:var(--trigo)">★</span>':''}${t.act?'':' <span class="pill p-gr">inactiva</span>'}<div style="font-size:10.5px;color:var(--mut)">${t.z}</div></td>
+  <td><div style="font-size:11px;font-weight:700;color:${r.c}">${r.l}</div><div style="font-size:10px;color:var(--mut)">${t.d} días</div></td>
+  <td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:${pct}%;background:${pct>=100?'var(--rojo)':pct>60?'var(--r5)':'var(--verde)'}"></i></div><span class="mono" style="font-size:11px">${money(t.sa)}</span></div>${t.sinMov?`<div style="font-size:9.5px;color:var(--rojo);font-weight:800">🐌 ${t.sinMov}d sin movimiento</div>`:''}</td>
+  <td>${t.falta.length?`<span class="pill ${t.falta.length>1?'p-ro':'p-tr'}">falta: ${t.falta.join(', ')}</span>`:'<span class="pill p-ve">completo</span>'}</td>
+  <td style="color:var(--mut)">›</td></tr>`;}).join('')}
+ </table></div></div>
+ <div class="aviso a-am">Las tiendas nuevas entran activas al instante con solo nombre + GPS; lo que falte queda marcado en amarillo/rojo para completar después. Las inactivas conservan todo su historial.</div>`;
+}
+function ficha(id){const t=TIENDAS.find(x=>x.id===id);const r=rep(t.d);
+ $('modal').innerHTML=`<div class="mh"><span class="dot" style="background:${r.c};width:12px;height:12px"></span><h3>${t.n} ${t.vip?'<span style="color:var(--trigo)">★ VIP</span>':''}</h3><button class="mx" onclick="cerrarModal()">✕</button></div>
+ <div class="mb">
+  <div class="g3" style="margin-bottom:12px">
+   <div><div class="eyebrow">Reposición</div><b style="color:${r.c}">${r.l}</b> · ${t.d} días</div>
+   <div><div class="eyebrow">Dueño / teléfono</div>${t.due} · ${t.tel}</div>
+   <div><div class="eyebrow">Zona</div>${t.z}</div>
+  </div>
+  ${t.patron?`<div class="aviso a-az" style="margin-top:0">Patrón: ${t.patron} — candidata a VIP (tú confirmas).</div>`:''}
+  <div class="eyebrow" style="margin:10px 0 6px">Deuda — quién fió y quién cobró</div>
+  <div style="font-size:15px;font-weight:800;margin-bottom:6px">${money(t.sa)} <span style="font-size:11px;color:var(--mut);font-weight:600">/ ${LIMITE} tope</span></div>
+  ${t.mov.length?t.mov.map(m=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid #EFEDE5"><span>${m.f} · ${m.t}</span><b class="mono" style="color:${m.v<0?'var(--verde)':m.v>0?'var(--rojo)':'var(--mut)'}">${m.v?money(Math.abs(m.v)):''}</b></div>`).join(''):'<div style="font-size:12px;color:var(--mut)">Sin deuda ni movimientos.</div>'}
+  <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">${t.sa>0?`<button class="btn b-t" onclick="abono(${id})">➕ Registrar abono</button>`:``}
+   ${t.act?`<button class="btn b-r" onclick="t=TIENDAS.find(x=>x.id===${id});t.act=false;cerrarModal();render();toast('Tienda inactiva — historial conservado')">Marcar inactiva</button>`:`<button class="btn b-v" onclick="t=TIENDAS.find(x=>x.id===${id});t.act=true;cerrarModal();render();toast('Tienda reactivada')">Reactivar</button>`}
+   <button class="btn b-l" onclick="cerrarModal()">Cerrar</button>
+  </div>
+ </div>`;
+ $('mbg').classList.add('on');}
+function abono(id){const t=TIENDAS.find(x=>x.id===id);const m=Math.min(50,t.sa);t.sa=Math.max(0,t.sa-50);t.mov.push({f:'hoy',t:'Abonó S/'+m+' — cobró: TÚ (dueño)',v:-m});cerrarModal();render();toast('Abono registrado a tu nombre — deuda actualizada');}
+function cerrarModal(){$('mbg').classList.remove('on');}
+function rCreditos(){var ds=(typeof TIENDAS!=='undefined'?TIENDAS:[]).filter(function(t){return Number(t.sa||0)>0}).sort(function(a,b){return b.sa-a.sa});var tot=ds.reduce(function(s,t){return s+Number(t.sa)},0);return '<div class="card"><div class="ct">💳 Créditos por cobrar</div>'+(ds.length?ds.map(function(t){return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid rgba(128,128,128,.2)"><div><b style="font-size:13px">'+tnomA(t)+'</b><div style="font-size:11px;opacity:.6">'+(t.z||'')+'</div></div><div style="text-align:right"><b style="font-size:13px;color:'+(Number(t.sa)>=Number(t.li||230)?'#B23B2E':'#D9A32F')+'">S/'+Number(t.sa).toFixed(2)+'</b><div style="font-size:10px;opacity:.6">límite S/'+Number(t.li||0).toFixed(0)+(Number(t.sa)>=Number(t.li||230)?' · AL TOPE':'')+'</div></div></div>'}).join('')+'<div style="display:flex;justify-content:space-between;padding-top:10px;font-weight:900"><span>Total por cobrar</span><span>S/'+tot.toFixed(2)+'</span></div>':'<div style="font-size:12px;opacity:.6;padding:8px 0">Sin deudas registradas aún.</div>')+'</div>';}
+function rKardex(){
+ const rows=KX.filter(k=>KSEL==='general'||k.c===KSEL);
+ return `<div class="fil">${[['general','General (suma)']].concat((typeof USRS!=='undefined'?USRS:[]).filter(function(u){return u.activo}).map(function(u){return [u.usuario,u.nombre]})).map(o=>`<button class="fc ${KSEL===o[0]?'on':''}" onclick="KSEL='${o[0]}';render()">${o[1]}</button>`).join('')}</div>
+ <div class="card"><div class="ch"><h3>Kardex — capa 2: cantidades + soles</h3><span class="eyebrow">detecta descuadres, no los esconde</span></div>
+ <div class="cb" style="overflow-x:auto"><table>
+ <tr><th>Fecha</th><th>Conductor</th><th>Movimiento</th><th>Categoría</th><th class="num">Cant</th><th class="num">Valor</th><th class="num">Saldo</th></tr>
+ ${rows.map(k=>`<tr><td class="mono" style="font-size:11px">${k.f}</td><td>${(function(){var u=(typeof USRS!=='undefined'?USRS:[]).find(function(x){return x.usuario===k.c});return u?u.nombre:(k.c||'—')})()}</td><td>${k.t}</td><td>${k.cat}</td><td class="num" style="color:${k.q<0?'var(--rojo)':k.q>0?'var(--verde)':'var(--mut)'}">${k.q>0?'+':''}${k.q||'—'}</td><td class="num mono">${money(k.v)}</td><td class="num mono">${k.s??'—'}</td></tr>`).join('')}
+ </table></div></div>
+ <div class="aviso a-az">El conductor de paso NO aparece aquí: su mercadería y su dinero no son tuyos; solo su efecto en la reposición de tiendas.</div>`;
+}
+function rPerdidas(){return '<div class="card"><div class="ct">🍄 Pérdidas</div><div style="font-size:12.5px;opacity:.75;line-height:1.7">Mermas, hongueado y devoluciones llegarán del kardex de los conductores con el movimiento real.</div></div>';}
+function rCierres(){return '<div class="card"><div class="ct">💰 Cierres de viaje</div><div style="font-size:12.5px;opacity:.75;line-height:1.7">Aquí aparecerán las liquidaciones de tus conductores al cerrar cada viaje. Aún sin viajes registrados.</div></div>';}
+function rConductores(){
+ return `<div class="g3">${Object.entries(COND).map(([k,c])=>`<div class="card" style="margin:0"><div class="cb">
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><div style="width:42px;height:42px;border-radius:11px;background:var(--tinta);color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px">${k==='pedro'?'🚚':'🚛'}</div>
+  <div><b style="font-size:13.5px">${c.n}</b><div style="font-size:10.5px;color:var(--mut)">${c.tipo}</div></div></div>
+  <div style="font-size:11.5px;line-height:1.8">
+  ${c.viaje}<br>
+  ${k!=='pedro'?`GPS: ${c.senal?`<span class="pill p-ve">● ${c.gps}</span>`:`<span class="pill p-tr">sin señal ${c.gps}</span>`}<br>Tiendas asignadas: <b>${c.tiendas.length}</b><br>Último cierre: ${c.ult.f} · ${money(c.ult.monto)} ${c.ult.dif?`(dif S/${c.ult.dif})`:''}`:'Mercadería y dinero <b>propios</b>.<br>Hoy registró <b>2 ventas</b> → reposición de esas tiendas al día.<br>No aparece en tu kardex ni en tus cierres.'}
+  </div>
+  ${k==='carlos'&&!c.senal?'<div class="aviso a-am" style="margin-bottom:0">Sin actualización hace varios minutos. Honesto: sin señal, apagado o sin batería se ven iguales desde el servidor.</div>':''}
+  <div style="display:flex;gap:8px;margin-top:10px">${k!=='pedro'?`<button class="btn b-l" onclick="toast('Ficha completa: en el sistema real')">Ver ficha</button><button class="btn b-r" onclick="toast('Cuenta desactivada al instante · stock vuelve · tiendas se reparten · te avisa lo que decides tú')">Desactivar</button>`:`<button class="btn b-l" onclick="toast('Su app: catálogo · registrar venta · su liquidación')">Ver su app limitada</button>`}</div>
+ </div></div>`).join('')}</div>`;
+}
+function rInforme(){return ''}
+
+function rConfig(){
+ return `<div class="card"><div class="ch"><h3>⚙️ Parámetros del sistema</h3><span class="eyebrow">los ⏳ los defines tú con datos reales</span></div><div class="cb"><table>
+ ${PEND.map(p=>`<tr><td>${p[0]}</td><td class="num">${p[2]==='ok'?`<span class="pill p-ve">${p[1]}</span>`:`<span class="pend">${p[1]}</span>`}</td></tr>`).join('')}
+ </table>
+ <div class="aviso a-az" style="margin-bottom:0">Funciones que esperan ~3 meses de historial antes de activarse en automático: rutas finas, VIP automático, reposición proporcional, marcado de gastos inusuales.</div>
+ </div></div>
+ <div class="card"><div class="ch"><h3>Reglas fijas ya activas</h3></div><div class="cb" style="font-size:12px;line-height:2">
+ 🔒 Efectivo en ruta nunca visible en vivo · 💳 Tope de crédito configurable · 🍞 Devolución = reemplazo mismo valor (9) · ⚡ Venta rápida solo contado, no toca la tienda (26) · ↔ Traspaso se mueve al confirmar el receptor (10) · 📲 Yape a cuenta del conductor, él verifica (18) · ✏️ Correcciones con rastro siempre (28) · 🐌 Ninguna tienda se desactiva sola (27) · 📩 Ningún pedido entra solo (16)
+ </div></div>`;
+}
+try{nav();render();}catch(e){console.error('boot:',e)}
+</script>
+
+<script id="v5a1">
+(function(){
+window.BANDEJA=window.BANDEJA||((typeof PEND!=='undefined')?PEND:[]);
+window.CFGA={API:localStorage.getItem('v5a_api')||'',TOKEN:localStorage.getItem('v5a_token')||''};
+window.apiA=async function(ruta,datos,metodo){
+ if(!CFGA.API)return{local:true};
+ try{var ctl=new AbortController();var to=setTimeout(function(){ctl.abort()},8000);
+  var r=await fetch(CFGA.API+ruta,{method:metodo||(datos?'POST':'GET'),headers:{'Content-Type':'application/json','x-admin':CFGA.TOKEN},body:datos?JSON.stringify(datos):undefined,signal:ctl.signal});
+  clearTimeout(to);return await r.json();
+ }catch(e){return{offline:true}}
+};
+window.tnomA=function(t){return t.n||t.nombre||t.nombre_tienda||'—'};
+window.CATC=[['panes','Panes'],['molde','Molde'],['especiales','Especiales'],['chifones','Chifones'],['tortas','Tortas'],['sm','Pasteles SM'],['bianka','Pasteles Bianka'],['queques','Otros']];
+window.USRS=JSON.parse(localStorage.getItem('v5a_usrs')||'null')||[];
+window.saveU=function(){localStorage.setItem('v5a_usrs',JSON.stringify(USRS));};
+window.SERV_EVT=[];window.PEDIDOS_ADM=[];window.CARGAS_ADM=[];window.AVISOS_ADM=[];
+window.PARAMS_A=JSON.parse(localStorage.getItem('v5a_params')||'null')||{limite_credito:230,umbral_repo:30,margen_liq:5,vida_util:6,deuda_dias:14,yape_umbral:100,costos:{panes:0,molde:0,especiales:0,chifones:0,tortas:0,sm:0,bianka:0,queques:0}};
+window.savePA=function(){
+ if(!PARAMS_A.tipos_tienda||!PARAMS_A.tipos_tienda.length)PARAMS_A.tipos_tienda=['bodega','minimarket','puesto','mayorista','otro'];localStorage.setItem('v5a_params',JSON.stringify(PARAMS_A));};
+
+if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='pedidos'})){var bi=SECS.findIndex(function(s){return s[0]==='bandeja'});SECS.splice(bi+1,0,['pedidos','📩','Pedidos WhatsApp']);}
+window.rPedidos=window.rPedidos||function(){return '<div class="card"><div class="ct">📩 Pedidos WhatsApp</div><div style="font-size:12px;opacity:.6">Cargando…</div></div>'};
+window.render=function(){
+ var map={resumen:rResumen,bandeja:rBandeja,mapa:rMapa,tiendas:rTiendas,creditos:rCreditos,kardex:rKardex,perdidas:rPerdidas,cierres:rCierres,conductores:rConductores,informe:rInforme,config:rConfig,pedidos:rPedidos};
+ try{document.getElementById('content').innerHTML=map[CUR]();}catch(e){console.error(CUR,e);document.getElementById('content').innerHTML='<div class="card"><div class="ct">Sección vacía</div><div style="font-size:12px;opacity:.65;line-height:1.6">Sin datos aún — esta vista analítica se activa cuando el sistema acumule movimiento real (ventas, cierres, kardex).</div></div>';}
+ if(CUR==='mapa'&&typeof L!=='undefined')setTimeout(function(){try{initMapA()}catch(e){console.error('mapaA',e)}},90);
+ if(CUR==='mapa')setTimeout(function(){try{zmapInit()}catch(e){console.error('zmap',e)}},140);
+ if(typeof nav==='function')nav();
+};
+
+})();
+</script>
+
+<script id="v5a2">
+(function(){
+/* ── Conductores: usuarios + avisos ── */
+if(typeof rConductores==='function'){var _rc=rConductores;window.rConductores=function(){
+ var lista=USRS.map(function(u,i){return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(128,128,128,.2);flex-wrap:wrap"><div style="flex:1;min-width:180px"><b style="font-size:13px">'+u.nombre+'</b> <span style="font-size:11px;opacity:.6">@'+u.usuario+' · '+u.tipo+' · '+u.camion+'</span><div style="font-size:11px;font-weight:700;margin-top:2px;color:'+(u.activo?(u.estado==='sin contraseña'?'#B97A1F':'#2F7D4F'):'#B23B2E')+'">'+(u.activo?u.estado:'⛔ desactivado')+'</div></div><button onclick="uReset('+i+')" style="border:1.5px solid #EFDCA8;background:#FDF6E4;color:#8A6410;border-radius:9px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer">Resetear contraseña</button><button onclick="uTog('+i+')" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:'+(u.activo?'#B23B2E':'#2F7D4F')+';border-radius:9px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer">'+(u.activo?'Desactivar':'Activar')+'</button></div>'}).join('');
+ var _b='';try{_b=_rc()}catch(e){}
+ return _b
+ +'<div class="card"><div class="ct">👤 Usuarios de la app (solo tú los creas)</div>'+lista
+ +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px"><input id="u-nom" placeholder="Nombre completo" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><input id="u-usr" placeholder="usuario (minúsculas)" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><select id="u-tipo" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><option value="fijo">Ruta fija (Espinar)</option><option value="paso">De paso</option></select><input id="u-cam" placeholder="Camión (C-03)" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"></div>'
+ +'<button onclick="uCrear()" style="width:100%;margin-top:8px;padding:12px;border:none;border-radius:11px;background:#20241E;color:#fff;font-weight:800;cursor:pointer">➕ Crear usuario</button>'
+ +'<div style="font-size:11px;opacity:.65;margin-top:8px;line-height:1.5">El conductor entra por <b>"Primera vez"</b> con este usuario y crea su contraseña. Resetear = vuelve a "sin contraseña" y él crea otra. El tipo (fijo/de paso) limita su app solo.</div></div>'
+ +'<div class="card"><div class="ct">🔔 Enviar aviso a conductores</div><select id="av-para" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:8px"><option value="todos">Todos</option>'+USRS.filter(function(u){return u.activo}).map(function(u){return '<option value="'+u.usuario+'">'+u.nombre+'</option>'}).join('')+'</select><textarea id="av-txt" placeholder="Ej: pasa por la tienda del mercado antes de las 11." style="width:100%;min-height:70px;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-family:inherit;font-size:13px"></textarea><button onclick="avEnviar()" style="width:100%;margin-top:8px;padding:12px;border:none;border-radius:11px;background:#B97A1F;color:#fff;font-weight:800;cursor:pointer">Enviar — le llega a la campanita 🔔</button>'+(AVISOS_ADM.length?'<div style="margin-top:10px">'+AVISOS_ADM.map(function(a){return '<div style="font-size:12px;opacity:.7;padding:6px 0;border-bottom:1px solid rgba(128,128,128,.15)">→ '+a.para+': '+a.txt+' <span style="opacity:.6">'+a.hora+'</span></div>'}).join('')+'</div>':'')+'</div>';
+};}
+window.uCrear=async function(){
+ var n=document.getElementById('u-nom').value.trim(),u=document.getElementById('u-usr').value.trim().toLowerCase(),t=document.getElementById('u-tipo').value,cm=document.getElementById('u-cam').value.trim()||'—';
+ if(!n||!u)return alert('Nombre y usuario son obligatorios.');
+ if(USRS.find(function(x){return x.usuario===u}))return alert('Ese usuario ya existe.');
+ USRS.push({usuario:u,nombre:n,tipo:t,camion:cm,estado:'sin contraseña',activo:true});saveU();
+ var r=await apiA('/admin/conductores',{usuario:u,nombre:n,tipo:t,camion:cm});
+ render();alert(r&&r.ok?'✓ Creado en el servidor. Entrégale el usuario en persona.':'Usuario creado'+(CFGA.API?' — el servidor no respondió':' (modo local)'));
+};
+window.uReset=async function(i){var u=USRS[i];if(!confirm('¿Resetear contraseña de '+u.nombre+'? Quedará "sin contraseña" y él crea una nueva por Primera vez.'))return;u.estado='sin contraseña';saveU();await apiA('/admin/conductores/'+u.usuario+'/reset',{},'POST');render();};
+window.uTog=async function(i){var u=USRS[i];u.activo=!u.activo;saveU();await apiA('/admin/conductores/'+u.usuario+'/activo',{activo:u.activo});render();};
+window.avEnviar=async function(){
+ var para=document.getElementById('av-para').value,txt=document.getElementById('av-txt').value.trim();
+ if(!txt)return alert('Escribe el aviso.');
+ AVISOS_ADM.unshift({para:para,txt:txt,hora:new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})});
+ var r=await apiA('/avisos',{para:para,txt:txt});
+ render();alert(r&&r.ok?'✓ Enviado':'Guardado'+(CFGA.API?' — reintenta':' (modo local)'));
+};
+
+/* ── Bandeja: eventos del servidor ── */
+if(typeof rBandeja==='function'){var _rb=rBandeja;window.rBandeja=function(){
+ var hb=BOL.length?'<div class="card" style="border-left:4px solid #B97A1F"><div class="ct">🧾 Boletas pedidas ('+BOL.length+')</div><div style="font-size:11.5px;opacity:.7;margin-bottom:8px;line-height:1.5">Las envías tú desde tu número, solo a quien la pidió.</div>'+BOL.map(function(b,i){return '<div style="padding:9px 0;border-bottom:1px solid rgba(128,128,128,.2)"><b style="font-size:13px">'+b.tienda+'</b> <span style="font-size:11px;opacity:.6">S/'+Number(b.total||0).toFixed(2)+' · '+(b.conductor||'')+'</span><div style="display:flex;gap:8px;margin-top:7px"><button onclick="bolWA('+i+')" style="flex:1;border:none;background:#128C3A;color:#fff;border-radius:9px;padding:8px;font-size:11.5px;font-weight:800;cursor:pointer">💬 Enviar por mi WhatsApp</button><button onclick="bolListo('+i+')" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:9px;padding:8px 12px;font-size:11.5px;font-weight:800;cursor:pointer">Ya la envié</button></div></div>'}).join('')+'</div>':'';
+ var h;
+ if(CFGA.API){h='<div class="card"><div class="ct">📡 Del servidor ('+SERV_EVT.length+')</div>'+(SERV_EVT.length?SERV_EVT.map(function(e,i){
+  var acc=e.tipo==='tienda_nueva'?'<button onclick="evVerif('+i+')" style="border:none;background:#2F7D4F;color:#fff;border-radius:9px;padding:8px 12px;font-size:11px;font-weight:800;cursor:pointer">✓ Verificar tienda</button>'
+   :e.tipo==='correccion'?'<button onclick="evCorr('+i+',1)" style="border:none;background:#2F7D4F;color:#fff;border-radius:9px;padding:8px 12px;font-size:11px;font-weight:800;cursor:pointer">Aprobar</button> <button onclick="evCorr('+i+',0)" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:#B23B2E;border-radius:9px;padding:8px 12px;font-size:11px;font-weight:800;cursor:pointer">Rechazar</button>'
+   :'<button onclick="evVisto('+i+')" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:9px;padding:8px 12px;font-size:11px;font-weight:800;cursor:pointer">Visto</button>';
+  return '<div style="padding:10px 0;border-bottom:1px solid rgba(128,128,128,.2)"><b style="font-size:13px">'+e.titulo+'</b><div style="font-size:12px;opacity:.7;margin:3px 0 7px">'+(e.desc||'')+'</div>'+acc+'</div>';
+ }).join(''):'<div style="font-size:12px;opacity:.6;padding:8px 0">Sin eventos nuevos del servidor.</div>')+'</div>';}
+ else h='<div class="card" style="border-left:4px solid #B97A1F"><div style="font-size:12px;color:#B97A1F;line-height:1.55">⚙️ Sin servidor: esto es la bandeja de ejemplo. Conéctalo en <b>Configuración</b> para recibir lo real: tiendas nuevas, correcciones, traspasos, visitas fallidas, cargas con diferencia.</div></div>';
+ var _b='';try{_b=_rb()}catch(e){}return hb+h+_b;
+};}
+window.BOL=[];
+window.cargarBoletas=async function(){var r=await apiA('/admin/boletas');if(r&&r.ok){BOL=r.boletas||[];if(CUR==='bandeja')render();}};
+window.bolWA=function(i){var b=BOL[i];var tel=String(b.tel||'').replace(/\D/g,'');
+ if(!tel)return alert('Esa tienda no tiene teléfono registrado. Agrégaselo en su ficha.');
+ window.open('https://wa.me/51'+tel+'?text='+encodeURIComponent(b.texto),'_blank');};
+window.bolListo=async function(i){var b=BOL[i];await apiA('/admin/boletas/'+b.id+'/enviada',{});BOL.splice(i,1);render();};
+window.evVerif=async function(i){var e=SERV_EVT[i];await apiA('/tiendas/'+e.ref+'/verificar',{},'POST');SERV_EVT.splice(i,1);render();};
+window.evCorr=async function(i,ap){var e=SERV_EVT[i];await apiA('/correcciones/'+e.ref+'/resolver',{aprobada:!!ap});SERV_EVT.splice(i,1);render();};
+window.evVisto=async function(i){var e=SERV_EVT[i];await apiA('/eventos/'+e.ref+'/visto',{},'POST');SERV_EVT.splice(i,1);render();};
+
+/* ── Kardex: carga de viaje + sugerencia ── */
+if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
+ var cOpts=USRS.filter(function(u){return u.activo}).map(function(u){return '<option value="'+u.usuario+'">'+u.nombre+'</option>'}).join('');
+ var inputs=CATC.map(function(x){return '<div style="display:flex;align-items:center;gap:8px"><div style="flex:1;font-size:12px;font-weight:700">'+x[1]+'</div><input type="number" id="cg-'+x[0]+'" value="0" style="width:80px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center"></div>'}).join('');
+ var _b='';try{_b=_rk()}catch(e){}
+ return _b
+ +'<div class="card"><div class="ct">📦 Registrar carga del viaje</div>'
+ +'<select id="cg-cond" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:10px">'+cOpts+'</select>'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-bottom:10px">'+inputs+'</div>'
+ +'<div style="display:flex;gap:8px"><button onclick="cgSugerir()" style="flex:1;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">🧮 Sugerir desde el último cierre</button><button onclick="cgEnviar()" style="flex:1.2;border:none;background:#20241E;color:#fff;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Asignar al conductor</button></div>'
+ +'<div style="font-size:11px;opacity:.65;margin-top:8px;line-height:1.5">Él la <b>cuenta y confirma</b> en su app antes de salir. Sugerencia = vendido del último viaje +10%.</div></div>';
+};}
+window.cgSugerir=async function(){
+ if(CFGA.API){var r=await apiA('/liquidaciones/sugerencia?conductor='+document.getElementById('cg-cond').value);if(r&&r.ok&&r.items){CATC.forEach(function(x){var el=document.getElementById('cg-'+x[0]);if(el&&r.items[x[0]]!=null)el.value=r.items[x[0]]});return alert('✓ Sugerencia calculada con las ventas reales del último viaje.');}}
+ var base={panes:60,molde:15,especiales:20,chifones:10,tortas:15,sm:150,bianka:150,queques:8};
+ CATC.forEach(function(x){var el=document.getElementById('cg-'+x[0]);if(el)el.value=Math.round((base[x[0]]||0)*1.1)});
+ alert('Sugerencia de ejemplo (modo local): base +10%. Con servidor, usa las ventas reales.');
+};
+window.cgEnviar=async function(){
+ var items={};CATC.forEach(function(x){items[x[0]]=+document.getElementById('cg-'+x[0]).value||0});
+ var cond=document.getElementById('cg-cond').value;
+ var prods={};try{var pk=(window._PK&&_PK['cg'])||{};Object.keys(pk).forEach(function(k){if(Number(pk[k])>0)prods[k]=Number(pk[k])})}catch(e){}
+  var r=await apiA('/cargas',{conductor:cond,items:items,prods:prods});
+ alert(r&&r.ok?'✓ Carga asignada — le aparece al conductor para confirmar':'Guardada'+(CFGA.API?' — reintenta':' (modo local)'));
+};
+
+/* ── Tiendas: verificación + crédito ── */
+if(typeof rTiendas==='function'){var _rt=rTiendas;window.rTiendas=function(){
+ var nuevas=(typeof TIENDAS!=='undefined'?TIENDAS:[]).map(function(t,i){return{t:t,i:i}}).filter(function(x){return x.t.nueva&&!x.t.verificada});
+ var h=nuevas.length?'<div class="card" style="border-left:4px solid #B97A1F"><div class="ct">🆕 Por verificar ('+nuevas.length+')</div>'+nuevas.map(function(x){return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(128,128,128,.2);flex-wrap:wrap"><div style="flex:1;min-width:160px"><b style="font-size:13px">'+tnomA(x.t)+'</b><div style="font-size:11px;opacity:.6">'+(x.t.z||'')+' · por '+(x.t.conductor||'conductor')+'</div></div><button onclick="tVerif('+x.i+')" style="border:none;background:#2F7D4F;color:#fff;border-radius:9px;padding:8px 12px;font-size:11px;font-weight:800;cursor:pointer">✓ Verificar</button><button onclick="tCred('+x.i+')" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:9px;padding:8px 12px;font-size:11px;font-weight:800;cursor:pointer">💳 Habilitar crédito</button></div>'}).join('')+'</div>':'';
+ var _b='';try{_b=_rt()}catch(e){}return h+_b;
+};}
+window.tVerif=async function(i){var t=TIENDAS[i];t.verificada=true;t.nueva=false;await apiA('/tiendas/'+(t.id||i)+'/verificar',{},'POST');render();};
+window.tCred=async function(i){var t=TIENDAS[i];var lim=prompt('Límite de crédito para '+tnomA(t)+' (S/):',PARAMS_A.limite_credito);if(lim===null)return;t.cr=true;t.li=+lim||PARAMS_A.limite_credito;await apiA('/tiendas/'+(t.id||i)+'/credito',{habilitado:true,limite:t.li});render();alert('✓ Crédito habilitado: S/'+t.li);};
+
+/* ── Config: conexión + parámetros + costos ── */
+if(typeof rConfig==='function'){var _cf=rConfig;window.rConfig=function(){
+ var P=PARAMS_A;
+ var num=function(id,lbl,v){return '<div style="display:flex;align-items:center;gap:8px"><div style="flex:1;font-size:12px;font-weight:700">'+lbl+'</div><input type="number" id="'+id+'" value="'+v+'" style="width:90px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center"></div>'};
+ var costos=CATC.map(function(x){return num('co-'+x[0],x[1],P.costos[x[0]]||0)}).join('');
+ return '<div class="card" style="border-left:4px solid #1D4ED8"><div class="ct">🔌 Conexión al servidor</div>'
+ +'<input id="cx-url" placeholder="https://tu-servidor.up.railway.app" value="'+CFGA.API+'" style="width:100%;padding:11px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:8px">'
+ +'<input id="cx-clave" type="password" placeholder="Clave de administrador (ADMIN_PASS)" style="width:100%;padding:11px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:10px">'
+ +'<button onclick="connGuardar()" style="width:100%;padding:12px;border:none;border-radius:11px;background:#1D4ED8;color:#fff;font-weight:800;cursor:pointer">Guardar, probar y entrar</button>'
+ +'<div id="cx-est" style="font-size:11.5px;margin-top:8px;font-weight:700;opacity:.8">'+(CFGA.API?(CFGA.TOKEN?'✓ Conectado y autenticado':'URL guardada — falta la clave'):'Modo local (sin servidor)')+'</div></div>'
+ +'<div class="card"><div class="ct">⚙️ Parámetros del sistema</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px">'
+ +num('pa-lim','Límite de crédito S/',P.limite_credito)+num('pa-umb','Compra que reinicia repo S/',P.umbral_repo)+num('pa-rp','Si compra menos: resta X días',P.repo_resta_parcial!=null?P.repo_resta_parcial:2)
+ +num('pa-mar','Margen liquidación S/',P.margen_liq)+num('pa-vid','Vida útil (días)',P.vida_util)
+ +num('pa-deu','Deuda estancada (días)',P.deuda_dias)+num('pa-yap','Yape grande desde S/',P.yape_umbral)
+ +'</div><div class="ct" style="margin-top:14px">🏷️ Precio: ajuste por tipo de tienda (%)</div><div style="font-size:11px;opacity:.65;margin:2px 0 6px;line-height:1.5">Sobre el precio base del catálogo. Ej: mayorista −8 = 8% menos.</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px">'
+ +["bodega","minimarket","puesto","cafetería","mayorista","otro"].map(function(t){return num('pt-'+t,t,(P.precio_tipo&&P.precio_tipo[t])||0)}).join('')
+ +'</div><div class="ct" style="margin-top:14px">🏷️ Precio: ajuste por conductor (%)</div><div style="font-size:11px;opacity:.65;margin:2px 0 6px;line-height:1.5">Se multiplica con el de arriba. 0 = precio normal.</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px">'
+ +(USRS.filter(function(u){return u.activo}).map(function(u){return num('pc-'+u.usuario,u.nombre,(P.precio_conductor&&P.precio_conductor[u.usuario])||0)}).join('')||'<div style="font-size:11.5px;opacity:.6">Crea conductores primero.</div>')
+ +'</div><div class="ct" style="margin-top:14px">📍 Aviso de tienda duplicada</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px">'+num('pa-dup','Radio en metros',P.dup_radio_m||15)+'</div>'
+ +'<div class="ct" style="margin-top:14px">💸 Aviso de gastos altos</div><div style="font-size:11px;opacity:.65;margin:2px 0 6px;line-height:1.5">Suma de gastos que NO son combustible. Al pasarlo, te avisa.</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px">'+num('pa-tope','Tope S/ (sin combustible)',P.tope_gastos||350)+'</div>'
+ +'<div class="ct" style="margin-top:14px">😴 Tienda sin comprar</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px">'+num('pa-inac','Avisar tras X días',P.inactiva_dias||10)+'</div>'
+ +'<div class="ct" style="margin-top:14px">🏬 Almacén (Espinar)</div><div style="font-size:11px;opacity:.65;margin:2px 0 6px;line-height:1.5">Donde el conductor deja el sobrante al terminar el viaje. Aparece en su app al liquidar.</div>'
+ +'<input id="al-nom" value="'+((P.almacen&&P.almacen.nombre)||'')+'" placeholder="Nombre (ej: Depósito de don Julio)" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:8px">'
+ +'<input id="al-ref" value="'+((P.almacen&&P.almacen.ref)||'')+'" placeholder="Referencia / dirección" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:8px">'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><input id="al-lat" value="'+((P.almacen&&P.almacen.lat)||'')+'" placeholder="lat (opcional)" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><input id="al-lon" value="'+((P.almacen&&P.almacen.lon)||'')+'" placeholder="lon (opcional)" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"></div>'
+ +'<div class="ct" style="margin-top:14px">💰 Costo de compra por categoría</div>'+'<div style="font-size:11px;opacity:.65;margin:2px 0 8px;line-height:1.5">Lo que TÚ pagas por unidad al proveedor (promedio de la categoría). Con esto los informes calculan tu UTILIDAD real (venta − costo) y el remate por vida útil sabe hasta dónde bajar sin perder. Los conductores nunca lo ven.</div>'+'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px">'+costos+'</div>'
+ +'<button onclick="paGuardar()" style="width:100%;margin-top:12px;padding:12px;border:none;border-radius:11px;background:#20241E;color:#fff;font-weight:800;cursor:pointer">Guardar parámetros</button>'
+ +'<div style="font-size:11px;opacity:.65;margin-top:8px;line-height:1.5">Con servidor conectado se guardan en la base de datos y las apps de los conductores los reciben al sincronizar. Los precios producto por producto se editan en Supabase → tabla <b>catalogo</b>.</div></div>'
+ +(function(){try{return _cf()}catch(e){return ''}})();
+};}
+window.connGuardar=async function(){
+ var url=document.getElementById('cx-url').value.trim().replace(/\/+$/,''),cl=document.getElementById('cx-clave').value;
+ CFGA.API=url;localStorage.setItem('v5a_api',url);
+ if(!url){CFGA.TOKEN='';localStorage.setItem('v5a_token','');alert('Modo local activado.');render();return;}
+ var h=await apiA('/health');
+ if(!h||!h.ok){document.getElementById('cx-est').textContent='✗ El servidor no responde en esa URL';return alert('No responde. Revisa la URL exacta de Railway.');}
+ if(cl){var r=await apiA('/auth/admin',{clave:cl});if(r&&r.ok){CFGA.TOKEN=r.token;localStorage.setItem('v5a_token',r.token);}else{return alert('Clave de administrador incorrecta.');}}
+ alert('✓ Conectado (v'+(h.v||'?')+')'+(CFGA.TOKEN?' y autenticado':''));
+ cargarAdm();render();
+};
+window.paGuardar=async function(){
+ var g=function(id){return +document.getElementById(id).value||0};
+ PARAMS_A={limite_credito:g('pa-lim'),umbral_repo:g('pa-umb')||40,repo_resta_parcial:g('pa-rp'),margen_liq:g('pa-mar'),vida_util:g('pa-vid'),deuda_dias:g('pa-deu'),yape_umbral:g('pa-yap'),costos:{}};
+ CATC.forEach(function(x){PARAMS_A.costos[x[0]]=g('co-'+x[0])});
+ PARAMS_A.dup_radio_m=g('pa-dup')||15;
+ PARAMS_A.tope_gastos=g('pa-tope')||350;
+ PARAMS_A.inactiva_dias=g('pa-inac')||10;
+ var gv=function(id){var e=document.getElementById(id);return e?e.value.trim():''};
+ PARAMS_A.almacen={nombre:gv('al-nom'),ref:gv('al-ref'),lat:parseFloat(gv('al-lat'))||null,lon:parseFloat(gv('al-lon'))||null};
+ PARAMS_A.precio_tipo={};["bodega","minimarket","puesto","cafetería","mayorista","otro"].forEach(function(t){PARAMS_A.precio_tipo[t]=g('pt-'+t)});
+ PARAMS_A.precio_conductor={};USRS.filter(function(u){return u.activo}).forEach(function(u){PARAMS_A.precio_conductor[u.usuario]=g('pc-'+u.usuario)});
+ savePA();
+ var r=await apiA('/admin/params',PARAMS_A);
+ alert(r&&r.ok?'✓ Guardado en el servidor — las apps lo reciben al sincronizar':'Guardado en este equipo'+(CFGA.API?' — el servidor no respondió':' (modo local)'));
+};
+window.cargarAdm=async function(){
+ if(!CFGA.API||!CFGA.TOKEN)return;
+ var r=await apiA('/admin/datos');
+ if(!r||!r.ok)return;
+ if(r.usuarios&&r.usuarios.length){USRS.length=0;r.usuarios.forEach(function(u){USRS.push(u)});saveU();}
+ if(r.eventos)SERV_EVT=r.eventos;
+ if(r.tiendas&&r.tiendas.length&&typeof TIENDAS!=='undefined'){TIENDAS.length=0;r.tiendas.forEach(function(t){TIENDAS.push(t)});}
+ if(r.pedidos_hoy)PEDIDOS_ADM=r.pedidos_hoy;
+ if(r.params){Object.assign(PARAMS_A,r.params);savePA();}
+ render();
+};
+/* chip de estado */
+var ch=document.createElement('button');ch.id='v5-chip';
+ch.style.cssText='position:fixed;left:12px;bottom:12px;z-index:999;border:none;border-radius:20px;padding:7px 12px;font-size:11px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25);background:'+(CFGA.API?'#123B24':'#3A2F14')+';color:'+(CFGA.API?'#7BD8A0':'#E8C36A');
+ch.textContent=CFGA.API?'● Servidor conectado':'● Modo local — toca para conectar';
+ch.onclick=function(){ir('config')};document.body.appendChild(ch);
+if(CFGA.API&&CFGA.TOKEN)cargarAdm();
+if(CFGA.API&&CFGA.TOKEN)setTimeout(cargarBoletas,700);
+if(typeof nav==='function')nav();if(typeof render==='function')render();
+})();
+</script>
+
+<script id="v5geoA">
+(function(){
+/* ═══ GEOCERCAS: dibujador de zonas de venta (params.zonas) ═══ */
+PARAMS_A.zonas=PARAMS_A.zonas||[];
+var ZPAL=['#B97A1F','#1D4ED8','#2F7D4F','#7C5CBF','#B23B2E','#0E7490'];
+var Z_DRAW=false,Z_TEST=false,Z_PTS=[];
+window.pip=function(lat,lon,poly){var d=false;for(var i=0,j=poly.length-1;i<poly.length;j=i++){var yi=poly[i][0],xi=poly[i][1],yj=poly[j][0],xj=poly[j][1];var inter=((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi)+xi);if(inter)d=!d;}return d;};
+function zonasCard(){
+ var filas=PARAMS_A.zonas.length?PARAMS_A.zonas.map(function(z,i){return '<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid rgba(128,128,128,.2)"><span style="width:12px;height:12px;border-radius:3px;background:'+z.color+';flex-shrink:0"></span><div style="flex:1;font-size:12.5px"><b>'+z.nombre+'</b> <span style="opacity:.6">· '+z.poligono.length+' puntos'+(z.conductor?' · 🚚 '+z.conductor:'')+(z.ajuste?' · '+(z.ajuste>0?'+':'')+z.ajuste+'%':'')+'</span></div><button onclick="zBorrar('+i+')" style="border:none;background:none;color:#B23B2E;font-weight:800;cursor:pointer;font-size:13px">🗑</button></div>'}).join(''):'<div style="font-size:12px;opacity:.6;padding:6px 0">Aún no hay zonas. Dibuja la primera.</div>';
+ return '<div class="card" style="border-left:4px solid #B97A1F"><div class="ct">🗺️ Zonas de venta (geocercas)</div>'
+ +filas
+ +'<div id="zmap" style="height:340px;border-radius:12px;background:#E8E6DC;margin:10px 0"></div>'
+ +'<div id="z-ctl" style="display:none;margin-bottom:8px"><div style="display:grid;grid-template-columns:1fr 120px;gap:8px;margin-bottom:8px"><input id="z-nom" placeholder="Nombre (ej: Espinar centro)" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><select id="z-cond" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><option value="">— sin conductor —</option>'+USRS.filter(function(u){return u.activo}).map(function(u){return '<option value="'+u.usuario+'">'+u.nombre+'</option>'}).join('')+'</select><input id="z-adj" type="number" placeholder="% precio" title="Ajuste de precios en esta zona (ej: 8 = +8%)" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"></div><div style="display:flex;gap:8px"><button onclick="zCancelar()" style="flex:1;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:10px;padding:10px;font-weight:800;cursor:pointer">✕ Cancelar</button><button onclick="zGuardar()" style="flex:1.3;border:none;background:#2F7D4F;color:#fff;border-radius:10px;padding:10px;font-weight:800;cursor:pointer">✓ Guardar zona</button></div></div>'
+ +'<div style="display:flex;gap:8px"><button id="z-btn" onclick="zIniciar()" style="flex:1.3;border:none;background:#B97A1F;color:#fff;border-radius:11px;padding:11px;font-weight:800;font-size:12.5px;cursor:pointer">✏️ Dibujar zona nueva</button><button onclick="zTestTog(this)" style="flex:1;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12.5px;cursor:pointer">📍 Probar un punto</button></div>'
+ +'<div id="z-est" style="font-size:11.5px;margin-top:8px;font-weight:700;opacity:.8">Toca "Dibujar" y haz clic sobre el mapa siguiendo el contorno de tu zona (deja 1–2 cuadras de margen por el error del GPS).</div>'
+ +'<div style="font-size:11px;opacity:.6;margin-top:6px;line-height:1.5">Se guarda en <b>params</b> y las apps de los conductores la reciben al sincronizar: aviso al registrar tienda fuera, evento si venden fuera, y ajuste % de precios por zona.</div></div>';
+}
+if(typeof rMapa==='function'){var _rmp=rMapa;window.rMapa=function(){var _b='';try{_b=_rmp()}catch(e){}return _b+zonasCard();};}
+window.zmapInit=function(){
+ var dv=document.getElementById('zmap');if(!dv)return;
+ if(typeof L==='undefined'){dv.innerHTML='<div style="padding:20px;font-size:12px;color:#8A6410">El mapa necesita internet (Leaflet). Recarga con conexión.</div>';return;}
+ if(window._zm){try{window._zm.remove()}catch(e){}}
+ var m=window._zm=L.map('zmap').setView([-14.7924,-71.4198],13);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(m);
+ m._zlg=L.layerGroup().addTo(m);m._tmp=L.layerGroup().addTo(m);
+ m.on('click',function(e){
+  if(Z_DRAW){Z_PTS.push([+e.latlng.lat.toFixed(6),+e.latlng.lng.toFixed(6)]);zPreview();zEst(Z_PTS.length+' punto(s). Mínimo 3 para guardar.');}
+  else if(Z_TEST){var hit=null;PARAMS_A.zonas.forEach(function(z){if(!hit&&pip(e.latlng.lat,e.latlng.lng,z.poligono))hit=z;});zEst(hit?('📍 DENTRO de "'+hit.nombre+'"'+(hit.ajuste?' (precios '+(hit.ajuste>0?'+':'')+hit.ajuste+'%)':'')):'📍 FUERA de todas las zonas');}
+ });
+ zPintar();
+ setTimeout(function(){try{m.invalidateSize()}catch(e){}},150);
+};
+function zEst(t){var e=document.getElementById('z-est');if(e)e.textContent=t;}
+function zPreview(){
+ var m=window._zm;if(!m)return;m._tmp.clearLayers();
+ Z_PTS.forEach(function(p,k){L.circleMarker(p,{radius:5,color:'#B23B2E',fillOpacity:1}).addTo(m._tmp);});
+ if(Z_PTS.length>1)L.polyline(Z_PTS,{color:'#B23B2E',dashArray:'6 5',weight:2.5}).addTo(m._tmp);
+}
+window.zPintar=function(){
+ var m=window._zm;if(!m)return;m._zlg.clearLayers();
+ PARAMS_A.zonas.forEach(function(z){L.polygon(z.poligono,{color:z.color,weight:2.5,fillOpacity:.08}).bindTooltip(z.nombre+(z.ajuste?' ('+(z.ajuste>0?'+':'')+z.ajuste+'%)':''),{permanent:true,direction:'center'}).addTo(m._zlg);});
+};
+window.zIniciar=function(){Z_DRAW=true;Z_TEST=false;Z_PTS=[];var c1=document.getElementById('z-ctl');if(c1)c1.style.display='block';var b=document.getElementById('z-btn');if(b)b.style.opacity='.4';zPreview();zEst('Modo dibujo: haz clic sobre el mapa, punto por punto, alrededor de tu zona.');};
+window.zCancelar=function(){Z_DRAW=false;Z_PTS=[];if(window._zm)window._zm._tmp.clearLayers();var c1=document.getElementById('z-ctl');if(c1)c1.style.display='none';var b=document.getElementById('z-btn');if(b)b.style.opacity='1';zEst('Dibujo cancelado.');};
+window.zGuardar=async function(){
+ var nom=(document.getElementById('z-nom').value||'').trim();
+ if(!nom)return alert('Ponle nombre a la zona (ej: Espinar centro).');
+ if(Z_PTS.length<3)return alert('Marca al menos 3 puntos sobre el mapa.');
+ var adj=+document.getElementById('z-adj').value||0;
+ PARAMS_A.zonas.push({id:Date.now(),nombre:nom,ajuste:adj,conductor:(document.getElementById('z-cond')||{}).value||null,color:ZPAL[PARAMS_A.zonas.length%ZPAL.length],poligono:Z_PTS.slice()});
+ savePA();
+ var r=await apiA('/admin/params',PARAMS_A);
+ Z_DRAW=false;Z_PTS=[];if(window._zm)window._zm._tmp.clearLayers();
+ render();
+ alert(r&&r.ok?'✓ Zona guardada en el servidor — los conductores la reciben al sincronizar.':'Zona guardada en este equipo'+(CFGA.API?' — el servidor no respondió, reintenta con "Guardar parámetros"':' (modo local)'));
+};
+window.zBorrar=async function(i){
+ if(!confirm('¿Borrar la zona "'+PARAMS_A.zonas[i].nombre+'"?'))return;
+ PARAMS_A.zonas.splice(i,1);savePA();await apiA('/admin/params',PARAMS_A);render();
+};
+window.zTestTog=function(el){Z_TEST=!Z_TEST;Z_DRAW=false;el.style.background=Z_TEST?'#1D4ED8':'none';el.style.color=Z_TEST?'#fff':'inherit';zEst(Z_TEST?'Modo prueba: haz clic en cualquier punto del mapa para ver si cae dentro o fuera.':'Prueba desactivada.');};
+})();
+</script>
+
+<script id="v5tienda">
+(function(){
+/* ═══ Registrar tienda a mano + asignar a conductor (entra a su ruta de HOY) ═══ */
+function selConds(id,ph){return '<select id="'+id+'" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><option value="">'+ph+'</option>'+USRS.filter(function(u){return u.activo}).map(function(u){return '<option value="'+u.usuario+'">'+u.nombre+' ('+u.tipo+')</option>'}).join('')+'</select>';}
+function atCard(){
+ var tOpts=(typeof TIENDAS!=='undefined'?TIENDAS:[]).map(function(t,i){return '<option value="'+i+'">'+tnomA(t)+(t.z?' · '+t.z:'')+'</option>'}).join('');
+ return '<div class="card" style="border-left:4px solid #1D4ED8"><div class="ct">➕ Registrar tienda a mano</div>'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+ +'<input id="at-n" placeholder="Nombre de la tienda *" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'
+ +'<input id="at-z" placeholder="Zona" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'
+ +'<input id="at-d" placeholder="Dueño/encargado" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'
+ +'<input id="at-tel" placeholder="Teléfono" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'
+ +'<select id="at-tp" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><option value="bodega">bodega</option><option value="minimarket">minimarket</option><option value="puesto">puesto</option><option value="cafetería">cafetería</option><option value="otro">otro</option></select>'
+ +selConds('at-c','— sin asignar (visible para todos) —')
+ +'</div>'
+ +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;opacity:.6;margin:2px 0 4px">Horario de atención (opcional)</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px"><input id="at-hi" type="time" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><input id="at-hf" type="time" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><input id="at-dn" placeholder="No atiende (domingo)" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"></div>'
+ +'<div style="font-size:11px;opacity:.65;margin-bottom:5px">📍 Ubicación: haz clic en el mapa o arrastra el pin (o escribe lat/lon).</div>'
+ +'<div id="at-map" style="height:240px;border-radius:12px;background:#E8E6DC;margin-bottom:6px"></div>'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'
+ +'<input id="at-lat" placeholder="lat (ej: -14.7924)" style="padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-family:monospace;font-size:12px">'
+ +'<input id="at-lon" placeholder="lon (ej: -71.4198)" style="padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-family:monospace;font-size:12px">'
+ +'</div>'
+ +'<button onclick="atGuardar()" style="width:100%;padding:12px;border:none;border-radius:11px;background:#1D4ED8;color:#fff;font-weight:800;cursor:pointer">Guardar tienda'+(' — si eliges conductor, le llega 🔔 y entra en su ruta de HOY')+'</button>'
+ +'<div style="border-top:1px solid rgba(128,128,128,.2);margin:14px 0 10px"></div>'
+ +'<div class="ct" style="margin-bottom:8px">→ Asignar tienda existente a un conductor</div>'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+ +'<select id="at-et" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'+(tOpts||'<option value="">— sin tiendas aún —</option>')+'</select>'
+ +selConds('at-ec','— elige conductor —')
+ +'</div>'
+ +'<button onclick="atAsignar()" style="width:100%;padding:11px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;font-weight:800;cursor:pointer">Asignar — entra en su ruta de HOY</button>'
+ +'<div style="font-size:11px;opacity:.6;margin-top:8px;line-height:1.5">Asignar es una directiva de ruta del día, no exclusividad: la tienda sigue visible para todos (por eso existe el 👁 "visitada hoy por otro"). El conductor la recibe en su próxima sincronización (máx. 5 min con la app abierta).</div>'
+ +'</div>';
+}
+window.atCardG=atCard;window.selCondsG=selConds;
+window.atMapInit=function(){
+ var dv=document.getElementById('at-map');if(!dv)return;
+ if(typeof L==='undefined'){dv.innerHTML='<div style="padding:20px;font-size:12px;color:#8A6410">El mapa necesita internet — puedes escribir lat/lon a mano.</div>';return;}
+ if(window._am2){try{window._am2.remove()}catch(e){}}
+ var c0=(PARAMS_A.zonas&&PARAMS_A.zonas[0]&&PARAMS_A.zonas[0].poligono[0])||[-14.7924,-71.4198];
+ var m=window._am2=L.map('at-map').setView(c0,14);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(m);
+ (PARAMS_A.zonas||[]).forEach(function(z){try{L.polygon(z.poligono,{color:z.color,weight:2,fillOpacity:.06,dashArray:'7 6'}).addTo(m);}catch(e){}});
+ var mk=window._amk=L.marker(c0,{draggable:true}).addTo(m);
+ function upd(ll){document.getElementById('at-lat').value=(+ll.lat).toFixed(6);document.getElementById('at-lon').value=(+ll.lng).toFixed(6);}
+ upd({lat:c0[0],lng:c0[1]});
+ mk.on('dragend',function(){upd(mk.getLatLng())});
+ m.on('click',function(e){mk.setLatLng(e.latlng);upd(e.latlng);});
+ setTimeout(function(){try{m.invalidateSize()}catch(e){}},150);
+};
+window.atGuardar=async function(){
+ var g=function(id){return (document.getElementById(id).value||'').trim()};
+ var n=g('at-n');if(!n)return alert('El nombre es obligatorio.');
+ var lat=parseFloat(g('at-lat')),lon=parseFloat(g('at-lon'));
+ if(isNaN(lat)||isNaN(lon)){lat=null;lon=null;}
+ var cond=g('at-c');
+ var pay={n:n,z:g('at-z'),tp:g('at-tp')||'bodega',d:g('at-d'),tel:g('at-tel').replace(/\D/g,''),lat:lat,lon:lon,conductor:cond||null,h_ini:g('at-hi'),h_fin:g('at-hf'),dias_no:g('at-dn')};
+ if(typeof TIENDAS!=='undefined')TIENDAS.push({id:'loc'+Date.now(),n:n,z:pay.z,due:pay.d,tel:pay.tel,lat:lat,lon:lon,d:3,vip:false,sa:0,cr:false,li:0,act:true,nueva:false,verificada:true,falta:[],mov:[],conductor_asig:cond||null});
+ var r=await apiA('/admin/tiendas',pay);
+ render();
+ if(r&&r.ok)alert('✓ Tienda guardada en el servidor'+(cond?'. Aviso 🔔 enviado a @'+cond+' — entra en su ruta de HOY.':'.'));
+ else alert('Tienda guardada en este equipo'+(CFGA.API?' — el servidor no respondió, reintenta':' (modo local)')+(cond?'. Ojo: la ASIGNACIÓN solo viaja con servidor conectado.':''));
+};
+window.atAsignar=async function(){
+ var i=document.getElementById('at-et').value,cond=document.getElementById('at-ec').value;
+ if(i===''||!cond)return alert('Elige tienda y conductor.');
+ var t=TIENDAS[+i];t.conductor_asig=cond;
+ if(String(t.id).indexOf('loc')===0&&CFGA.API)return alert('Esta tienda aún no existe en el servidor (se creó en modo local). Regístrala con servidor conectado para poder asignarla.');
+ var r=await apiA('/admin/tiendas/'+t.id+'/asignar',{conductor:cond});
+ if(r&&r.ok)alert('✓ '+tnomA(t)+' asignada a @'+cond+' — le llega 🔔 y entra en su ruta de HOY.');
+ else alert(CFGA.API?'El servidor no respondió — reintenta.':'Anotado en este equipo (modo local): la asignación real viaja por el servidor.');
+ render();
+};
+})();
+</script>
+
+<script id="v5cat">window.CATA=[
+  {id:'panes',nom:'Panes x24 unidades',emoji:'🍞',precio:5.50,prods:[
+    {id:'p01',n:'Biscocho Chancay'},{id:'p02',n:'Colizas'},{id:'p03',n:'Integrales'},{id:'p04',n:'Pan Caracol'},{id:'p05',n:'Pan Queso'},{id:'p06',n:'Pan Coco'},{id:'p07',n:'Pan Carioca'},{id:'p08',n:'Petipanes'},{id:'p09',n:'Chocopetipanes'},{id:'p10',n:'Yema x6'},{id:'p11',n:'Yema x12'},{id:'p12',n:'Biscocho Canela'}]},
+  {id:'sm',nom:'Pasteles San Miguel x6',emoji:'🥐',precio:7.00,prods:[
+    {id:'sm01',n:'Chocochispas'},{id:'sm02',n:'Mermelada SM'},{id:'sm03',n:'Especial Frutado'},{id:'sm04',n:'Alfajor Coco'},{id:'sm05',n:'Alfajor Maní'},{id:'sm06',n:'Alfajor Maicena'},{id:'sm07',n:'Alfajor Impalpable'},{id:'sm08',n:'Lenguas Vainilla'},{id:'sm09',n:'Platillos SM'},{id:'sm10',n:'Cachos'},{id:'sm11',n:'Queque Marmolado'},{id:'sm12',n:'Muffin Vainilla SM'},{id:'sm13',n:'Muffin Choco SM'},{id:'sm14',n:'Tajada Choco SM'},{id:'sm15',n:'Tajada Vainilla SM'},{id:'sm16',n:'Tajada Combinada'},{id:'sm17',n:'Empanada Queso'},{id:'sm18',n:'Piononos SM'},{id:'sm19',n:'Mil Hojas'},{id:'sm20',n:'Oruga'}]},
+  {id:'bianka',nom:'Pasteles Bianka x6',emoji:'🧁',precio:4.70,prods:[
+    {id:'bk01',n:'Mermelada Bianka'},{id:'bk02',n:'Chocochispa Bianka'},{id:'bk03',n:'Especial Económico'},{id:'bk04',n:'Platillo Bianka'},{id:'bk05',n:'Cachito Bianka'},{id:'bk06',n:'Alfajor Coco Bk'},{id:'bk07',n:'Alfajor Maní Bk'},{id:'bk08',n:'Queque Bianka'},{id:'bk09',n:'Empanada Bianka'},{id:'bk10',n:'Pionono Bianka'},{id:'bk11',n:'Muffin Vainilla Bk'},{id:'bk12',n:'Muffin Choco Bk'},{id:'bk13',n:'Tajada Choco Bk'},{id:'bk14',n:'Tajada Vainilla Bk'},{id:'bk15',n:'Tajada Combinada Bk'},{id:'bk16',n:'Alfajor Impalpable Bk'},{id:'bk17',n:'Donas x6 Bianka'},{id:'bk18',n:'Quequepack Bianka'},{id:'bk19',n:'Lengua Chocolate'},{id:'bk20',n:'Lengua Vainilla'}]},
+  {id:'chifones',nom:'Chifones',emoji:'🎂',precio:18.00,prods:[
+    {id:'c01',n:'Chifón Vainilla'},{id:'c02',n:'Chifón Chocolate'},{id:'c03',n:'Chifón Naranja'},{id:'c04',n:'Chifón con Chispa'}]},
+  {id:'tortas',nom:'Tortas Decoradas',emoji:'🍰',precio:35.00,prods:[
+    {id:'td01',n:'Torta Dec. Vainilla'},{id:'td02',n:'Torta Helada'},{id:'td03',n:'Torta Dec. Chocolate'},{id:'td04',n:'Torta Dec. Mocca'},{id:'td05',n:'Torta Dec. Domino'}]},
+  {id:'molde',nom:'Molde / Tostadas',emoji:'🍞',precio:13.00,prods:[
+    {id:'m01',n:'Pan Molde x6'},{id:'m02',n:'Pan Molde Integral x6'}]},
+  {id:'especiales',nom:'Especiales y Taperes',emoji:'🍩',precio:9.00,prods:[
+    {id:'e01',n:'Donas x7'},{id:'e02',n:'Empanaditas x12'},{id:'e03',n:'Chocogalleta x30'},{id:'e04',n:'Chocogalleta Choco'},{id:'e05',n:'Pionono Jalea'},{id:'e06',n:'Alfajorcillo SM'}]},
+  {id:'queques',nom:'Otros',emoji:'🧺',precio:0,prods:[
+    {id:'qe01',n:'Queque Estrella'},
+    {id:'ot01',n:'Corbatas'},
+    {id:'ot02',n:'Alfajores de Miel'}]},
+];</script>
+<script id="v5ux">
+(function(){
+/* ═══ Selector de productos por catálogo (reutilizable: pedidos y cargas) ═══ */
+window._PK={};
+function pkSt(p){if(!_PK[p])_PK[p]={cat:0,items:{}};return _PK[p];}
+window.pkReset=function(p){_PK[p]={cat:0,items:{}};};
+window.pickerHTML=function(p){
+ return '<div id="'+p+'-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>'
+ +'<div id="'+p+'-prods" style="max-height:260px;overflow:auto;border:1.5px solid rgba(128,128,128,.25);border-radius:12px;padding:4px 10px;margin-bottom:8px"></div>'
+ +'<div id="'+p+'-res" style="margin-bottom:8px"></div>';
+};
+window.pkPinta=function(p){
+ var st=pkSt(p);
+ var ch=document.getElementById(p+'-chips');if(!ch)return;
+ ch.innerHTML=CATA.map(function(c,i){var on=i===st.cat;return '<button onclick="pkCat(\''+p+'\','+i+')" style="padding:7px 11px;border-radius:16px;border:1.5px solid '+(on?'#1D4ED8':'rgba(128,128,128,.35)')+';background:'+(on?'rgba(29,78,216,.12)':'none')+';color:'+(on?'#1D4ED8':'inherit')+';font-size:11.5px;font-weight:800;cursor:pointer">'+c.emoji+' '+c.nom.split(' x')[0]+'</button>'}).join('');
+ var cat=CATA[st.cat];
+ document.getElementById(p+'-prods').innerHTML='<div style="font-size:10.5px;opacity:.55;padding:6px 0 2px">'+cat.nom+' · S/'+cat.precio.toFixed(2)+' c/u</div>'+cat.prods.map(function(pr){
+  var q=(st.items[pr.id]&&st.items[pr.id].c)||0;
+  return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(128,128,128,.15)"><div style="flex:1;font-size:12.5px;font-weight:'+(q?'800':'500')+'">'+pr.n+'</div>'
+  +'<button onclick="pkAdd(\''+p+'\',\''+pr.id+'\',-1)" style="width:30px;height:30px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-weight:800;cursor:pointer">−</button>'
+  +'<span style="min-width:26px;text-align:center;font-weight:800;font-size:13px;color:'+(q?'#1D4ED8':'inherit')+'">'+q+'</span>'
+  +'<button onclick="pkAdd(\''+p+'\',\''+pr.id+'\',1)" style="width:30px;height:30px;border-radius:9px;border:1.5px solid #1D4ED8;background:rgba(29,78,216,.12);color:#1D4ED8;font-weight:800;cursor:pointer">+</button></div>';
+ }).join('');
+ var it=pkItems(p),res=document.getElementById(p+'-res');
+ if(!it.length){res.innerHTML='<div style="font-size:12px;opacity:.6;padding:6px 2px">Aún sin productos — toca + en los que lleva.</div>';return;}
+ var grupos={};it.forEach(function(x){(grupos[x.cat]=grupos[x.cat]||[]).push(x)});
+ var tot=0,uni=0,h='<div style="border:1.5px solid rgba(128,128,128,.25);border-radius:12px;padding:8px 10px">';
+ CATA.forEach(function(c){var g=grupos[c.id];if(!g)return;var sub=0;
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;background:rgba(128,128,128,.12);border-radius:8px;padding:6px 9px;margin-top:6px"><b style="font-size:11.5px">'+c.emoji+' '+c.nom+'</b><span style="font-size:10.5px;opacity:.7">S/'+c.precio.toFixed(2)+' c/u</span></div>';
+  g.forEach(function(x){var sx=x.c*c.precio;sub+=sx;uni+=x.c;
+   h+='<div style="display:flex;align-items:center;gap:7px;padding:6px 2px;border-bottom:1px solid rgba(128,128,128,.14)"><div style="flex:1;font-size:12px">'+x.n+'</div>'
+   +'<button onclick="pkAdd(\''+p+'\',\''+x.id+'\',-1)" style="width:26px;height:26px;border-radius:8px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-weight:800;cursor:pointer">−</button>'
+   +'<b style="min-width:24px;text-align:center;font-size:12.5px;color:#1D4ED8">'+x.c+'</b>'
+   +'<button onclick="pkAdd(\''+p+'\',\''+x.id+'\',1)" style="width:26px;height:26px;border-radius:8px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-weight:800;cursor:pointer">+</button>'
+   +'<span style="min-width:56px;text-align:right;font-size:11.5px;font-weight:700;opacity:.85">S/'+sx.toFixed(2)+'</span>'
+   +'<button onclick="pkDel(\''+p+'\',\''+x.id+'\')" title="Quitar" style="border:none;background:none;color:#B23B2E;font-weight:800;cursor:pointer;font-size:13px">✕</button></div>';
+  });
+  tot+=sub;
+  h+='<div style="text-align:right;font-size:10.5px;font-weight:800;opacity:.7;padding:3px 2px">Subtotal: S/'+sub.toFixed(2)+'</div>';
+ });
+ h+='<div style="display:flex;justify-content:space-between;padding:9px 2px 2px;font-weight:900;font-size:13px;border-top:2px solid rgba(128,128,128,.3);margin-top:4px"><span>'+it.length+' producto(s) · '+uni+' unid.</span><span>S/'+tot.toFixed(2)+'</span></div></div>';
+ res.innerHTML=h;
+};
+window.pkCat=function(p,i){pkSt(p).cat=i;pkPinta(p);};
+window.pkAdd=function(p,id,d){
+ var st=pkSt(p),pr=null,cat=null;
+ CATA.forEach(function(c){var f=c.prods.find(function(x){return x.id===id});if(f){pr=f;cat=c;}});
+ if(!pr)return;
+ var cur=st.items[id]?st.items[id].c:0;var nv=Math.max(0,cur+d);
+ if(nv===0)delete st.items[id];else st.items[id]={id:id,n:pr.n,c:nv,cat:cat.id};
+ pkPinta(p);
+};
+window.pkDel=function(p,id){delete pkSt(p).items[id];pkPinta(p);};
+window.pkItems=function(p){var st=pkSt(p);return Object.keys(st.items).map(function(k){return st.items[k]});};
+
+/* ═══ PEDIDOS WHATSAPP — bien ejecutado: etiquetas claras + catálogo real ═══ */
+window.rPedidos=function(){
+ var hayT=(typeof TIENDAS!=='undefined')&&TIENDAS.length,hayC=USRS.filter(function(u){return u.activo}).length;
+ var tOpts=hayT?TIENDAS.map(function(t,i){return '<option value="'+i+'">'+tnomA(t)+(t.z?' · '+t.z:'')+'</option>'}).join(''):'';
+ var lbl=function(t){return '<div style="font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;opacity:.6;margin:2px 0 4px">'+t+'</div>'};
+ return '<div class="card"><div class="ct">📩 Registrar pedido recibido por WhatsApp</div>'
+ +'<div style="font-size:12px;opacity:.7;margin-bottom:10px;line-height:1.55">La tienda te escribe a TU WhatsApp; tú lo registras aquí y le llega al conductor con el detalle exacto. Tú decides todo — aquí no interviene ninguna IA.</div>'
+ +(!hayT?'<div style="background:rgba(217,163,47,.12);border:1px solid rgba(217,163,47,.35);color:#B97A1F;border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;margin-bottom:8px">Aún no hay tiendas: regístralas en <b>Mapa y rutas → ➕ Registrar tienda</b> (o espera a que un conductor registre en campo).</div>':'')
+ +(!hayC?'<div style="background:rgba(217,163,47,.12);border:1px solid rgba(217,163,47,.35);color:#B97A1F;border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;margin-bottom:8px">Aún no hay conductores: créalos en <b>Conductores → ➕ Crear usuario</b>.</div>':'')
+ +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+ +'<div>'+lbl('¿Qué tienda pidió?')+(hayT?'<select id="pd-t" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'+tOpts+'</select>':'<div style="font-size:12px;opacity:.5;padding:10px 0">—</div>')+'</div>'
+ +'<div>'+lbl('¿Qué conductor lo atiende?')+(hayC?selCondsG('pd-c','— elige conductor —'):'<div style="font-size:12px;opacity:.5;padding:10px 0">—</div>')+'</div></div>'
+ +lbl('Productos del pedido (toca + como en la app)')
+ +pickerHTML('pd')
+ +'<input id="pd-nota" placeholder="Nota (ej: para antes de las 11)" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:10px">'
+ +'<button onclick="pdGuardar()" style="width:100%;padding:12px;border:none;border-radius:11px;background:#1D4ED8;color:#fff;font-weight:800;cursor:pointer">Registrar y enviar al conductor</button></div>'
+ +'<div class="card"><div class="ct">Pedidos de hoy ('+PEDIDOS_ADM.length+')</div>'+(PEDIDOS_ADM.length?PEDIDOS_ADM.map(function(p){return '<div style="padding:9px 0;border-bottom:1px solid rgba(128,128,128,.2)"><b style="font-size:13px">'+p.tienda+'</b> → '+p.conductor+' <span style="font-size:10px;opacity:.6">'+p.hora+'</span><div style="font-size:12px;color:#1D4ED8;margin-top:2px">'+p.items.map(function(x){return x.c+' '+x.p}).join(', ')+'</div>'+(p.nota?'<div style="font-size:11px;opacity:.6">📝 '+p.nota+'</div>':'')+'</div>'}).join(''):'<div style="font-size:12px;opacity:.6;padding:8px 0">Ninguno registrado hoy.</div>')+'</div>';
+};
+window.pdGuardar=async function(){
+ if(!(typeof TIENDAS!=='undefined'&&TIENDAS.length))return alert('Aún no hay tiendas registradas.');
+ var cs=document.getElementById('pd-c');if(!cs)return alert('Aún no hay conductores creados.');
+ var cond=cs.value;if(!cond)return alert('Elige el conductor que atenderá el pedido.');
+ var it=pkItems('pd');if(!it.length)return alert('Añade al menos un producto con el botón +.');
+ var ti=TIENDAS[+document.getElementById('pd-t').value]||{};
+ var p={tienda:tnomA(ti),conductor:cond,items:it.map(function(x){return{p:x.n,c:x.c}}),nota:(document.getElementById('pd-nota').value||'').trim(),hora:new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})};
+ PEDIDOS_ADM.unshift(p);pkReset('pd');
+ var r=await apiA('/pedidos',p);
+ render();
+ alert(r&&r.ok?'✓ Pedido enviado — le aparece al conductor en Inicio con el detalle.':'Pedido registrado'+(CFGA.API?' — el servidor no respondió (¿pusiste la clave admin en Configuración?)':' (modo local)'));
+};
+
+/* ═══ MAPA Y RUTAS — etiquetas funcionales (alerta por defecto) + registrar tienda ═══ */
+window.FMAPA='alerta';
+function pasaM(t){
+ if(t.act===false)return FMAPA==='inactivas';
+ switch(FMAPA){case 'alerta':return (t.d||0)>=5;case 'limite':return Number(t.sa||0)>=Number(t.li||PARAMS_A.limite_credito||230)&&Number(t.sa||0)>0;case 'vip':return !!t.vip;case 'nuevas':return !!t.nueva||t.verificada===false;case 'inactivas':return false;default:return true;}
+}
+var _rmp3=window.rMapa;
+window.rMapa=function(){
+ var prev='';try{prev=_rmp3()}catch(e){}
+ var zi=prev.indexOf('🗺️ Zonas de venta');
+ var zonas=zi>=0?prev.slice(prev.lastIndexOf('<di'+'v class="card"',zi)):'';
+ var chips=[['alerta','⚠ En alerta (≥5d)'],['nuevas','🆕 Nuevas'],['limite','💳 Al límite'],['vip','★ VIP'],['todas','Todas']].map(function(o){var on=FMAPA===o[0];return '<button onclick="fMapa(\''+o[0]+'\')" style="padding:8px 12px;border-radius:16px;border:1.5px solid '+(on?'#1D4ED8':'rgba(128,128,128,.35)')+';background:'+(on?'rgba(29,78,216,.12)':'none')+';color:'+(on?'#1D4ED8':'inherit')+';font-size:11.5px;font-weight:800;cursor:pointer">'+o[1]+'</button>'}).join('');
+ var _tot=(typeof TIENDAS!=='undefined'?TIENDAS:[]).filter(function(t){return t.act!==false}).length;
+ var n=(typeof TIENDAS!=='undefined'?TIENDAS:[]).filter(pasaM).length;
+ if(!n&&_tot&&FMAPA==='alerta'){FMAPA='todas';n=_tot;}
+ return '<div class="card"><div class="ct">🗺️ Tiendas en el territorio</div>'
+ +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+chips
+ +'<button onclick="regTog()" style="margin-left:auto;padding:8px 13px;border-radius:16px;border:none;background:#20241E;color:#fff;font-size:11.5px;font-weight:800;cursor:pointer">➕ Registrar tienda</button></div>'
+ +'<div id="reg-wrap" style="display:none;margin-bottom:10px">'+atCardG()+'</div>'
+ +'<div id="amap2" style="height:400px;border-radius:12px;background:#E8E6DC"></div>'
+ +'<button onclick="cargarAdm()" style="width:100%;margin-top:8px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:10px;font-weight:800;font-size:12px;cursor:pointer">🔄 Actualizar tiendas del servidor</button>'+'<div id="amap-n" style="font-size:12px;font-weight:700;opacity:.8;margin-top:7px">'+n+' tienda(s) con este filtro'+(FMAPA==='alerta'?' — reposición ≥5 días, atiéndelas primero':'')+(_tot?'':' · aún no hay tiendas: regístralas aquí o espera a que un conductor lo haga en campo')+(n&&!(typeof TIENDAS!=='undefined'?TIENDAS:[]).filter(pasaM).some(function(t){return t.lat})?' · sin coordenadas, no salen en el mapa':'')+'</div>'
+ +'</div>'+zonas;
+};
+window.fMapa=function(f){FMAPA=f;render();};
+window.regTog=function(){var w=document.getElementById('reg-wrap');if(!w)return;var ab=w.style.display==='none';w.style.display=ab?'block':'none';if(ab)setTimeout(function(){try{atMapInit()}catch(e){}},130);};
+window.initMapA=function(){
+ var dv=document.getElementById('amap2');if(!dv)return;
+ if(typeof L==='undefined'){dv.innerHTML='<div style="padding:20px;font-size:12px;color:#8A6410">El mapa necesita internet (Leaflet).</div>';return;}
+ if(window._amap){try{window._amap.remove()}catch(e){}}
+ var c0=(PARAMS_A.zonas&&PARAMS_A.zonas[0]&&PARAMS_A.zonas[0].poligono[0])||[-14.7924,-71.4198];
+ var m=window._amap=L.map('amap2').setView(c0,13);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(m);
+ (PARAMS_A.zonas||[]).forEach(function(z){try{L.polygon(z.poligono,{color:z.color,weight:2,fillOpacity:.05,dashArray:'7 6'}).addTo(m);}catch(e){}});
+ var pts=[];
+ (typeof TIENDAS!=='undefined'?TIENDAS:[]).filter(pasaM).forEach(function(t){
+  if(t.lat==null||t.lon==null)return;pts.push([t.lat,t.lon]);
+  var col=(t.d||0)>=5?'#B23B2E':(Number(t.sa||0)>=Number(t.li||230)&&t.sa>0?'#D9A32F':(t.vip?'#B97A1F':'#1D4ED8'));
+  L.circleMarker([t.lat,t.lon],{radius:9,color:col,fillColor:col,fillOpacity:.85,weight:2})
+   .bindPopup('<b>'+tnomA(t)+'</b><br>'+(t.z||'')+'<br>'+(t.d!=null?('Reposición: '+t.d+'d'):'')+(t.sa>0?('<br>💳 Deuda S/'+Number(t.sa).toFixed(2)):'')).addTo(m);
+ });
+ if(pts.length)try{m.fitBounds(L.latLngBounds(pts).pad(0.3))}catch(e){}
+ setTimeout(function(){try{m.invalidateSize()}catch(e){}},150);
+};
+
+/* ═══ KARDEX — pestañas reales + carga producto por producto ═══ */
+window.KXS=window.KXS||[];window.FKX='todos';
+window.rKardex=function(){
+ var conds=USRS.filter(function(u){return u.activo});
+ var tabs=[['todos','Todos']].concat(conds.map(function(u){return[u.usuario,u.nombre.split(' ')[0]]})).map(function(o){var on=FKX===o[0];return '<button onclick="FKX=\''+o[0]+'\';render()" style="padding:8px 12px;border-radius:16px;border:1.5px solid '+(on?'#1D4ED8':'rgba(128,128,128,.35)')+';background:'+(on?'rgba(29,78,216,.12)':'none')+';color:'+(on?'#1D4ED8':'inherit')+';font-size:11.5px;font-weight:800;cursor:pointer">'+o[1]+'</button>'}).join('');
+ var rows=KXS.filter(function(k){return FKX==='todos'||k.conductor===FKX});
+ var lista=rows.length?rows.slice(0,60).map(function(k){return '<div style="padding:8px 0;border-bottom:1px solid rgba(128,128,128,.15)"><b style="font-size:12.5px">'+(k.tipo||'mov')+'</b> <span style="font-size:10.5px;opacity:.6">· '+(k.conductor||'')+' · '+(k.creado?new Date(k.creado).toLocaleString('es-PE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'')+'</span><div style="font-size:11.5px;opacity:.75;margin-top:2px;word-break:break-word">'+(k.detalle||'')+'</div></div>'}).join(''):'<div style="font-size:12px;opacity:.6;padding:10px 0">'+(CFGA.API?'Sin movimientos aún para este filtro.':'Conecta el servidor para ver el kardex real de cada conductor.')+'</div>';
+ return '<div class="card"><div class="ct">📒 Kardex por conductor</div>'
+ +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+tabs
+ +'<button onclick="cgTog()" style="margin-left:auto;padding:8px 13px;border-radius:16px;border:none;background:#20241E;color:#fff;font-size:11.5px;font-weight:800;cursor:pointer">📦 Registrar carga</button></div>'
+ +'<div id="cg-wrap" style="display:none;border:1.5px solid rgba(128,128,128,.25);border-radius:12px;padding:12px;margin-bottom:10px">'
+ +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;opacity:.6;margin-bottom:4px">Conductor que lleva la carga</div>'
+ +(conds.length?selCondsG('cg-cond','— elige conductor —'):'<div style="font-size:12px;color:#B97A1F">Primero crea usuarios en Conductores.</div>')
+ +'<div id="cg-sug" style="font-size:11.5px;color:#B97A1F;font-weight:700;margin:8px 0;display:none"></div>'
+ +'<div style="margin-top:10px">'+pickerHTML('cg')+'</div>'
+ +'<div style="border:1.5px dashed rgba(128,128,128,.4);border-radius:12px;padding:11px;margin-bottom:10px"><div style="font-size:12.5px;font-weight:800;margin-bottom:4px">📄 Cargar desde tu documento</div><div style="font-size:11.5px;opacity:.7;line-height:1.5;margin-bottom:7px">Sube la foto del papel o PDF escaneado que te pasan. El sistema lee las cantidades y las coloca; tú solo verificas producto por producto antes de asignar.</div><input type="file" accept="image/*" id="cg-doc" style="font-size:11.5px"><div id="cg-doc-msg" style="font-size:11.5px;font-weight:700;margin-top:7px"></div></div>'+'<div style="display:flex;gap:8px"><button onclick="cgSugerirTxt()" style="flex:1;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">🧮 Ver sugerencia del último viaje</button><button onclick="cgEnviar()" style="flex:1.2;border:none;background:#20241E;color:#fff;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Asignar carga al conductor</button></div>'
+ +'<div style="font-size:11px;opacity:.65;margin-top:8px;line-height:1.5">Él la <b>cuenta y confirma producto por producto</b> en su app antes de salir (o marca diferencias con motivo).</div>'
+ +'</div>'
+ +lista+'</div>';
+};
+window.leerDoc=function(f){
+ var msg=document.getElementById('cg-doc-msg');
+ if(!CFGA.API){msg.textContent='Necesita el servidor conectado.';return;}
+ msg.textContent='Leyendo el documento… puede tardar unos segundos.';
+ var rd=new FileReader();
+ rd.onload=function(){
+  var img=new Image();
+  img.onload=async function(){
+   var cv=document.createElement('canvas'),s=Math.min(1,1600/Math.max(img.width,img.height));
+   cv.width=img.width*s;cv.height=img.height*s;cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+   var b64=cv.toDataURL('image/jpeg',0.85);
+   var cat=[];CATA.forEach(function(c){c.prods.forEach(function(p){cat.push({id:p.id,nombre:p.n,cat:c.id})})});
+   var r=await apiA('/admin/cargas/leer',{imagen:b64,catalogo:cat});
+   if(!r||!r.ok){msg.textContent='✗ '+((r&&r.error)||'Sin respuesta');return;}
+   pkReset('cg');var st=_PK['cg'];var baja=0;
+   (r.items||[]).forEach(function(it){
+    var cc=null,pp=null;CATA.forEach(function(c){var f=c.prods.find(function(x){return x.id===it.id});if(f){cc=c;pp=f;}});
+    if(!pp||!it.cantidad)return;
+    st.items[it.id]={id:it.id,n:pp.n,c:it.cantidad,cat:cc.id};
+    if(it.confianza==='baja')baja++;
+   });
+   pkPinta('cg');
+   msg.innerHTML='✓ Leídos '+(r.items||[]).length+' producto(s).'+(baja?' <span style="color:#B97A1F">'+baja+' con lectura dudosa — revísalos.</span>':'')+((r.no_reconocido||[]).length?'<div style="opacity:.75;font-weight:600;margin-top:4px">No reconoció: '+r.no_reconocido.join(' · ')+'</div>':'')+'<div style="opacity:.75;font-weight:600;margin-top:4px">Verifica cada cantidad abajo antes de asignar.</div>';
+  };
+  img.src=rd.result;
+ };
+ rd.readAsDataURL(f);
+};
+document.addEventListener('change',function(e){if(e.target&&e.target.id==='cg-doc'&&e.target.files&&e.target.files[0])leerDoc(e.target.files[0]);});
+window.cgTog=function(){var w=document.getElementById('cg-wrap');if(!w)return;var ab=w.style.display==='none';w.style.display=ab?'block':'none';if(ab)pkPinta('cg');};
+window.cgSugerirTxt=async function(){
+ var el=document.getElementById('cg-sug');if(!el)return;
+ var cs=document.getElementById('cg-cond');var cond=cs?cs.value:'';
+ if(!cond){el.style.display='block';el.textContent='Elige primero el conductor.';return;}
+ if(!CFGA.API){el.style.display='block';el.textContent='La sugerencia se calcula con el historial real — necesita el servidor conectado.';return;}
+ var r=await apiA('/liquidaciones/sugerencia?conductor='+encodeURIComponent(cond));
+ el.style.display='block';
+ if(!r||!r.ok){el.innerHTML='<b>Sin historial todavía.</b> Registra este primer viaje a mano; desde el segundo el sistema empieza a aprender lo que este conductor suele llevar.';return;}
+ var ico={sube:'▲',baja:'▼',estable:'=',pocos_datos:'·'};
+ var filas=CATC.map(function(x){var k=x[0];if(!r.items[k]&&!r.base[k])return '';
+  return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid rgba(128,128,128,.15)"><div style="flex:1;font-size:12px">'+x[1]+'</div><span style="font-size:11px;opacity:.65">base '+r.base[k]+'</span><span style="font-size:11px;font-weight:800;color:'+(r.tendencia[k]==='sube'?'#2F7D4F':(r.tendencia[k]==='baja'?'#B23B2E':'inherit'))+'">'+ico[r.tendencia[k]]+'</span><b style="min-width:44px;text-align:right;font-size:12.5px;color:#1D4ED8">'+r.items[k]+'</b><button onclick="cgAplicarUno(\''+k+'\','+r.items[k]+')" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:8px;padding:3px 8px;font-size:10.5px;font-weight:800;cursor:pointer">usar</button></div>'}).join('');
+ el.innerHTML='<div style="border:1.5px solid rgba(128,128,128,.25);border-radius:12px;padding:10px"><div style="font-weight:800;font-size:12.5px;margin-bottom:6px">🧮 Lo que este conductor suele llevar <span style="opacity:.6;font-weight:600">· '+r.viajes+' viaje(s) · confianza '+r.confianza+'</span></div>'+filas+'<div style="font-size:10.5px;opacity:.65;margin-top:8px;line-height:1.5">'+r.nota+' Las cantidades son <b>sugerencia</b>: tú marcas la carga real producto por producto.</div></div>';
+};
+window.cgAplicarUno=function(cat,cantidad){
+ var c=CATA.find(function(x){return x.id===cat});if(!c||!c.prods.length)return;
+ var st=(window._PK&&_PK['cg'])||null;if(!st){pkReset('cg');st=_PK['cg'];}
+ var porProd=Math.floor(cantidad/c.prods.length),resto=cantidad-porProd*c.prods.length;
+ c.prods.forEach(function(p,i){var q=porProd+(i<resto?1:0);if(q>0)st.items[p.id]={id:p.id,n:p.n,c:q,cat:c.id};});
+ pkPinta('cg');
+};
+window.cgEnviar=async function(){
+ var cs=document.getElementById('cg-cond');if(!cs||!cs.value)return alert('Elige el conductor.');
+ var det=pkItems('cg');if(!det.length)return alert('Marca los productos de la carga con +.');
+ var items={};det.forEach(function(x){items[x.cat]=(items[x.cat]||0)+x.c});
+ var r=await apiA('/cargas',{conductor:cs.value,items:items,detalle:det});
+ if(r&&r.ok){pkReset('cg');render();alert('✓ Carga asignada — al conductor le aparece para contar y confirmar.');}
+ else alert(CFGA.API?'El servidor no respondió (¿clave admin puesta en Configuración?).':'Guardada en este equipo (modo local): la carga real viaja por el servidor.');
+};
+
+/* kardex del servidor */
+if(typeof cargarAdm==='function'){var _ca2=cargarAdm;window.cargarAdm=async function(){await _ca2();var r=await apiA('/admin/kardex');if(r&&r.ok)window.KXS=r.rows||[];if(CUR==='kardex')render();};}
+
+/* ═══ Sidebar: botón ✕ mediano + deslizar para cerrar ═══ */
+var sd=document.getElementById('side');
+if(sd){
+ if(getComputedStyle(sd).position==='static')sd.style.position='relative';
+ var xb=document.createElement('button');xb.textContent='✕';xb.title='Cerrar menú';
+ xb.style.cssText='position:absolute;top:10px;right:10px;width:34px;height:34px;border-radius:10px;border:1.5px solid rgba(128,128,128,.4);background:rgba(128,128,128,.14);color:inherit;font-size:15px;font-weight:800;cursor:pointer;z-index:6;line-height:1';
+ xb.onclick=function(){sd.classList.remove('on')};
+ sd.appendChild(xb);
+ var x0=null;
+ sd.addEventListener('touchstart',function(e){x0=e.touches[0].clientX},{passive:true});
+ sd.addEventListener('touchmove',function(e){if(x0!=null&&Math.abs(e.touches[0].clientX-x0)>55){sd.classList.remove('on');x0=null;}},{passive:true});
+}
+/* pintar pickers al entrar a sus secciones */
+var _r3=render;window.render=function(){_r3();if(CUR==='pedidos')setTimeout(function(){try{pkPinta('pd')}catch(e){}},60);};
+})();
+</script>
+<script id="v5final">
+(function(){
+window.rResumen=function(){
+ var act=USRS.filter(function(u){return u.activo}).length;
+ var ev=(window.SERV_EVT?SERV_EVT.length:0)+(window.BANDEJA?BANDEJA.length:0);
+ var box=function(n,l,col){return '<div style="flex:1;min-width:130px;background:rgba(128,128,128,.08);border:1.5px solid rgba(128,128,128,.2);border-radius:12px;padding:14px"><div style="font-size:26px;font-weight:900;color:'+col+'">'+n+'</div><div style="font-size:11px;font-weight:700;opacity:.65;margin-top:2px">'+l+'</div></div>'};
+ return '<div class="card"><div class="ct">📊 Hoy</div><div style="display:flex;gap:10px;flex-wrap:wrap">'+box((typeof TIENDAS!=='undefined'?TIENDAS.length:0),'Tiendas','#1D4ED8')+box(act,'Conductores activos','#2F7D4F')+box(PEDIDOS_ADM.length,'Pedidos de hoy','#B97A1F')+box(ev,'Eventos por atender','#B23B2E')+'</div><div style="font-size:12px;opacity:.65;margin-top:12px;line-height:1.6">Las métricas de ventas, cierres y utilidad aparecen cuando el sistema acumule movimiento real.</div></div>';
+};
+window.rInforme=function(){
+ return '<div class="card"><div class="ct">📊 Informe diario</div><div style="font-size:12.5px;opacity:.75;line-height:1.7">El informe con totales, ranking y análisis llega a tu <b>WhatsApp a las 22:00</b> (con Twilio y Anthropic en Railway). La versión en panel se activa cuando existan ventas reales.</div></div>';
+};
+})();
+</script>
+
+<script id="v5gpsA">
+(function(){
+if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='gps'})){
+ var mi=SECS.findIndex(function(s){return s[0]==='mapa'});SECS.splice(mi+1,0,['gps','🛰️','Camiones en vivo']);
+}
+window.GPSD={conductores:[],plataforma:null};window.GPSSEL='';
+var _r=render;window.render=function(){
+ var map={gps:rGPS};
+ if(CUR==='gps'){try{document.getElementById('content').innerHTML=rGPS();}catch(e){console.error(e)}if(typeof nav==='function')nav();setTimeout(gpsInit,90);return;}
+ _r();
+};
+window.rGPS=function(){
+ var d=GPSD.conductores||[];
+ var filas=d.length?d.map(function(c){return '<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid rgba(128,128,128,.2);flex-wrap:wrap"><span style="width:10px;height:10px;border-radius:50%;background:'+(c.activo?'#2F7D4F':'#B23B2E')+';flex-shrink:0"></span><div style="flex:1;min-width:150px"><b style="font-size:13px">'+c.nombre+'</b> <span style="font-size:11px;opacity:.6">'+(c.camion||'')+' · '+(c.fuente==='celular'?'📱 celular':'🛰️ '+(c.fuente||'GPS'))+'</span><div style="font-size:11px;opacity:.65">'+(c.min!=null?('hace '+c.min+' min'):'sin dato')+(c.activo?'':' · SIN SEÑAL')+'</div></div><button onclick="gpsVer(\''+c.usuario+'\')" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:9px;padding:7px 11px;font-size:11px;font-weight:800;cursor:pointer">Ver recorrido de hoy</button></div>'}).join(''):'<div style="font-size:12px;opacity:.6;padding:8px 0">'+(CFGA.API?'Ningún camión con posición todavía. Si usas plataforma externa, revisa que cada conductor tenga su <b>ID de vehículo</b> asignado en Conductores; si no, el celular del conductor envía posición cuando activa su turno.':'Conecta el servidor en Configuración.')+'</div>';
+ return '<div class="card"><div class="ct">🛰️ Camiones en vivo'+(GPSD.plataforma?' · plataforma: '+GPSD.plataforma:' · fuente: celular de los conductores')+'</div>'
+ +filas
+ +'<div id="gpsmap" style="height:420px;border-radius:12px;background:#E8E6DC;margin-top:10px"></div>'
+ +'<div id="gps-disp" style="margin-top:10px"></div>'
+ +'<button onclick="gpsDisp()" style="width:100%;margin-top:8px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:10px;font-weight:800;font-size:12px;cursor:pointer">🔍 Ver vehículos de mi plataforma GPS y asignarlos</button>'+'<div style="display:flex;gap:8px;margin-top:8px"><button onclick="gpsCargar()" style="flex:1;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:10px;font-weight:800;font-size:12px;cursor:pointer">🔄 Actualizar</button>'+(GPSSEL?'<button onclick="GPSSEL=\'\';render()" style="flex:1;border:none;background:#20241E;color:#fff;border-radius:11px;padding:10px;font-weight:800;font-size:12px;cursor:pointer">Ver todos</button>':'')+'</div>'
+ +'<div style="font-size:11px;opacity:.6;margin-top:8px;line-height:1.5">Se actualiza solo cada 60 s mientras estés en esta pantalla. El recorrido guarda 60 días.</div></div>';
+};
+window.gpsDisp=async function(){
+ var el=document.getElementById('gps-disp');if(!el)return;
+ el.innerHTML='<div style="font-size:12px;opacity:.7;padding:8px 0">Consultando tu plataforma…</div>';
+ var r=await apiA('/admin/gps/dispositivos');
+ if(!r||!r.ok){el.innerHTML='<div style="background:rgba(178,59,46,.12);border:1px solid rgba(178,59,46,.35);color:#e5a49b;border-radius:10px;padding:10px;font-size:12px;line-height:1.55">'+((r&&r.error)||'Sin respuesta del servidor')+'</div>';return;}
+ if(!r.dispositivos.length){el.innerHTML='<div style="font-size:12px;opacity:.7">La plataforma respondió, pero no devolvió vehículos para esa cuenta.</div>';return;}
+ var opts=USRS.filter(function(u){return u.activo}).map(function(u){return '<option value="'+u.usuario+'">'+u.nombre+'</option>'}).join('');
+ el.innerHTML='<div style="border:1.5px solid rgba(128,128,128,.25);border-radius:12px;padding:10px"><div style="font-weight:800;font-size:12.5px;margin-bottom:6px">🚚 Vehículos en '+r.plataforma+' ('+r.dispositivos.length+')</div>'
+ +r.dispositivos.map(function(d){return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(128,128,128,.15);flex-wrap:wrap"><div style="flex:1;min-width:140px;font-size:12.5px"><b>'+(d.nombre||'—')+'</b> <span style="opacity:.6">ID '+d.id+(d.placa?' · '+d.placa:'')+'</span></div><select id="asig-'+d.id+'" style="padding:7px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px">'+opts+'</select><button onclick="gpsAsignar(\''+d.id+'\')" style="border:none;background:#20241E;color:#fff;border-radius:9px;padding:7px 11px;font-size:11px;font-weight:800;cursor:pointer">Asignar</button></div>'}).join('')
+ +'<div style="font-size:11px;opacity:.65;margin-top:8px;line-height:1.5">Asigna cada vehículo al conductor que lo maneja. En menos de un minuto aparecerá arriba en vivo.</div></div>';
+};
+window.gpsAsignar=async function(id){
+ var u=document.getElementById('asig-'+id).value;
+ var r=await apiA('/admin/conductores/'+u+'/gpsid',{gps_id:id});
+ var x=USRS.find(function(z){return z.usuario===u});if(x)x.gps_id=id;
+ alert(r&&r.ok?'✓ Vehículo '+id+' asignado. Aparecerá en vivo en menos de 1 minuto.':'El servidor no respondió — reintenta.');
+ gpsCargar();
+};
+window.gpsCargar=async function(){var r=await apiA('/admin/gps');if(r&&r.ok){GPSD=r;if(CUR==='gps')render();}};
+window.gpsVer=async function(u){GPSSEL=u;var r=await apiA('/admin/gps/recorrido?conductor='+encodeURIComponent(u));window._REC=(r&&r.puntos)||[];render();};
+window.gpsInit=function(){
+ var dv=document.getElementById('gpsmap');if(!dv)return;
+ if(typeof L==='undefined'){dv.innerHTML='<div style="padding:20px;font-size:12px">El mapa necesita internet.</div>';return;}
+ if(window._gm){try{window._gm.remove()}catch(e){}}
+ var m=window._gm=L.map('gpsmap').setView([-14.7924,-71.4198],12);
+ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(m);
+ (PARAMS_A.zonas||[]).forEach(function(z){try{L.polygon(z.poligono,{color:z.color,weight:2,fillOpacity:.05,dashArray:'7 6'}).addTo(m)}catch(e){}});
+ var pts=[];
+ (GPSD.conductores||[]).filter(function(c){return !GPSSEL||c.usuario===GPSSEL}).forEach(function(c){
+  pts.push([c.lat,c.lon]);
+  L.marker([c.lat,c.lon],{icon:L.divIcon({className:'',html:'<div style="background:'+(c.activo?'#2F7D4F':'#B23B2E')+';color:#fff;border:2px solid #fff;border-radius:10px;padding:3px 7px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.4)">🚚 '+c.nombre.split(' ')[0]+'</div>',iconSize:[0,0]})})
+   .bindPopup('<b>'+c.nombre+'</b><br>'+(c.camion||'')+'<br>'+(c.min!=null?('hace '+c.min+' min'):'')+'<br>'+(c.fuente==='celular'?'📱 celular':'🛰️ '+c.fuente)).addTo(m);
+ });
+ if(GPSSEL&&window._REC&&_REC.length>1){
+  var rec=_REC.map(function(p){return [p.lat,p.lon]});
+  L.polyline(rec,{color:'#1D4ED8',weight:3,opacity:.75}).addTo(m);
+  L.circleMarker(rec[0],{radius:6,color:'#2F7D4F',fillOpacity:1}).bindTooltip('Inicio').addTo(m);
+  rec.forEach(function(p){pts.push(p)});
+ }
+ if(pts.length)try{m.fitBounds(L.latLngBounds(pts).pad(0.25))}catch(e){}
+ setTimeout(function(){try{m.invalidateSize()}catch(e){}},150);
+ if(window._gmT)clearInterval(window._gmT);
+ window._gmT=setInterval(function(){if(CUR==='gps')gpsCargar();else clearInterval(window._gmT)},60000);
+};
+/* campo ID de vehículo en Conductores */
+if(typeof rConductores==='function'){var _rc3=rConductores;window.rConductores=function(){
+ var base='';try{base=_rc3()}catch(e){}
+ var f=USRS.map(function(u){return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(128,128,128,.15)"><div style="flex:1;font-size:12.5px"><b>'+u.nombre+'</b> <span style="opacity:.6">@'+u.usuario+'</span></div><input id="gid-'+u.usuario+'" value="'+(u.gps_id||'')+'" placeholder="ID del vehículo" style="width:130px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px"><button onclick="setGpsId(\''+u.usuario+'\')" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:9px;padding:7px 10px;font-size:11px;font-weight:800;cursor:pointer">Guardar</button></div>'}).join('');
+ return base+'<div class="card"><div class="ct">🛰️ ID de vehículo en tu plataforma GPS</div>'+(USRS.length?f:'<div style="font-size:12px;opacity:.6">Crea usuarios primero.</div>')+'<div style="font-size:11px;opacity:.65;margin-top:8px;line-height:1.5">Solo si usas una plataforma externa (Traccar/Wialon/Navixy): pega aquí el ID que esa plataforma le da al vehículo. Sin esto, el sistema usa el celular del conductor.</div></div>';
+};}
+window.setGpsId=async function(u){var v=document.getElementById('gid-'+u).value.trim();var r=await apiA('/admin/conductores/'+u+'/gpsid',{gps_id:v});var x=USRS.find(function(z){return z.usuario===u});if(x)x.gps_id=v;alert(r&&r.ok?'✓ ID guardado':'Guardado localmente'+(CFGA.API?' — el servidor no respondió':''));};
+if(CFGA.API&&CFGA.TOKEN)gpsCargar();
+})();
+</script>
+
+<script id="v5cat2">
+(function(){
+if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='catalogo'})){
+ var ci=SECS.findIndex(function(s){return s[0]==='kardex'});SECS.splice(ci+1,0,['catalogo','🏷️','Catálogo y precios']);
+}
+window.CATE={};window.CATCAT=0;
+var _rr=render;window.render=function(){
+ if(CUR==='catalogo'){try{document.getElementById('content').innerHTML=rCatalogo()}catch(e){console.error(e)}if(typeof nav==='function')nav();return;}
+ _rr();
+};
+window.rCatalogo=function(){
+ var c=CATA[CATCAT]||{prods:[],nom:'—',emoji:'📦',precio:0,id:''};
+ var chips=CATA.map(function(x,i){var on=i===CATCAT;return '<button onclick="CATCAT='+i+';render()" style="padding:7px 11px;border-radius:16px;border:1.5px solid '+(on?'#1D4ED8':'rgba(128,128,128,.35)')+';background:'+(on?'rgba(29,78,216,.12)':'none')+';color:'+(on?'#1D4ED8':'inherit')+';font-size:11.5px;font-weight:800;cursor:pointer">'+x.emoji+' '+x.nom.split(' x')[0]+'</button>'}).join('');
+ var filas=c.prods.map(function(p){var e=CATE[p.id]||{};
+  return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(128,128,128,.15)"><div style="flex:1;font-size:12.5px">'+p.n+'</div>'
+  +'<span style="font-size:10.5px;opacity:.6">venta</span><input id="pv-'+p.id+'" type="number" step="0.1" value="'+(e.precio!=null?e.precio:c.precio)+'" style="width:74px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center">'
+  +'<span style="font-size:10.5px;opacity:.6">costo</span><input id="pk-'+p.id+'" type="number" step="0.1" value="'+(e.costo!=null?e.costo:0)+'" style="width:74px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center">'
+  +'<button onclick="prodBorrar(\''+p.id+'\')" title="Quitar del catálogo" style="border:none;background:none;color:#B23B2E;font-weight:800;cursor:pointer;font-size:13px">✕</button></div>'}).join('');
+ return '<div class="card"><div class="ct">🏷️ Precios y costos por producto</div>'
+ +'<div style="font-size:12px;opacity:.7;margin-bottom:8px;line-height:1.55">Cada producto con su precio de venta y lo que te costó. Al guardar, los conductores lo reciben en su próxima sincronización (máx. 5 min).</div>'
+ +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+chips+'</div>'
+ +filas
+ +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><input id="np-nom" placeholder="Producto nuevo en '+c.nom.split(' x')[0]+'" style="flex:2;min-width:150px;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><input id="np-pv" type="number" step="0.1" placeholder="precio" style="width:90px;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><button onclick="prodAgregar()" style="border:none;background:#2F7D4F;color:#fff;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer">+ Añadir</button></div>'
+ +'<button onclick="catGuardar()" style="width:100%;margin-top:10px;padding:12px;border:none;border-radius:11px;background:#1D4ED8;color:#fff;font-weight:800;cursor:pointer">Guardar precios de '+c.nom.split(' x')[0]+'</button>'
+ +'<div style="font-size:11.5px;opacity:.7;margin-top:8px">Los campos en ámbar aún no tienen precio propio para <b>'+TIPOSEL+'</b>: muestran el que ya cargaste en otro tipo. Al guardar, quedan fijados para este tipo.</div>'+'<div id="cat-msg" style="font-size:11.5px;font-weight:700;margin-top:8px;opacity:.8"></div></div>'
+ +'<div class="card"><div class="ct">🗂️ Categorías</div>'
+ +'<div style="font-size:12px;opacity:.7;margin-bottom:8px;line-height:1.55">Añade categorías de temporada (ej. Panetones en octubre) y desactívalas cuando pase la campaña: dejan de aparecerle a los conductores sin perder el historial.</div>'
+ +CATA.map(function(x,i){return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(128,128,128,.15)"><input id="cn-'+x.id+'" value="'+x.nom+'" style="flex:1;min-width:120px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12.5px"><input id="ce-'+x.id+'" value="'+x.emoji+'" style="width:52px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center"><span style="font-size:10.5px;opacity:.6">precio base</span><input id="cp-'+x.id+'" type="number" step="0.1" value="'+(x.precio||0)+'" style="width:74px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center"><button onclick="catBorrar(\''+x.id+'\')" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:#B23B2E;border-radius:9px;padding:6px 10px;font-size:11px;font-weight:800;cursor:pointer">Desactivar</button></div>'}).join('')
+ +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><input id="nc-nom" placeholder="Categoría nueva (ej: Panetones)" style="flex:2;min-width:150px;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><input id="nc-emo" placeholder="🎄" style="width:60px;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center"><input id="nc-pre" type="number" step="0.1" placeholder="precio" style="width:90px;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><button onclick="catAgregar()" style="border:none;background:#2F7D4F;color:#fff;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer">+ Añadir</button></div>'
+ +'<button onclick="catsGuardar()" style="width:100%;margin-top:10px;padding:12px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;font-weight:800;cursor:pointer">Guardar cambios de categorías</button>'
+ +'<div id="cats-msg" style="font-size:11.5px;font-weight:700;margin-top:8px;opacity:.8"></div></div>';
+};
+function slug(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'').slice(0,14)}
+window.catAgregar=async function(){
+ var n=document.getElementById('nc-nom').value.trim();if(!n)return alert('Escribe el nombre de la categoría.');
+ var id=slug(n);if(CATA.find(function(x){return x.id===id}))return alert('Ya existe una categoría parecida.');
+ CATA.push({id:id,nom:n,emoji:document.getElementById('nc-emo').value.trim()||'📦',precio:+document.getElementById('nc-pre').value||0,prods:[]});
+ await catsGuardar();CATCAT=CATA.length-1;renderForzado();
+};
+window.catsGuardar=async function(){
+ var cats=CATA.map(function(x){var n=document.getElementById('cn-'+x.id),e=document.getElementById('ce-'+x.id),p=document.getElementById('cp-'+x.id);
+  if(n)x.nom=n.value.trim()||x.nom; if(e)x.emoji=e.value.trim()||x.emoji; if(p)x.precio=+p.value||x.precio;
+  return{id:x.id,nom:x.nom,emoji:x.emoji,precio:x.precio,activa:true}});
+ var r=await apiA('/admin/categorias',{categorias:cats});
+ var m=document.getElementById('cats-msg');if(m)m.textContent=(r&&r.ok)?'✓ Categorías guardadas — los conductores las verán al sincronizar.':'No se pudo guardar'+(CFGA.API?' (¿clave admin?)':' (modo local)');
+};
+window.catBorrar=async function(id){
+ if(!confirm('¿Desactivar esta categoría? Deja de aparecerle a los conductores; el historial se conserva.'))return;
+ await apiA('/admin/categorias/'+id+'/borrar',{});
+ CATA=CATA.filter(function(x){return x.id!==id});CATCAT=0;renderForzado();
+};
+window.prodAgregar=async function(){
+ var n=document.getElementById('np-nom').value.trim();if(!n)return alert('Escribe el nombre del producto.');
+ var c=CATA[CATCAT],id=c.id+'_'+slug(n);
+ var pv=+document.getElementById('np-pv').value||c.precio;
+ var r=await apiA('/admin/catalogo/producto',{id:id,cat:c.id,nombre:n,precio:pv,costo:0});
+ c.prods.push({id:id,n:n});CATE[id]={precio:pv,costo:0};
+ render();
+ if(!(r&&r.ok))alert('Guardado localmente'+(CFGA.API?' — el servidor no respondió':' (modo local)'));
+};
+window.prodBorrar=async function(id){
+ if(!confirm('¿Quitar este producto del catálogo? El historial de ventas se conserva.'))return;
+ await apiA('/admin/catalogo/'+id+'/borrar',{});
+ var c=CATA[CATCAT];c.prods=c.prods.filter(function(p){return p.id!==id});renderForzado();
+};
+window.catCargar=async function(){
+ var rc=await apiA('/admin/categorias');
+ if(rc&&rc.ok&&rc.categorias.length){
+  rc.categorias.filter(function(x){return x.activa!==false}).forEach(function(sc){
+   var loc=CATA.find(function(x){return x.id===sc.id});
+   if(loc){loc.nom=sc.nom||loc.nom;loc.emoji=sc.emoji||loc.emoji;loc.precio=sc.precio||loc.precio;}
+   else CATA.push({id:sc.id,nom:sc.nom,emoji:sc.emoji||'📦',precio:sc.precio||0,prods:[]});
+  });
+ }
+ var r=await apiA('/admin/catalogo');if(r&&r.ok){CATE={};(r.productos||[]).forEach(function(p){
+  if(p.activo===false)return;
+  CATE[p.id]={precio:p.precio,costo:p.costo};
+  var lc=CATA.find(function(x){return x.id===p.cat});
+  if(lc&&!lc.prods.find(function(x){return x.id===p.id}))lc.prods.push({id:p.id,n:p.nombre});
+ });if(CUR==='catalogo')render();}};
+window.catGuardar=async function(){
+ var c=CATA[CATCAT];
+ var prods=c.prods.map(function(p){return{id:p.id,cat:c.id,nombre:p.n,precio:+document.getElementById('pv-'+p.id).value||0,costo:+document.getElementById('pk-'+p.id).value||0}});
+ var r=await apiA('/admin/catalogo',{productos:prods});
+ prods.forEach(function(p){CATE[p.id]={precio:p.precio,costo:p.costo}});
+ var m=document.getElementById('cat-msg');
+ if(m)m.textContent=(r&&r.ok)?'✓ Guardado — los conductores lo verán en su próxima sincronización.':'No se pudo guardar'+(CFGA.API?' (¿clave admin?)':' (modo local)');
+};
+if(CFGA.API&&CFGA.TOKEN)setTimeout(catCargar,800);
+})();
+</script>
+
+<script id="v5exp">
+(function(){
+if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='exportar'})){
+ SECS.push(['exportar','📤','Exportar datos']);
+}
+var _re=render;window.render=function(){
+ if(CUR==='exportar'){try{document.getElementById('content').innerHTML=rExportar()}catch(e){console.error(e)}if(typeof nav==='function')nav();return;}
+ _re();
+};
+window.rExportar=function(){
+ var cOpts=USRS.filter(function(u){return u.activo}).map(function(u){return '<option value="'+u.usuario+'">'+u.nombre+'</option>'}).join('');
+ var hoy=new Date().toISOString().slice(0,10);
+ var mes=hoy.slice(0,8)+'01';
+ var b=function(t,l,d){return '<button onclick="expar(\''+t+'\',\''+(d||'')+'\')" style="text-align:left;border:1.5px solid rgba(128,128,128,.3);background:none;color:inherit;border-radius:11px;padding:12px;font-size:12.5px;font-weight:700;cursor:pointer;width:100%;margin-bottom:8px">'+l+'</button>'};
+ return '<div class="card"><div class="ct">📤 Exportar a Excel</div>'
+ +'<div style="font-size:12px;opacity:.7;margin-bottom:10px;line-height:1.55">Descarga un archivo que abres con Excel. Útil para tu contabilidad o para hacer tus propios cálculos.</div>'
+ +b('ventas','📈 Ventas de HOY','hoy')
+ +b('ventas','📈 Ventas del MES en curso','mes')
+ +b('ventas','📈 Todas las ventas','')
+ +b('deudas','💳 Deudas por cobrar (todas las tiendas)','')
+ +b('creditos','💳 Movimientos de crédito (cargos y pagos)','')
+ +b('gastos','💸 Gastos de los conductores','')
+ +b('liquidaciones','💰 Liquidaciones de viaje','')
+ +b('tiendas','🏪 Todas mis tiendas','')
+ +'<div style="border-top:1px solid rgba(128,128,128,.2);margin:12px 0 10px"></div>'
+ +'<div style="font-size:12.5px;font-weight:800;margin-bottom:6px">Filtrar por conductor y fechas</div>'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px"><select id="ex-c" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><option value="">Todos</option>'+cOpts+'</select><input id="ex-d" type="date" value="'+mes+'" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><input id="ex-h" type="date" value="'+hoy+'" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"></div>'
+ +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="exparFiltro(\'ventas\')" style="flex:1;min-width:120px;border:none;background:#1D4ED8;color:#fff;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Ventas filtradas</button><button onclick="exparFiltro(\'gastos\')" style="flex:1;min-width:120px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Gastos filtrados</button><button onclick="exparFiltro(\'liquidaciones\')" style="flex:1;min-width:120px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Liquidaciones</button></div>'
+ +'<div style="border-top:1px solid rgba(128,128,128,.2);margin:12px 0 10px"></div>'
+ +'<div style="font-size:12.5px;font-weight:800;margin-bottom:6px">💾 Respaldo completo del sistema</div>'
+ +'<div style="font-size:11.5px;opacity:.7;line-height:1.55;margin-bottom:8px">Un archivo con TODO (tiendas, ventas, deudas, kardex, configuración). Guárdalo cada semana en tu computadora y en tu correo o nube: si algo le pasa a la base de datos, con esto se reconstruye.</div>'
+ +'<button onclick="respaldo()" style="width:100%;border:none;background:#2F7D4F;color:#fff;border-radius:11px;padding:12px;font-weight:800;cursor:pointer">💾 Descargar respaldo completo</button>'
+ +'<div style="border-top:1px solid rgba(128,128,128,.2);margin:12px 0 10px"></div>'
+ +'<div style="font-size:12.5px;font-weight:800;margin-bottom:6px">🧾 Historial de cambios importantes</div><div id="aud-box" style="font-size:11.5px;opacity:.8"></div>'
+ +'<button onclick="verAuditoria()" style="width:100%;margin-top:6px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:10px;font-weight:800;font-size:12px;cursor:pointer">Ver últimos cambios</button>'+'<div id="ex-msg" style="font-size:11.5px;font-weight:700;margin-top:10px;opacity:.8"></div></div>';
+};
+function bajar(url,msg){
+ var m=document.getElementById('ex-msg');if(m)m.textContent='Preparando archivo…';
+ fetch(CFGA.API+url,{headers:{'x-admin':CFGA.TOKEN}}).then(function(r){if(!r.ok)throw new Error(r.status);return r.blob()})
+ .then(function(b){var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=(url.match(/tipo=(\w+)/)||[,'datos'])[1]+'.csv';a.click();if(m)m.textContent='✓ Descargado. Ábrelo con Excel.';})
+ .catch(function(e){if(m)m.textContent='✗ No se pudo: '+e.message+(CFGA.TOKEN?'':' (falta la clave admin en Configuración)');});
+}
+window.respaldo=function(){
+ if(!CFGA.API)return alert('Necesita el servidor conectado.');
+ var m=document.getElementById('ex-msg');if(m)m.textContent='Armando el respaldo… puede tardar unos segundos.';
+ fetch(CFGA.API+'/admin/respaldo',{headers:{'x-admin':CFGA.TOKEN}}).then(function(r){if(!r.ok)throw new Error(r.status);return r.blob()})
+ .then(function(b){var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='respaldo-'+new Date().toISOString().slice(0,10)+'.json';a.click();
+  if(m)m.textContent='✓ Respaldo descargado ('+Math.round(b.size/1024)+' KB). Guárdalo también en tu correo o nube.';})
+ .catch(function(e){if(m)m.textContent='✗ No se pudo: '+e.message;});
+};
+window.verAuditoria=async function(){
+ var box=document.getElementById('aud-box');if(!box)return;
+ var r=await apiA('/admin/auditoria');
+ if(!r||!r.ok)return box.textContent='No se pudo consultar.';
+ box.innerHTML=r.filas.length?r.filas.slice(0,30).map(function(f){return '<div style="padding:5px 0;border-bottom:1px solid rgba(128,128,128,.15)">'+new Date(f.creado).toLocaleString('es-PE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' · '+f.detalle+'</div>'}).join(''):'Sin cambios registrados aún.';
+};
+window.expar=function(tipo,rango){
+ if(!CFGA.API)return alert('Necesita el servidor conectado.');
+ var q='/admin/exportar?tipo='+tipo, h=new Date().toISOString().slice(0,10);
+ if(rango==='hoy')q+='&desde='+h+'&hasta='+h;
+ if(rango==='mes')q+='&desde='+h.slice(0,8)+'01&hasta='+h;
+ bajar(q);
+};
+window.exparFiltro=function(tipo){
+ if(!CFGA.API)return alert('Necesita el servidor conectado.');
+ var c=document.getElementById('ex-c').value,d=document.getElementById('ex-d').value,h=document.getElementById('ex-h').value;
+ bajar('/admin/exportar?tipo='+tipo+(c?'&conductor='+encodeURIComponent(c):'')+(d?'&desde='+d:'')+(h?'&hasta='+h:''));
+};
+})();
+</script>
+<script id="v5rep">
+(function(){
+window.CIERRES=[];
+if(typeof cargarAdm==='function'){var _ca=cargarAdm;window.cargarAdm=async function(){await _ca();var r=await apiA('/admin/cierres');if(r&&r.ok)CIERRES=r.cierres||[];};}
+window.rPerdidas=function(){
+ var ps=(window.KXS||[]).filter(function(k){return k.tipo==='perdida'});
+ if(!ps.length)return '<div class="card"><div class="ct">🍄 Pérdidas</div><div style="font-size:12.5px;opacity:.75;line-height:1.7">'+(CFGA.API?'Sin pérdidas registradas todavía. Aparecerán aquí cuando los conductores marquen producto dañado, perdido o consumido.':'Conecta el servidor para ver las pérdidas reales.')+'</div></div>';
+ var porMot={},tot=0;
+ ps.forEach(function(k){
+  var m=(k.detalle||'').split('·')[0].trim()||'otro';
+  var v=parseFloat(((k.detalle||'').match(/S\/\s?([\d.]+)/)||[])[1])||0;
+  porMot[m]=(porMot[m]||0)+v;tot+=v;
+ });
+ return '<div class="card"><div class="ct">🍄 Pérdidas — total S/'+tot.toFixed(2)+'</div>'
+ +Object.keys(porMot).sort(function(a,b){return porMot[b]-porMot[a]}).map(function(m){
+   return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(128,128,128,.18)"><span style="font-size:12.5px">'+m+'</span><b style="font-size:12.5px;color:#B23B2E">S/'+porMot[m].toFixed(2)+'</b></div>'}).join('')
+ +'<div style="font-size:11px;opacity:.65;margin-top:10px;line-height:1.5">Solo registro: el sistema no le cobra nada al conductor. Tú decides si conversas con él.</div></div>'
+ +'<div class="card"><div class="ct">Detalle ('+ps.length+')</div>'+ps.slice(0,40).map(function(k){return '<div style="padding:7px 0;border-bottom:1px solid rgba(128,128,128,.15);font-size:12px"><b>'+(k.conductor||'')+'</b> · '+new Date(k.creado).toLocaleDateString('es-PE')+'<div style="opacity:.75">'+(k.detalle||'')+'</div></div>'}).join('')+'</div>';
+};
+window.rCierres=function(){
+ if(!CIERRES.length)return '<div class="card"><div class="ct">💰 Cierres de viaje</div><div style="font-size:12.5px;opacity:.75;line-height:1.7">'+(CFGA.API?'Aún no hay liquidaciones. Aparecerán al cerrar cada viaje.':'Conecta el servidor para ver los cierres.')+'</div></div>';
+ return '<div class="card"><div class="ct">💰 Cierres de viaje ('+CIERRES.length+')</div>'+CIERRES.map(function(l){
+  var d=l.dia||{},ef=Number(d.vEf||0),ya=Number(d.vYape||0),ab=Number(d.abonos||0);
+  return '<div style="padding:10px 0;border-bottom:1px solid rgba(128,128,128,.2)"><div style="display:flex;justify-content:space-between"><b style="font-size:13px">'+(l.conductor||'')+'</b><span style="font-size:11px;opacity:.6">'+new Date(l.creado).toLocaleDateString('es-PE')+'</span></div><div style="font-size:12px;opacity:.8;margin-top:3px">Efectivo S/'+ef.toFixed(2)+' · Yape S/'+ya.toFixed(2)+' · Abonos S/'+ab.toFixed(2)+'</div><div style="font-size:12.5px;font-weight:800;margin-top:2px">Total del viaje: S/'+(ef+ya+ab).toFixed(2)+'</div></div>'}).join('')+'</div>';
+};
+})();
+</script>
+<script id="v5admlogin">
+(function(){
+/* ══ INICIO DE SESIÓN DEL PANEL ══ */
+var ov=document.createElement('div');
+ov.id='adm-login';
+ov.style.cssText='position:fixed;inset:0;z-index:99999;background:linear-gradient(180deg,#12161a,#0b0f0c);display:none;align-items:center;justify-content:center;padding:22px';
+ov.innerHTML='<div style="width:100%;max-width:360px">'
++'<div style="text-align:center;margin-bottom:22px"><div style="font-size:40px">🥖</div>'
++'<div style="font-size:20px;font-weight:900;color:#fff;margin-top:6px">Panel del administrador</div>'
++'<div id="adm-est" style="font-size:11.5px;color:#8a917f;margin-top:4px"></div></div>'
++'<input id="adm-url" placeholder="URL del servidor (Railway)" style="width:100%;padding:13px;border-radius:12px;border:1.5px solid #3a4136;background:#171b15;color:#fff;font-size:14px;margin-bottom:9px">'
++'<input id="adm-clave" type="password" placeholder="Clave de administrador" style="width:100%;padding:13px;border-radius:12px;border:1.5px solid #3a4136;background:#171b15;color:#fff;font-size:14px;margin-bottom:12px">'
++'<button id="adm-btn" style="width:100%;padding:14px;border-radius:12px;border:none;background:#B97A1F;color:#fff;font-size:14px;font-weight:800;cursor:pointer">Entrar</button>'
++'<div id="adm-err" style="display:none;margin-top:12px;background:rgba(226,58,46,.15);border:1px solid rgba(226,58,46,.4);color:#f1a49e;font-size:12px;border-radius:10px;padding:9px 12px"></div>'
++'<div style="font-size:11px;color:#6b7364;margin-top:14px;line-height:1.5">Solo tú entras aquí. Tras 5 intentos fallidos el servidor bloquea 15 minutos.</div></div>';
+document.body.appendChild(ov);
+
+function err(m){var e=document.getElementById('adm-err');e.textContent=m;e.style.display='block';setTimeout(function(){e.style.display='none'},6000);}
+window.admMostrarLogin=function(){
+ document.getElementById('adm-url').value=CFGA.API||'';
+ document.getElementById('adm-est').textContent=CFGA.API?'Servidor configurado':'Pega la URL de tu servidor la primera vez';
+ ov.style.display='flex';
+};
+window.admEntrar=async function(){
+ var url=(document.getElementById('adm-url').value||'').trim().replace(/\/+$/,'');
+ var cl=document.getElementById('adm-clave').value||'';
+ if(!url)return err('Falta la URL del servidor.');
+ if(!cl)return err('Escribe tu clave de administrador.');
+ CFGA.API=url;localStorage.setItem('v5a_api',url);
+ document.getElementById('adm-btn').textContent='Entrando…';
+ var h=await apiA('/health');
+ if(!h||!h.ok){document.getElementById('adm-btn').textContent='Entrar';return err('El servidor no responde en esa URL.');}
+ var r=await apiA('/auth/admin',{clave:cl});
+ document.getElementById('adm-btn').textContent='Entrar';
+ if(!r||!r.ok)return err(r&&r.error?r.error:'Clave incorrecta.');
+ CFGA.TOKEN=r.token;localStorage.setItem('v5a_token',r.token);
+ ov.style.display='none';
+ if(typeof cargarAdm==='function')cargarAdm();
+ if(typeof render==='function')render();
+};
+window.admSalir=function(){
+ if(!confirm('¿Cerrar sesión del panel?'))return;
+ CFGA.TOKEN='';localStorage.setItem('v5a_token','');
+ location.reload();
+};
+document.getElementById('adm-btn').onclick=admEntrar;
+document.getElementById('adm-clave').addEventListener('keydown',function(e){if(e.key==='Enter')admEntrar()});
+
+/* Si el servidor rechaza por sesión vencida, vuelve al login */
+var _api=window.apiA;
+window.apiA=async function(ruta,datos,metodo){
+ var r=await _api(ruta,datos,metodo);
+ if(r&&r.ok===false&&/no autenticado/i.test(r.error||'')&&ruta.indexOf('/auth/')<0){
+  CFGA.TOKEN='';localStorage.setItem('v5a_token','');admMostrarLogin();
+ }
+ return r;
+};
+
+/* Botón de cerrar sesión dentro de Configuración */
+if(typeof rConfig==='function'){var _cf=rConfig;window.rConfig=function(){
+ var base='';try{base=_cf()}catch(e){}
+ return base+'<div class="card"><div class="ct">🔒 Sesión</div><div style="font-size:11.5px;opacity:.7;margin-bottom:8px;line-height:1.5">Cierra sesión si usas una computadora compartida.</div><button onclick="admSalir()" style="width:100%;padding:12px;border:1.5px solid rgba(178,59,46,.5);background:none;color:#e5a49b;border-radius:11px;font-weight:800;cursor:pointer">Cerrar sesión del panel</button></div>';
+};}
+
+/* Al abrir: si no hay sesión válida, pide clave */
+if(!CFGA.TOKEN)admMostrarLogin();
+})();
+</script>
+
+<script id="v5fix2">
+(function(){
+/* ══ Tiendas y pedidos: refrescar siempre desde el servidor ══ */
+if(typeof atGuardar==='function'){var _ag=atGuardar;window.atGuardar=async function(){
+ await _ag(); if(CFGA.API&&CFGA.TOKEN)setTimeout(function(){cargarAdm()},600);
+};}
+if(typeof pdGuardar==='function'){var _pg=pdGuardar;window.pdGuardar=async function(){
+ await _pg(); if(CFGA.API&&CFGA.TOKEN)setTimeout(function(){cargarAdm()},600);
+};}
+if(typeof tVerif==='function'){var _tv=tVerif;window.tVerif=async function(i){await _tv(i);if(CFGA.API&&CFGA.TOKEN)cargarAdm();};}
+if(typeof tCred==='function'){var _tc=tCred;window.tCred=async function(i){await _tc(i);if(CFGA.API&&CFGA.TOKEN)cargarAdm();};}
+if(typeof evVerif==='function'){var _ev=evVerif;window.evVerif=async function(i){await _ev(i);if(CFGA.API&&CFGA.TOKEN)cargarAdm();};}
+
+/* ══ Lista completa de tiendas + estado de conexión (sección Tiendas) ══ */
+if(typeof rTiendas==='function'){var _rt=rTiendas;window.rTiendas=function(){
+ var base='';try{base=_rt()}catch(e){}
+ var T=(typeof TIENDAS!=='undefined')?TIENDAS:[];
+ var filas=T.length?T.map(function(t,i){
+  var sin=(t.lat==null||t.lon==null);
+  return '<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid rgba(128,128,128,.18);flex-wrap:wrap">'
+  +'<div style="flex:1;min-width:150px"><b style="font-size:13px">'+(t.nueva?'🆕 ':'')+tnomA(t)+'</b>'
+  +'<div style="font-size:11px;opacity:.65">'+(t.z||'sin zona')+' · '+(t.d!=null?t.d+'d':'—')
+  +(Number(t.sa||0)>0?' · 💳 S/'+Number(t.sa).toFixed(2):'')
+  +(t.conductor_asig?' · 🔒 '+t.conductor_asig:'')
+  +(sin?' · <span style="color:#B97A1F">sin coordenadas</span>':'')+'</div></div>'
+  +(t.nueva?'<button onclick="tVerif('+i+')" style="border:none;background:#2F7D4F;color:#fff;border-radius:9px;padding:7px 11px;font-size:11px;font-weight:800;cursor:pointer">✓ Verificar</button>':'')
+  +'<button onclick="tCred('+i+')" style="border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:9px;padding:7px 11px;font-size:11px;font-weight:800;cursor:pointer">💳 Crédito</button></div>'
+ }).join(''):'<div style="font-size:12px;opacity:.65;padding:8px 0;line-height:1.6">'+(CFGA.API?'Aún no hay tiendas en el servidor. Regístralas en <b>Mapa y rutas → ➕ Registrar tienda</b>, o espera a que un conductor lo haga desde su app.':'Conecta el servidor para ver tus tiendas.')+'</div>';
+ return '<div class="card"><div class="ct">🏪 Todas mis tiendas ('+T.length+')</div>'
+  +'<button onclick="cargarAdm()" style="width:100%;margin-bottom:8px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:9px;font-weight:800;font-size:12px;cursor:pointer">🔄 Actualizar desde el servidor</button>'
+  +filas+'</div>'+base;
+};}
+
+/* ══ Diagnóstico: qué hay realmente guardado en Supabase ══ */
+if(typeof rConfig==='function'){var _cf2=rConfig;window.rConfig=function(){
+ var base='';try{base=_cf2()}catch(e){}
+ return base+'<div class="card"><div class="ct">🔎 Diagnóstico de la base de datos</div>'
+ +'<div style="font-size:11.5px;opacity:.7;margin-bottom:8px;line-height:1.5">Muestra cuántos registros hay en cada tabla y las últimas tiendas y pedidos guardados. Sirve para confirmar que todo llega a Supabase.</div>'
+ +'<button onclick="verDiag()" style="width:100%;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Ver estado de la base</button>'
+ +'<div id="diag-box" style="font-size:11.5px;margin-top:10px;line-height:1.6"></div></div>';
+};}
+window.verDiag=async function(){
+ var b=document.getElementById('diag-box');if(!b)return;
+ b.textContent='Consultando…';
+ var r=await apiA('/admin/diagnostico');
+ if(!r||!r.ok)return b.textContent='No se pudo consultar'+(CFGA.TOKEN?'':' (falta iniciar sesión)');
+ b.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;margin-bottom:8px">'
+ +Object.keys(r.conteos).map(function(k){return '<div style="display:flex;justify-content:space-between"><span style="opacity:.7">'+k+'</span><b>'+r.conteos[k]+'</b></div>'}).join('')+'</div>'
+ +'<b>Últimas tiendas:</b><br>'+((r.ultimas_tiendas||[]).map(function(t){return '#'+t.id+' '+t.nombre+(t.lat?'':' <span style="color:#B97A1F">(sin coordenadas)</span>')+(t.nueva?' 🆕':'')}).join('<br>')||'ninguna')
+ +'<br><br><b>Últimos pedidos:</b><br>'+((r.ultimos_pedidos||[]).map(function(p){return '#'+p.id+' '+p.tienda+' → '+p.conductor+(p.tienda_id?'':' <span style="color:#B23B2E">(no enlazó con la tienda)</span>')}).join('<br>')||'ninguno');
+};
+})();
+</script>
+
+<script id="v5ro">
+(function(){
+/* ══ Modo solo lectura (clave VIEWER_PASS del servidor) ══ */
+function leerRO(){try{var p=JSON.parse(atob(CFGA.TOKEN.split('.')[1]));return !!p.ro}catch(e){return false}}
+window.RO=CFGA.TOKEN?leerRO():false;
+window.pintaRO=function(){
+ var b=document.getElementById('ro-chip');
+ if(window.RO){
+  if(!b){b=document.createElement('div');b.id='ro-chip';b.style.cssText='position:fixed;right:12px;bottom:12px;z-index:9999;background:#3A2F14;color:#E8C36A;border-radius:20px;padding:7px 12px;font-size:11px;font-weight:800;box-shadow:0 4px 14px rgba(0,0,0,.25)';document.body.appendChild(b);}
+  b.textContent='👁 Solo lectura — sin cambios';
+ }else if(b)b.remove();
+};
+if(typeof admEntrar==='function'){var _ae=admEntrar;window.admEntrar=async function(){
+ await _ae();
+ if(CFGA.TOKEN){window.RO=leerRO();pintaRO();}
+};}
+var _apiA=window.apiA;
+window.apiA=async function(ruta,datos,metodo){
+ var esEscritura=(metodo&&metodo!=='GET')||!!datos;
+ if(window.RO&&esEscritura&&ruta.indexOf('/auth/')<0){
+  alert('Estás en modo solo lectura: puedes ver todo el panel, pero no hacer cambios.');
+  return {ok:false,error:'solo lectura'};
+ }
+ return await _apiA(ruta,datos,metodo);
+};
+pintaRO();
+})();
+</script>
+
+<style id="v5estilo">
+/* ── Unifica todo lo que se generó con estilos sueltos ── */
+.card{padding:16px 18px!important;border-radius:14px!important;border:1px solid var(--linea)!important}
+.card+.card{margin-top:0}
+.ct{font-size:13.5px!important;font-weight:700!important;letter-spacing:-.15px!important;
+    text-transform:none!important;color:var(--tinta)!important;margin-bottom:12px!important;
+    padding-bottom:9px;border-bottom:1px solid var(--linea)}
+
+/* Campos: mismo alto, mismo borde, mismo foco */
+.card input,.card select,.card textarea{
+  height:42px;padding:0 12px!important;border-radius:10px!important;
+  border:1px solid var(--linea)!important;background:var(--carta)!important;color:var(--tinta)!important;
+  font-size:13.5px!important;font-family:inherit;width:100%;transition:border-color .15s,box-shadow .15s}
+.card textarea{height:auto;padding:10px 12px!important;min-height:76px}
+.card input:focus,.card select:focus,.card textarea:focus{
+  outline:none;border-color:var(--trigo)!important;box-shadow:0 0 0 3px rgba(185,122,31,.14)}
+.card input[type=number]{text-align:right!important}
+.card input::placeholder,.card textarea::placeholder{color:#A7AA9F}
+
+/* Botones: tres jerarquías claras */
+.card button{height:42px;border-radius:10px!important;font-size:13px!important;font-weight:650!important;
+  font-family:inherit;cursor:pointer;transition:filter .15s,background .15s;padding:0 14px!important}
+.card button:hover{filter:brightness(.96)}
+.card button:active{transform:translateY(1px)}
+.card button[style*="background:#1D4ED8"],.card button[style*="background:#20241E"],
+.card button[style*="background:#2F7D4F"],.card button[style*="background:#B97A1F"],
+.card button[style*="background:#128C3A"]{border:none!important;color:#fff!important}
+.card button[style*="background:none"]{background:var(--carta)!important;border:1px solid var(--linea)!important;color:var(--tinta)!important}
+
+/* Filas de lista: respiración pareja */
+.card>div[style*="border-bottom"]{padding:11px 0!important;border-bottom:1px solid var(--linea)!important}
+.card>div[style*="border-bottom"]:last-of-type{border-bottom:none!important}
+
+/* Rejillas simétricas */
+.card div[style*="grid-template-columns"]{gap:10px 14px!important;align-items:center}
+@media(max-width:620px){.card div[style*="grid-template-columns"]{grid-template-columns:1fr!important}}
+
+/* Chips de filtro */
+.card button[style*="border-radius:16px"]{height:34px;border-radius:999px!important;font-size:12px!important;padding:0 13px!important}
+
+/* Notas y avisos: mismo lenguaje visual */
+.card div[style*="opacity:.65"],.card div[style*="opacity:.7"]{line-height:1.55}
+.aviso,.card div[style*="border-left:4px"]{border-radius:12px!important}
+
+/* Mapas */
+.card div[id$="map"],#zmap,#amap2,#gpsmap,#at-map{border:1px solid var(--linea)!important;border-radius:12px!important}
+
+/* Menú lateral y barra superior */
+#side{box-shadow:var(--sombra)}
+.top h1{letter-spacing:-.2px}
+
+/* Login del panel */
+#adm-login input{height:46px;border-radius:12px;font-size:14px}
+#adm-login #adm-btn{height:48px;border-radius:12px;font-size:14px;letter-spacing:.1px}
+</style>
+<script id="v5estilo-js">
+(function(){
+/* Quita textos que explican lo evidente y etiquetas en mayúsculas */
+var FRASES=['Se aplica sobre el precio base','Se multiplica con el de arriba','Sobre el precio base del catálogo',
+'Cada producto con su precio de venta','Suma de gastos que NO son combustible','Solo si usas una plataforma externa',
+'Él la cuenta y confirma producto','Se actualiza solo cada 60 s','Las envías tú desde tu número',
+'Asignar es una directiva de ruta','El conductor entra por','Muestra cuántos registros hay',
+'Descarga un archivo que abres con Excel','Cierra sesión si usas una computadora','Donde el conductor deja el sobrante',
+'Añade categorías de temporada','Las tiendas te escriben a TU WhatsApp','Al guardar, los conductores lo reciben'];
+function limpiar(){
+ document.querySelectorAll('.card div').forEach(function(d){
+  if(d.children.length)return;
+  var t=(d.textContent||'').trim();
+  if(t.length<12)return;
+  for(var i=0;i<FRASES.length;i++){if(t.indexOf(FRASES[i])===0){d.remove();return;}}
+ });
+ document.querySelectorAll('.card div[style*="text-transform:uppercase"]').forEach(function(d){
+  d.style.textTransform='none';d.style.letterSpacing='0';d.style.fontSize='12px';d.style.opacity='.7';
+ });
+}
+var _r=window.render;
+if(typeof _r==='function'){window.render=function(){_r();setTimeout(limpiar,20);};}
+setTimeout(limpiar,300);
+})();
+</script>
+
+<style id="v5resp">
+/* ══════ CELULAR (hasta 700px) ══════ */
+@media(max-width:700px){
+  .content{padding:12px 12px 80px!important}
+  .card{padding:14px!important;margin-bottom:12px!important;border-radius:12px!important}
+  .top{padding:10px 14px!important;gap:10px!important}
+  .top h1{font-size:15px!important}
+  .card input,.card select{height:44px!important;font-size:15px!important}  /* 15px evita el zoom de iOS */
+  .card button{height:44px!important;width:100%}
+  .card div[style*="display:flex"]>button{flex:1 1 auto;min-width:120px}
+  .card div[style*="grid-template-columns"]{grid-template-columns:1fr!important;gap:8px!important}
+  .card div[style*="display:flex"][style*="gap"]{flex-wrap:wrap!important}
+  #zmap,#amap2,#gpsmap,#at-map{height:280px!important}
+  .card button[style*="border-radius:16px"]{flex:1 1 auto;min-width:112px}
+  #ro-chip,#v5-chip{bottom:8px!important;font-size:10.5px!important}
+  .side{width:min(84vw,290px)!important}
+  .card table{display:block;overflow-x:auto}
+}
+/* Capa oscura al abrir el menú en celular */
+@media(max-width:860px){
+  #side-mask{position:fixed;inset:0;background:rgba(32,36,30,.45);z-index:790;display:none}
+  #side-mask.on{display:block}
+}
+/* ══════ TABLET (701–1100px) ══════ */
+@media(min-width:701px) and (max-width:1100px){
+  .content{padding:18px 20px 60px!important;max-width:820px;margin:0 auto}
+  .card div[style*="grid-template-columns:1fr 1fr 1fr"]{grid-template-columns:1fr 1fr!important}
+  #zmap,#amap2,#gpsmap{height:380px!important}
+}
+/* ══════ COMPUTADORA (1101px+) ══════ */
+@media(min-width:1101px){
+  .content{padding:24px 32px 70px!important;max-width:1080px;margin:0 auto}
+  .card{padding:20px 22px!important}
+  /* Dos columnas para las secciones con varias tarjetas */
+  .content.cols2{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  .content.cols2>.card{margin-bottom:0!important}
+  .content.cols2>.card.ancha{grid-column:1/-1}
+  #zmap,#amap2,#gpsmap{height:460px!important}
+  .card button{width:auto}
+}
+/* Que ningún mapa ni tabla desborde */
+.card>div[id$="map"]{max-width:100%}
+img,canvas{max-width:100%}
+</style>
+<script id="v5resp-js">
+(function(){
+/* Capa oscura + cerrar el menú al tocar fuera */
+var m=document.createElement('div');m.id='side-mask';
+m.onclick=function(){var s=document.getElementById('side');if(s)s.classList.remove('on');m.classList.remove('on');};
+document.body.appendChild(m);
+var side=document.getElementById('side');
+if(side&&typeof MutationObserver!=='undefined'){
+ try{new MutationObserver(function(){m.classList.toggle('on',side.classList.contains('on'))}).observe(side,{attributes:true,attributeFilter:['class']});}catch(e){}
+}
+if(typeof ir==='function'){var _ir=ir;window.ir=function(s){_ir(s);m.classList.remove('on');};}
+/* En pantalla grande, las secciones con varias tarjetas van a dos columnas */
+var DOS=['resumen','tiendas','creditos','conductores','config','exportar','kardex'];
+function ajusta(){
+ var c=document.getElementById('content');if(!c)return;
+ var ancho=window.innerWidth>1100;
+ var usa=ancho&&DOS.indexOf(typeof CUR!=='undefined'?CUR:'')>=0&&c.querySelectorAll('.card').length>2;
+ c.classList.toggle('cols2',!!usa);
+ if(usa){var cards=c.querySelectorAll('.card');
+  cards.forEach(function(k){var t=(k.querySelector('.ct')||{}).textContent||'';
+   if(/mapa|zonas|camiones|catálogo|catalogo/i.test(t)||k.querySelector('div[id$="map"]'))k.classList.add('ancha');});}
+}
+var _r=window.render;if(typeof _r==='function'){window.render=function(){_r();setTimeout(ajusta,30);};}
+window.addEventListener('resize',function(){clearTimeout(window._rt);window._rt=setTimeout(ajusta,150)});
+setTimeout(ajusta,400);
+})();
+</script>
+
+<script id="v5panelfijo">
+/* ═══ URL del servidor fija: el panel solo pide la clave ═══ */
+var SERVIDOR_PANEL = "https://distribuidora-backend-production-bb80.up.railway.app";
+
+(function(){
+ if(!SERVIDOR_PANEL||SERVIDOR_PANEL.indexOf('TU-URL')>=0)return;
+ try{
+  window.CFGA=window.CFGA||{};
+  CFGA.API=SERVIDOR_PANEL.replace(/\/+$/,'');
+  localStorage.setItem('v5a_api',CFGA.API);
+ }catch(e){}
+ function ocultar(){
+  var u=document.getElementById('adm-url');
+  if(u){u.style.display='none';u.value=CFGA.API;}
+  var e=document.getElementById('adm-est');
+  if(e)e.textContent='Ingresa tu clave para continuar';
+  var c=document.getElementById('cx-url');
+  if(c){
+   var card=c.closest?c.closest('.card'):null;
+   if(card)card.style.display='none';
+  }
+  var chip=document.getElementById('v5-chip');
+  if(chip)chip.style.display='none';
+ }
+ var _r=window.render;
+ if(typeof _r==='function'){window.render=function(){_r();setTimeout(ocultar,25);};}
+ setTimeout(ocultar,120);
+ document.addEventListener('DOMContentLoaded',ocultar);
+})();
+</script>
+
+<style id="v5fixui">
+/* Los controles del mapa nunca por encima de la barra superior */
+.leaflet-top,.leaflet-bottom{z-index:400!important}
+.leaflet-control-zoom{margin-top:10px!important;margin-left:10px!important}
+.top{z-index:600!important}
+#side{z-index:800!important}
+</style>
+<script id="v5fixpanel">
+(function(){
+/* ══ 1. Barra superior: marca, fecha real y menú de sesión ══ */
+function topbar(){
+ var t=document.querySelector('.top');if(!t)return;
+ t.querySelectorAll('*').forEach(function(el){
+  if(el.children.length)return;
+  var x=(el.textContent||'').trim();
+  if(/despacho\s*andino/i.test(x))el.remove();
+ });
+ var f=document.getElementById('top-fecha');
+ if(!f){f=document.createElement('div');f.id='top-fecha';f.style.cssText='margin-left:auto;font-size:12px;color:var(--tenue);white-space:nowrap';t.appendChild(f);}
+ f.textContent=new Date().toLocaleDateString('es-PE',{weekday:'short',day:'2-digit',month:'short'})+' · '+new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'});
+ var u=document.getElementById('top-user');
+ if(!u){u=document.createElement('button');u.id='top-user';
+  u.style.cssText='margin-left:10px;border:1px solid var(--linea);background:var(--carta);color:var(--tinta);border-radius:999px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer';
+  u.onclick=function(){if(confirm('¿Cerrar sesión del panel?'))admSalir()};
+  t.appendChild(u);}
+ u.textContent=(window.RO?'👁 Solo lectura':'👤 Dueño')+' · salir';
+}
+setInterval(function(){var f=document.getElementById('top-fecha');if(f)f.textContent=new Date().toLocaleDateString('es-PE',{weekday:'short',day:'2-digit',month:'short'})+' · '+new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'});},30000);
+
+/* ══ 2. Conductores: editar nombre, camión e ID de vehículo ══ */
+if(typeof rConductores==='function'){var _rc=rConductores;window.rConductores=function(){
+ var base='';try{base=_rc()}catch(e){}
+ var filas=USRS.map(function(u,i){
+  return '<div style="padding:11px 0;border-bottom:1px solid var(--linea)">'
+  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+  +'<input id="ed-n-'+u.usuario+'" value="'+(u.nombre||'')+'" placeholder="Nombre">'
+  +'<input id="ed-c-'+u.usuario+'" value="'+(u.camion||'')+'" placeholder="Camión / placa">'
+  +'<input id="ed-g-'+u.usuario+'" value="'+(u.gps_id||'')+'" placeholder="ID de vehículo (Traccar)">'
+  +'<select id="ed-t-'+u.usuario+'"><option value="fijo"'+(u.tipo!=='paso'?' selected':'')+'>Ruta fija</option><option value="paso"'+(u.tipo==='paso'?' selected':'')+'>De paso</option></select>'
+  +'</div><div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
+  +'<button onclick="edCond(\''+u.usuario+'\')" style="background:#1D4ED8;color:#fff;border:none">Guardar cambios</button>'
+  +'<span style="align-self:center;font-size:11.5px;opacity:.6">@'+u.usuario+' · '+(u.estado||'')+'</span></div></div>';
+ }).join('');
+ return '<div class="card"><div class="ct">👤 Conductores</div>'+(USRS.length?filas:'<div style="font-size:12px;opacity:.6">Sin conductores todavía.</div>')+'</div>'+base;
+};}
+window.edCond=async function(u){
+ var g=function(p){var e=document.getElementById(p+u);return e?e.value.trim():null};
+ var r=await apiA('/admin/conductores/'+u+'/editar',{nombre:g('ed-n-'),camion:g('ed-c-'),gps_id:g('ed-g-'),tipo:g('ed-t-')});
+ alert(r&&r.ok?'✓ Guardado':(r&&r.error)||'No se pudo guardar');
+ if(r&&r.ok)cargarAdm();
+};
+
+/* ══ 3. Tiendas: ficha editable + historial ══ */
+window.TSEL=-1;
+window.abrirTienda=async function(i){
+ TSEL=i;var t=TIENDAS[i];
+ var zonas=(PARAMS_A.zonas||[]).map(function(z){return '<option value="'+z.nombre+'"'+(t.z===z.nombre?' selected':'')+'>'+z.nombre+'</option>'}).join('');
+ var tipos=(PARAMS_A.tipos_tienda&&PARAMS_A.tipos_tienda.length?PARAMS_A.tipos_tienda:['bodega','minimarket','puesto','mayorista','otro'])
+  .map(function(x){return '<option value="'+x+'"'+(t.tp===x?' selected':'')+'>'+x+'</option>'}).join('');
+ var h='<div class="card"><div class="ct">✏️ '+tnomA(t)+'</div>'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">'
+ +'<input id="et-nom" value="'+(t.n||'')+'" placeholder="Nombre">'
+ +'<select id="et-zona">'+(zonas?'<option value="">— sin zona —</option>'+zonas:'<option value="">— aún no hay zonas creadas —</option>')+'</select>'
+ +'<input id="et-due" value="'+(t.due||'')+'" placeholder="Dueño">'
+ +'<input id="et-tel" value="'+(t.tel||'')+'" placeholder="Teléfono">'
+ +'<select id="et-tipo">'+tipos+'</select>'
+ +'<select id="et-vip"><option value="0">Normal</option><option value="1"'+(t.vip?' selected':'')+'>★ VIP</option></select>'
+ +'<input id="et-hi" type="time" value="'+(t.h_ini||'')+'"><input id="et-hf" type="time" value="'+(t.h_fin||'')+'">'
+ +'<input id="et-lat" value="'+(t.lat!=null?t.lat:'')+'" placeholder="lat"><input id="et-lon" value="'+(t.lon!=null?t.lon:'')+'" placeholder="lon">'
+ +'</div><input id="et-not" value="'+(t.no||'')+'" placeholder="Notas" style="margin-top:9px">'
+ +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
+ +'<button onclick="guardarTiendaAdm()" style="background:#1D4ED8;color:#fff;border:none">Guardar</button>'
+ +'<button onclick="TSEL=-1;render()" style="background:none">Cerrar</button></div></div>'
+ +'<div class="card"><div class="ct">🕘 Historial de cambios</div><div id="t-hist" style="font-size:12px;line-height:1.6">Cargando…</div></div>';
+ document.getElementById('content').innerHTML=h;
+ var r=await apiA('/admin/tiendas/'+t.id+'/historial');
+ var box=document.getElementById('t-hist');
+ if(box)box.innerHTML=(r&&r.ok&&r.filas.length)?r.filas.map(function(f){return '<div style="padding:6px 0;border-bottom:1px solid var(--linea)">'+new Date(f.creado).toLocaleString('es-PE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' · '+f.detalle.replace(/^#\d+\s/,'')+'</div>'}).join(''):'Sin cambios registrados.';
+};
+window.guardarTiendaAdm=async function(){
+ var t=TIENDAS[TSEL];if(!t)return;
+ var g=function(id){var e=document.getElementById(id);return e?e.value.trim():null};
+ var r=await apiA('/admin/tiendas/'+t.id+'/editar',{nombre:g('et-nom'),zona:g('et-zona'),dueno:g('et-due'),tel:g('et-tel'),
+  tipo:g('et-tipo'),vip:g('et-vip')==='1',hora_ini:g('et-hi'),hora_fin:g('et-hf'),notas:g('et-not'),
+  lat:parseFloat(g('et-lat'))||null,lon:parseFloat(g('et-lon'))||null});
+ if(r&&r.ok){alert(r.sin_cambios?'Sin cambios':'✓ Guardado');await cargarAdm();abrirTienda(TSEL);}
+ else alert((r&&r.error)||'No se pudo guardar');
+};
+if(typeof rTiendas==='function'){var _rt=rTiendas;window.rTiendas=function(){
+ var base='';try{base=_rt()}catch(e){}
+ return base.replace(/onclick="tCred\((\d+)\)"[^>]*>💳 Crédito<\/button>/g,
+   function(m,i){return 'onclick="tCred('+i+')" style="border:1px solid var(--linea);background:none">💳 Crédito</button><button onclick="abrirTienda('+i+')" style="background:#B97A1F;color:#fff;border:none;margin-left:6px">✏️ Editar</button>'});
+};}
+
+/* ══ 4. Pedido de tienda sin registrar ══ */
+if(typeof rPedidos==='function'){var _rp=rPedidos;window.rPedidos=function(){
+ var h=_rp();
+ return h.replace('<select id="pd-t"','<select id="pd-t" onchange="pdLibre()"')
+  .replace('</select>','<option value="_libre">🆕 Tienda sin registrar…</option></select>',1)
+  .replace('<input id="pd-nota"','<input id="pd-libre" placeholder="Nombre de la tienda sin registrar" style="display:none;margin-bottom:8px"><input id="pd-nota"');
+};}
+window.pdLibre=function(){
+ var s=document.getElementById('pd-t'),i=document.getElementById('pd-libre');
+ if(s&&i)i.style.display=(s.value==='_libre')?'block':'none';
+};
+if(typeof pdGuardar==='function'){var _pg=pdGuardar;window.pdGuardar=async function(){
+ var s=document.getElementById('pd-t');
+ if(s&&s.value==='_libre'){
+  var nom=(document.getElementById('pd-libre')||{}).value||'';
+  if(!nom.trim())return alert('Escribe el nombre de la tienda sin registrar.');
+  var it=pkItems('pd');if(!it.length)return alert('Añade al menos un producto.');
+  var cs=document.getElementById('pd-c');if(!cs||!cs.value)return alert('Elige el conductor.');
+  var p={tienda:nom.trim(),conductor:cs.value,items:it.map(function(x){return{p:x.n,c:x.c}}),
+    nota:((document.getElementById('pd-nota')||{}).value||'')+' · TIENDA SIN REGISTRAR',
+    hora:new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})};
+  PEDIDOS_ADM.unshift(p);pkReset('pd');
+  var r=await apiA('/pedidos',p);render();
+  return alert(r&&r.ok?'✓ Pedido enviado al conductor':'No se pudo enviar');
+ }
+ return await _pg();
+};}
+
+/* ══ 5. Zona en el alta de tienda: solo zonas existentes ══ */
+function zonaSelect(){
+ try{
+  var inp=document.getElementById('at-z');
+  if(!inp||inp.tagName==='SELECT'||!inp.parentElement||typeof inp.parentElement.replaceChild!=='function')return;
+  var zs=PARAMS_A.zonas||[];
+  var s=document.createElement('select');s.id='at-z';
+  s.innerHTML=zs.length?('<option value="">— elige zona —</option>'+zs.map(function(z){return '<option value="'+z.nombre+'">'+z.nombre+'</option>'}).join(''))
+    :'<option value="">— aún no hay zonas creadas —</option>';
+  if(!zs.length)s.disabled=true;
+  inp.parentElement.replaceChild(s,inp);
+ }catch(e){}
+}
+var _r=window.render;
+window.render=function(){_r();setTimeout(function(){try{topbar()}catch(e){};try{zonaSelect()}catch(e){}},30);};
+setTimeout(function(){try{topbar()}catch(e){};try{zonaSelect()}catch(e){}},250);
+})();
+</script>
+
+<script id="v5cat3">
+(function(){
+/* ══ Catálogo por TIPO DE TIENDA → categoría → productos ══ */
+window.TIPOSEL='';window.PRECIOS={};   /* PRECIOS[idProducto][tipo] */
+function tipos(){
+ var t=(PARAMS_A.tipos_tienda&&PARAMS_A.tipos_tienda.length)?PARAMS_A.tipos_tienda:['bodega','minimarket','puesto','mayorista','otro'];
+ return t;
+}
+window.rCatalogo=function(){
+ var TP=tipos();
+ if(!TIPOSEL)TIPOSEL=TP[0];
+ var c=CATA[CATCAT]||{prods:[],nom:'—',emoji:'📦',precio:0,id:''};
+ var chipsTipo=TP.map(function(t){var on=t===TIPOSEL;
+  return '<button onclick="TIPOSEL=\''+t+'\';render()" style="border-radius:999px;border:1px solid '+(on?'#B97A1F':'var(--linea)')+';background:'+(on?'rgba(185,122,31,.12)':'var(--carta)')+';color:'+(on?'#8A5B12':'var(--tinta)')+'">'+t+'</button>'}).join('')
+  +'<button onclick="tipoNuevo()" style="border-radius:999px;border:1px dashed var(--linea);background:none">+ tipo</button>';
+ var chipsCat=CATA.map(function(x,i){var on=i===CATCAT;
+  return '<button onclick="CATCAT='+i+';render()" style="border-radius:999px;border:1px solid '+(on?'#1D4ED8':'var(--linea)')+';background:'+(on?'rgba(29,78,216,.10)':'var(--carta)')+';color:'+(on?'#1D4ED8':'var(--tinta)')+'">'+x.emoji+' '+x.nom.split(' x')[0]+'</button>'}).join('');
+ var filas=c.prods.map(function(p){
+  var _pp=PRECIOS[p.id]||{},_otros=Object.keys(_pp);
+  var _prop=_pp[TIPOSEL]!=null;
+  var pr=_prop?_pp[TIPOSEL]:(_otros.length?_pp[_otros[0]]:((CATE[p.id]||{}).precio!=null?CATE[p.id].precio:c.precio));
+  var co=(CATE[p.id]||{}).costo||0;
+  return '<div style="display:grid;grid-template-columns:1fr 92px 92px 34px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--linea)">'
+   +'<div style="font-size:13px">'+p.n+'</div>'
+   +'<input id="px-'+p.id+'" type="number" step="0.1" value="'+pr+'" title="Precio para '+TIPOSEL+'" style="'+(_prop?'':'border-color:#E3C583;background:#FDF6E4')+'">'
+   +'<input id="pc-'+p.id+'" type="number" step="0.1" value="'+co+'" title="Costo de compra">'
+   +'<button onclick="prodBorrar(\''+p.id+'\')" style="background:none;border:none;color:#B23B2E;font-size:15px;padding:0">✕</button></div>'}).join('');
+ return '<div class="card"><div class="ct">🏷️ Precios · '+TIPOSEL+'</div>'
+ +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chipsTipo+'</div>'
+ +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+chipsCat+'</div>'
+ +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
+ +'<input id="pgen" type="number" step="0.1" placeholder="Precio general" style="width:130px">'
+ +'<button onclick="aplicarGeneral()" style="background:none">Aplicar a toda la categoría</button></div>'
+ +'<div style="display:grid;grid-template-columns:1fr 92px 92px 34px;gap:8px;font-size:11px;opacity:.6;padding-bottom:4px"><div>Producto</div><div style="text-align:right">Precio</div><div style="text-align:right">Costo</div><div></div></div>'
+ +(filas||'<div style="font-size:12px;opacity:.6;padding:8px 0">Esta categoría aún no tiene productos.</div>')
+ +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><input id="np-nom" placeholder="Producto nuevo" style="flex:2;min-width:150px"><input id="np-pv" type="number" step="0.1" placeholder="precio" style="width:110px"><button onclick="prodAgregar()" style="background:#2F7D4F;color:#fff;border:none">+ Añadir</button></div>'
+ +'<button onclick="catGuardar()" style="width:100%;margin-top:10px;background:#1D4ED8;color:#fff;border:none">Guardar precios de '+c.nom.split(' x')[0]+' ('+TIPOSEL+')</button>'
+ +'<div id="cat-msg" style="font-size:12px;font-weight:600;margin-top:8px;opacity:.8"></div></div>'
+ +'<div class="card"><div class="ct">🗂️ Categorías</div>'
+ +CATA.map(function(x){return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--linea)"><input id="cn-'+x.id+'" value="'+x.nom+'" style="flex:1"><input id="ce-'+x.id+'" value="'+x.emoji+'" style="width:56px;text-align:center"><input id="cp-'+x.id+'" type="number" step="0.1" value="'+(x.precio||0)+'" style="width:88px"><button onclick="catBorrar(\''+x.id+'\')" style="background:none;color:#B23B2E">Desactivar</button></div>'}).join('')
+ +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><input id="nc-nom" placeholder="Categoría nueva" style="flex:2;min-width:150px"><input id="nc-emo" placeholder="🎄" style="width:64px;text-align:center"><input id="nc-pre" type="number" step="0.1" placeholder="precio" style="width:110px"><button onclick="catAgregar()" style="background:#2F7D4F;color:#fff;border:none">+ Añadir</button></div>'
+ +'<button onclick="catsGuardar()" style="width:100%;margin-top:10px;background:none">Guardar categorías</button>'
+ +'<div id="cats-msg" style="font-size:12px;font-weight:600;margin-top:8px;opacity:.8"></div></div>';
+};
+window.aplicarGeneral=function(){
+ var v=parseFloat((document.getElementById('pgen')||{}).value);
+ if(isNaN(v))return alert('Escribe el precio general.');
+ (CATA[CATCAT].prods||[]).forEach(function(p){var e=document.getElementById('px-'+p.id);if(e)e.value=v;});
+};
+window.tipoNuevo=async function(){
+ var n=prompt('Nombre del tipo de tienda (ej: mayorista):');if(!n)return;
+ n=n.trim().toLowerCase();if(!n)return;
+ PARAMS_A.tipos_tienda=(PARAMS_A.tipos_tienda&&PARAMS_A.tipos_tienda.length?PARAMS_A.tipos_tienda:tipos()).concat([n]);
+ savePA();await apiA('/admin/params',PARAMS_A);TIPOSEL=n;render();
+};
+window.catGuardar=async function(){
+ var c=CATA[CATCAT];
+ var prods=c.prods.map(function(p){
+  var precio=parseFloat((document.getElementById('px-'+p.id)||{}).value)||0;
+  var costo=parseFloat((document.getElementById('pc-'+p.id)||{}).value)||0;
+  PRECIOS[p.id]=PRECIOS[p.id]||{};PRECIOS[p.id][TIPOSEL]=precio;
+  return{id:p.id,cat:c.id,nombre:p.n,precio:((CATE[p.id]||{}).precio||precio),costo:costo,precios:PRECIOS[p.id]};
+ });
+ var r=await apiA('/admin/catalogo',{productos:prods});
+ prods.forEach(function(p){CATE[p.id]={precio:p.precio,costo:p.costo}});
+ var m=document.getElementById('cat-msg');
+ if(m)m.textContent=(r&&r.ok)?('✓ Guardado para '+TIPOSEL+' — los conductores lo reciben al sincronizar'):'No se pudo guardar';
+};
+if(typeof catCargar==='function'){var _cc=catCargar;window.catCargar=async function(){
+ await _cc();
+ var r=await apiA('/admin/catalogo');
+ if(r&&r.ok)(r.productos||[]).forEach(function(p){if(p.precios)PRECIOS[p.id]=p.precios;});
+ if(CUR==='catalogo')render();
+};}
+})();
+</script>
+
+<script id="v5almacen">
+(function(){
+if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='almacen'})){
+ var ki=SECS.findIndex(function(s){return s[0]==='kardex'});
+ SECS.splice(ki+1,0,['almacen','🏬','Almacén']);
+}
+window.ALM={stock:{},movimientos:[]};
+var _r=render;window.render=function(){
+ if(CUR==='almacen'){try{document.getElementById('content').innerHTML=rAlmacen()}catch(e){console.error(e)}if(typeof nav==='function')nav();return;}
+ _r();
+};
+window.rAlmacen=function(){
+ var a=(PARAMS_A.almacen)||{};
+ var cats=(typeof CATC!=='undefined')?CATC:[];
+ var total=0;
+ var filas=cats.map(function(x){
+  var q=Number(ALM.stock[x[0]]||0);total+=q;
+  return '<div style="display:grid;grid-template-columns:1fr 90px 90px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--linea)">'
+  +'<div style="font-size:13px">'+x[1]+'</div>'
+  +'<div style="text-align:right;font-weight:800;font-size:14px;color:'+(q>0?'#2F6B4F':'var(--tenue)')+'">'+q+'</div>'
+  +'<input id="alm-'+x[0]+'" type="number" placeholder="0" style="width:100%">'
+  +'</div>'}).join('');
+ return '<div class="card"><div class="ct">🏬 '+(a.nombre||'Almacén')+'</div>'
+ +(a.ref?'<div style="font-size:12px;opacity:.7;margin-bottom:10px">'+a.ref+'</div>':'')
+ +'<div style="display:grid;grid-template-columns:1fr 90px 90px;gap:8px;font-size:11px;opacity:.6;padding-bottom:4px"><div>Categoría</div><div style="text-align:right">En almacén</div><div style="text-align:right">Ajuste</div></div>'
+ +filas
+ +'<div style="display:flex;justify-content:space-between;padding-top:10px;font-weight:800"><span>Total guardado</span><span>'+total+' unidades</span></div>'
+ +'<input id="alm-nota" placeholder="Motivo del ajuste" style="margin-top:10px">'
+ +'<div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap">'
+ +'<button onclick="almMov(\'retorno\')" style="flex:1;background:#2F7D4F;color:#fff;border:none">➕ Ingresar al almacén</button>'
+ +'<button onclick="almMov(\'salida\')" style="flex:1;background:none">➖ Sacar del almacén</button></div>'
+ +'<button onclick="almCargar()" style="width:100%;margin-top:9px;background:none">🔄 Actualizar</button></div>'
+ +'<div class="card"><div class="ct">Movimientos ('+ALM.movimientos.length+')</div>'
+ +(ALM.movimientos.length?ALM.movimientos.map(function(m){
+   var det=String(m.detalle||'');var obj={};try{obj=JSON.parse(det.split(' · ')[0])}catch(e){}
+   var txt=Object.keys(obj).map(function(k){var c=cats.find(function(x){return x[0]===k});return (c?c[1]:k)+' '+obj[k]}).join(', ');
+   return '<div style="padding:8px 0;border-bottom:1px solid var(--linea);font-size:12.5px"><b>'+(m.tipo==='almacen_retorno'?'➕ Ingreso':'➖ Salida')+'</b> · '+(m.conductor||'')+' · '+fechaHora(m.creado)
+   +'<div style="opacity:.75">'+(txt||det)+'</div></div>'}).join('')
+  :'<div style="font-size:12px;opacity:.6">Sin movimientos. Aparecerán cuando un conductor deje su sobrante al liquidar.</div>')+'</div>';
+};
+window.almCargar=async function(){var r=await apiA('/admin/almacen');if(r&&r.ok){ALM=r;if(CUR==='almacen')render();}};
+window.almMov=async function(tipo){
+ var items={},hay=false;
+ (typeof CATC!=='undefined'?CATC:[]).forEach(function(x){var v=+((document.getElementById('alm-'+x[0])||{}).value)||0;if(v>0){items[x[0]]=v;hay=true;}});
+ if(!hay)return alert('Escribe cuánto ingresa o sale en la columna Ajuste.');
+ var r=await apiA('/admin/almacen/ajuste',{tipo:tipo,items:items,nota:(document.getElementById('alm-nota')||{}).value||''});
+ if(r&&r.ok){await almCargar();alert('✓ Registrado');}else alert('No se pudo registrar');
+};
+if(CFGA.API&&CFGA.TOKEN)setTimeout(almCargar,900);
+})();
+</script>
+
+<script id="v5alm2">
+(function(){
+if(typeof rAlmacen==='function'){var _ra=rAlmacen;window.rAlmacen=function(){
+ var base='';try{base=_ra()}catch(e){}
+ var conds=(typeof USRS!=='undefined'?USRS:[]).filter(function(u){return u.activo});
+ var sel=conds.length?('<select id="alm-cond">'+conds.map(function(u){return '<option value="'+u.usuario+'">'+u.nombre+'</option>'}).join('')+'</select>')
+   :'<div style="font-size:12px;opacity:.6">Crea conductores primero.</div>';
+ var extra='<div class="card"><div class="ct">↔ Mover mercadería con un conductor</div>'
+ +'<div style="display:grid;grid-template-columns:1fr;gap:9px">'+sel+'</div>'
+ +'<div style="margin-top:10px">'+pickerHTML('alm')+'</div>'
+ +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+ +'<button onclick="almEnviar()" style="flex:1;background:#2F7D4F;color:#fff;border:none">📤 Enviar al conductor</button>'
+ +'<button onclick="almPedir()" style="flex:1;background:none">📥 Pedir al conductor</button></div>'
+ +'<div style="font-size:11.5px;opacity:.7;margin-top:8px;line-height:1.5">El conductor debe aceptar en su app; recién entonces se mueve el stock.</div></div>';
+ return base+extra;
+};}
+window.almEnviar=async function(){almMover('enviar')};
+window.almPedir=async function(){almMover('pedir')};
+window.almMover=async function(modo){
+ var cs=document.getElementById('alm-cond');
+ if(!cs||!cs.value)return alert('Elige el conductor.');
+ var det=pkItems('alm');if(!det.length)return alert('Marca los productos con +.');
+ var items={};det.forEach(function(x){items[x.cat]=(items[x.cat]||0)+x.c});
+ var r=await apiA('/admin/almacen/'+(modo==='enviar'?'enviar':'pedir'),{conductor:cs.value,items:items});
+ if(r&&r.ok){pkReset('alm');await almCargar();
+  alert(modo==='enviar'?'✓ Enviado. El conductor debe confirmar la recepción en su app.':'✓ Solicitado. El conductor debe confirmar la entrega en su app.');}
+ else alert((r&&r.error)||'No se pudo registrar');
+};
+var _r=render;window.render=function(){_r();if(CUR==='almacen')setTimeout(function(){try{pkPinta('alm')}catch(e){}},60);};
+})();
+</script>
+<script id="v5fix3p">
+(function(){
+/* ══ 1. Kardex: se actualiza solo, sin tener que pulsar nada ══ */
+function autoKardex(){
+ if(!CFGA.API||!CFGA.TOKEN)return;
+ if(window._akT)clearInterval(window._akT);
+ /* temporizador antiguo retirado: lo reemplaza el de 90 s más abajo */
+}
+var _r=render;window.render=function(){
+ _r();
+ /* refresca solo al CAMBIAR de sección, no en cada repintado */
+ if(window._ultSec!==CUR){
+  window._ultSec=CUR;
+  if(['kardex','bandeja','almacen','creditos','tiendas','resumen'].indexOf(CUR)>=0&&CFGA.API&&CFGA.TOKEN)setTimeout(function(){cargarAdm()},60);
+ }
+ setTimeout(pkTipoPre,40);
+};
+autoKardex();
+
+/* ══ 2. Registrar carga: usa el conductor de la pestaña elegida ══ */
+window.pkTipoPre=function(){
+ var s=document.getElementById('cg-cond');
+ if(s&&typeof FKX!=='undefined'&&FKX&&FKX!=='todos'){
+  s.value=FKX;
+  var av=document.getElementById('cg-quien');
+  if(!av){av=document.createElement('div');av.id='cg-quien';
+   av.style.cssText='font-size:12px;font-weight:700;color:#2F6B4F;margin:6px 0';
+   s.parentElement.insertBefore(av,s);}
+  var u=(USRS||[]).find(function(x){return x.usuario===FKX});
+  av.textContent='Asignando la carga a '+(u?u.nombre:FKX);
+ }
+};
+
+/* ══ 3. Catálogo: si el tipo no tiene precio propio, hereda el que ya pusiste ══ */
+if(typeof rCatalogo==='function'){var _rc=rCatalogo;window.rCatalogo=function(){
+ var h=_rc();
+ return h.replace('🏷️ Precios · ','🏷️ Precios · ');
+};}
+window.precioHeredado=function(pid,tipo){
+ var p=(window.PRECIOS||{})[pid]||{};
+ if(p[tipo]!=null)return {v:p[tipo],propio:true};
+ var otros=Object.keys(p);
+ if(otros.length)return {v:p[otros[0]],propio:false};
+ var b=(window.CATE||{})[pid];
+ if(b&&b.precio)return {v:b.precio,propio:false};
+ return {v:null,propio:false};
+};
+})();
+</script>
+
+<script id="v5fix4p">
+(function(){
+/* ══ 1. Quitar los dos cuadros de la barra (fecha y usuario) ══ */
+function limpiarTop(){
+ ['top-fecha','top-user'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+ var t=document.querySelector('.top');if(!t)return;
+ t.querySelectorAll('div,span,button').forEach(function(el){
+  if(el.children.length)return;
+  var x=(el.textContent||'').trim();
+  if(/^\d{1,2}\s+de\s+\w+/i.test(x)||/dueñ|despacho\s*andino/i.test(x))el.remove();
+ });
+}
+
+/* ══ 2. Resumen con los datos que pediste ══ */
+window.rResumen=function(){
+ var R=(window.RESUMEN)||{};
+ var enTurno=(typeof USRS!=='undefined'?USRS:[]).filter(function(u){return u.en_turno}).length;
+ var box=function(v,l,col){return '<div style="text-align:center;padding:14px 8px;border:1px solid var(--linea);border-radius:12px"><div style="font-size:26px;font-weight:800;color:'+(col||'var(--tinta)')+';line-height:1">'+v+'</div><div style="font-size:11px;color:var(--tenue);margin-top:4px">'+l+'</div></div>'};
+ return '<div class="card"><div class="ct">Resumen de hoy</div>'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'
+ +box(R.tiendas!=null?R.tiendas:(typeof TIENDAS!=='undefined'?TIENDAS.length:0),'Tiendas')
+ +box(R.conductores!=null?R.conductores:(typeof USRS!=='undefined'?USRS.length:0),'Conductores')
+ +box(R.en_turno!=null?R.en_turno:enTurno,'En ruta ahora',(R.en_turno||enTurno)?'#2F6B4F':'var(--tenue)')
+ +box(R.pedidos_hoy||0,'Pedidos hoy','#1D4ED8')
+ +box(R.pedidos_pendientes||0,'Pedidos pendientes',(R.pedidos_pendientes?'#B97A1F':'var(--tenue)'))
+ +box((typeof TIENDAS!=='undefined'?TIENDAS.filter(function(t){return Number(t.sa||0)>0}).length:0),'Tiendas con deuda')
+ +'</div>'
+ +'<button onclick="cargarAdm()" style="width:100%;margin-top:11px;background:none">🔄 Actualizar</button></div>'
+ +rBandeja();
+};
+if(typeof cargarAdm==='function'){var _ca=cargarAdm;window.cargarAdm=async function(){
+ await _ca();
+ var r=await apiA('/admin/datos');
+ if(r&&r.resumen)window.RESUMEN=r.resumen;
+ if(CUR==='resumen')render();
+};}
+
+/* ══ 3. Eventos: fuera los avisos de camión detenido ══ */
+if(typeof rBandeja==='function'){var _rb=rBandeja;window.rBandeja=function(){
+ var guarda=window.EVS;
+ try{if(Array.isArray(EVS))window.EVS=EVS.filter(function(e){return !/camion_detenido|detenido/i.test((e.tipo||'')+(e.titulo||''))});}catch(e){}
+ var h='';try{h=_rb()}catch(e){}
+ window.EVS=guarda;return h;
+};}
+
+/* ══ 4. Editar tienda: la pantalla ya no se regresa ══ */
+window.MODO_EDIT=false;
+if(typeof abrirTienda==='function'){var _at=abrirTienda;window.abrirTienda=function(i){MODO_EDIT=true;return _at(i);};}
+var _r=render;window.render=function(){
+ if(MODO_EDIT&&CUR==='tiendas'){setTimeout(limpiarTop,20);return;}   /* no repintar encima */
+ _r();setTimeout(limpiarTop,20);
+};
+if(typeof guardarTiendaAdm==='function'){var _gt=guardarTiendaAdm;window.guardarTiendaAdm=async function(){await _gt();};}
+window.cerrarEdicion=function(){MODO_EDIT=false;TSEL=-1;render();};
+
+/* ══ 5. Zonas dibujadas visibles en el mapa ══ */
+window.pintaZonasPanel=function(){
+ var m=window.ZMAP||window._zmap||window.MAPA;
+ if(!m||typeof L==='undefined')return;
+ try{
+  if(window._capaZ){try{m.removeLayer(_capaZ)}catch(e){}}
+  window._capaZ=L.layerGroup().addTo(m);
+  (PARAMS_A.zonas||[]).forEach(function(z){
+   if(!z.poligono||!z.poligono.length)return;
+   L.polygon(z.poligono,{color:z.color||'#B97A1F',weight:2,fillOpacity:.12}).addTo(_capaZ)
+    .bindPopup('<b>'+z.nombre+'</b>'+(z.conductor?'<br>🚚 '+z.conductor:''));
+  });
+ }catch(e){console.error('zonas:',e)}
+};
+setInterval(function(){if(CUR==='mapa')pintaZonasPanel();},4000);
+setTimeout(limpiarTop,200);
+})();
+</script>
+
+<script id="v5items">
+window.itemsLegible=function(it){
+ try{
+  var o=(typeof it==='string')?JSON.parse(it):it;
+  if(Array.isArray(o))return o.map(function(x){return (x.c||x.cant||'')+' '+(x.p||x.n||x.nombre||'')}).join(' · ');
+  var cats=(typeof CATC!=='undefined')?CATC:[];
+  return Object.keys(o).map(function(k){var c=cats.find(function(x){return x[0]===k});return (c?c[1]:k)+': '+o[k]}).join(' · ');
+ }catch(e){return String(it||'')}
+};
+</script>
+<script id="v5legible">
+(function(){
+function bonito(txt){
+ return txt.replace(/\{[^{}]*\}/g,function(m){
+  try{
+   var o=JSON.parse(m);
+   var cats=(typeof CATC!=='undefined')?CATC:[];
+   var partes=Object.keys(o).map(function(k){
+    var c=cats.find(function(x){return x[0]===k});
+    return (c?c[1]:k)+' ×'+o[k];
+   });
+   return partes.length?partes.join(' · '):m;
+  }catch(e){return m}
+ });
+}
+function limpiar(){
+ var host=document.getElementById('content');if(!host)return;
+ var it=document.createTreeWalker(host,NodeFilter.SHOW_TEXT,null);
+ var nodos=[],n;
+ while((n=it.nextNode()))if(/\{\s*"?[a-z_]+"?\s*:\s*\d/i.test(n.nodeValue))nodos.push(n);
+ nodos.forEach(function(x){x.nodeValue=bonito(x.nodeValue)});
+}
+var _r=window.render;
+if(typeof _r==='function'){window.render=function(){_r();setTimeout(limpiar,40);};}
+setTimeout(limpiar,500);
+})();
+</script>
+<script id="v5diag2">
+(function(){
+/* Probar GPS y ver cargas pendientes, desde Configuración */
+if(typeof rConfig==='function'){var _cf=rConfig;window.rConfig=function(){
+ var base='';try{base=_cf()}catch(e){}
+ return base+'<div class="card"><div class="ct">🛰️ Probar conexión con el GPS</div>'
+ +'<button onclick="probarGPS()" style="width:100%;background:none">Probar ahora</button>'
+ +'<div id="gps-box" style="font-size:12px;margin-top:10px;line-height:1.6"></div></div>'
+ +'<div class="card"><div class="ct">📦 Cargas pendientes de confirmar</div>'
+ +'<button onclick="verCargas()" style="width:100%;background:none">Ver cargas</button>'
+ +'<div id="cgs-box" style="font-size:12px;margin-top:10px;line-height:1.6"></div></div>';
+};}
+window.probarGPS=async function(){
+ var b=document.getElementById('gps-box');if(!b)return;
+ b.textContent='Consultando la plataforma…';
+ var r=await apiA('/admin/gps/probar');
+ if(!r||!r.ok)return b.textContent='No se pudo consultar.';
+ var h='<div><b>Plataforma:</b> '+r.plataforma+'</div><div style="word-break:break-all"><b>URL:</b> '+r.url+'</div>';
+ h+= r.error? '<div style="color:#B23B2E;margin-top:6px"><b>Error:</b> '+r.error+'</div>'
+   : '<div style="color:#2F6B4F;margin-top:6px">✓ Respondió con '+r.vehiculos+' vehículo(s)</div>';
+ if(r.ids_plataforma&&r.ids_plataforma.length)h+='<div style="margin-top:6px"><b>IDs en la plataforma:</b> '+r.ids_plataforma.join(', ')+'</div>';
+ h+='<div style="margin-top:8px"><b>Conductores:</b><br>'+(r.conductores||[]).map(function(c){
+  return '· '+c.nombre+' → '+(c.gps_id?('ID '+c.gps_id+(c.coincide?' <span style="color:#2F6B4F">✓ coincide</span>':' <span style="color:#B23B2E">✗ no está en la plataforma</span>')):'<span style="color:#B97A1F">sin ID asignado</span>')}).join('<br>')+'</div>';
+ b.innerHTML=h;
+};
+window.verCargas=async function(){
+ var b=document.getElementById('cgs-box');if(!b)return;
+ b.textContent='Consultando…';
+ var r=await apiA('/admin/diagnostico');
+ if(!r||!r.ok)return b.textContent='No se pudo consultar.';
+ var cg=r.ultimas_cargas||[];
+ b.innerHTML=cg.length?cg.map(function(c){
+  var it=c.items||{};var cats=(typeof CATC!=='undefined')?CATC:[];
+  var txt=Object.keys(it).map(function(k){var x=cats.find(function(y){return y[0]===k});return (x?x[1]:k)+' ×'+it[k]}).join(' · ');
+  return '<div style="padding:7px 0;border-bottom:1px solid var(--linea)"><b>'+(c.conductor||'?')+'</b> · '+(c.estado||'')+
+  ' · '+new Date(c.creado).toLocaleDateString("es-PE")+'<div style="opacity:.75">'+txt+'</div></div>'}).join('')
+  :'Sin cargas registradas.';
+};
+})();
+</script>
+<script id="v5cargas2">
+(function(){
+/* Validar antes de asignar y poder reparar cargas huérfanas */
+['cgEnviar','cgGuardar'].forEach(function(fn){
+ if(typeof window[fn]==='function'){var _o=window[fn];window[fn]=async function(){
+  var s=document.getElementById('cg-cond');
+  if(!s||!s.value)return alert('Elige primero el conductor que lleva la carga.');
+  return await _o.apply(this,arguments);
+ };}
+});
+if(typeof verCargas==='function'){var _vc=verCargas;window.verCargas=async function(){
+ var b=document.getElementById('cgs-box');if(!b)return;
+ b.textContent='Consultando…';
+ var r=await apiA('/admin/diagnostico');
+ if(!r||!r.ok)return b.textContent='No se pudo consultar.';
+ var cg=r.ultimas_cargas||[];
+ var conds=(typeof USRS!=='undefined'?USRS:[]).filter(function(u){return u.activo});
+ b.innerHTML=cg.length?cg.map(function(c){
+  var it=c.items||{},cats=(typeof CATC!=='undefined')?CATC:[];
+  var txt=Object.keys(it).map(function(k){var x=cats.find(function(y){return y[0]===k});return (x?x[1]:k)+' ×'+it[k]}).join(' · ');
+  var huerfana=!c.conductor||!conds.some(function(u){return u.usuario===c.conductor});
+  return '<div style="padding:9px 0;border-bottom:1px solid var(--linea)">'
+  +'<b>'+(c.conductor||'(sin conductor)')+'</b> · '+(c.estado||'')+' · '+new Date(c.creado).toLocaleDateString("es-PE")
+  +(huerfana&&c.estado==='pendiente'?' <span style="color:#B23B2E;font-weight:800">⚠ nadie la ve</span>':'')
+  +'<div style="opacity:.75;margin:3px 0">'+txt+'</div>'
+  +(c.estado==='pendiente'?'<div style="display:flex;gap:6px;flex-wrap:wrap"><select id="rc-'+c.id+'" style="flex:1;min-width:130px">'
+    +conds.map(function(u){return '<option value="'+u.usuario+'"'+(u.usuario===c.conductor?' selected':'')+'>'+u.nombre+'</option>'}).join('')
+    +'</select><button onclick="reasignarCarga('+c.id+')" style="background:#1D4ED8;color:#fff;border:none">Reasignar</button>'
+    +'<button onclick="cancelarCarga('+c.id+')" style="background:none;color:#B23B2E">Cancelar</button></div>':'')
+  +'</div>'}).join(''):'Sin cargas registradas.';
+};}
+window.reasignarCarga=async function(id){
+ var s=document.getElementById('rc-'+id);if(!s||!s.value)return;
+ var r=await apiA('/admin/cargas/'+id+'/reasignar',{conductor:s.value});
+ alert(r&&r.ok?'✓ Reasignada — ya le aparece en su app':(r&&r.error)||'No se pudo');
+ if(r&&r.ok)verCargas();
+};
+window.cancelarCarga=async function(id){
+ if(!confirm('¿Cancelar esta carga?'))return;
+ var r=await apiA('/admin/cargas/'+id+'/cancelar',{});
+ if(r&&r.ok)verCargas();
+};
+})();
+</script>
+<style id="v5top2">
+/* La barra ya no muestra fecha ni usuario (sin parpadeo) */
+#top-fecha,#top-user{display:none!important}
+#bar-fecha,#bar-salir{display:inline-flex!important;align-items:center;gap:6px}
+</style>
+<script id="v5fix5p">
+(function(){
+/* ══ 1. El refresco automático ya no interrumpe lo que estás escribiendo ══ */
+function ocupado(){
+ var a=document.activeElement;
+ if(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))return true;         // estás escribiendo
+ var w=document.getElementById('cg-wrap');
+ if(w&&w.style.display!=='none')return true;                             // formulario de carga abierto
+ if(document.querySelector('#content input[value]:not([value="0"]):not([value=""])'))return true;
+ if(window.MODO_EDIT)return true;
+ return false;
+}
+if(window._akT)clearInterval(window._akT);
+window._akT=setInterval(async function(){
+ if(document.hidden||ocupado())return;
+ if(['resumen','bandeja','almacen','creditos'].indexOf(CUR)<0)return;   /* Kardex NO se auto-refresca */
+ await cargarAdm();
+},90000);
+/* y al entrar a una sección, no repintar si hay algo abierto */
+var _r=window.render;
+window.render=function(){ _r(); };
+window.renderForzado=function(){window._forzar=true;render();window._forzar=false;};
+
+/* ══ 2. Almacén: fecha y hora reales en cada movimiento ══ */
+if(typeof rAlmacen==='function'){var _ra=rAlmacen;window.rAlmacen=function(){
+ var h=_ra();
+ return h.replace(/new Date\(m\.creado\)\.toLocaleDateString\('es-PE'\)/g,'');
+};}
+window.fechaHora=function(v){
+ try{var d=new Date(v);
+  return d.toLocaleDateString('es-PE',{day:'2-digit',month:'2-digit'})+' · '+d.toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'});
+ }catch(e){return ''}
+};
+
+/* ══ 3. Catálogo: quitar tipos de tienda y categorías ══ */
+window.tipoQuitar=async function(t){
+ var tp=(PARAMS_A.tipos_tienda&&PARAMS_A.tipos_tienda.length)?PARAMS_A.tipos_tienda.slice():['bodega','minimarket','puesto','mayorista','otro'];
+ if(tp.length<=1)return alert('Debe quedar al menos un tipo de tienda.');
+ var usadas=(typeof TIENDAS!=='undefined'?TIENDAS:[]).filter(function(x){return x.tp===t}).length;
+ if(!confirm('¿Quitar el tipo "'+t+'"?'+(usadas?('\n\n'+usadas+' tienda(s) lo usan: quedarán sin tipo hasta que les asignes otro.'):'')))return;
+ PARAMS_A.tipos_tienda=tp.filter(function(x){return x!==t});
+ savePA();await apiA('/admin/params',PARAMS_A);
+ if(TIPOSEL===t)TIPOSEL=PARAMS_A.tipos_tienda[0];
+ renderForzado();
+};
+if(typeof rCatalogo==='function'){var _rc=rCatalogo;window.rCatalogo=function(){
+ var h=_rc();
+ /* añade la ✕ a cada chip de tipo de tienda */
+ return h.replace(/onclick="TIPOSEL='([^']+)';render\(\)"([^>]*)>([^<]+)<\/button>/g,
+  function(m,t,resto,txt){
+   return 'onclick="TIPOSEL=\''+t+'\';renderForzado()"'+resto+'>'+txt+
+    ' <span onclick="event.stopPropagation();tipoQuitar(\''+t+'\')" style="opacity:.55;margin-left:4px">✕</span></button>';
+  });
+};}
+})();
+</script>
+
+<script id="v5barra">
+(function(){
+/* Fecha y hora reales, actualizándose */
+function reloj(){
+ var e=document.getElementById('bar-txt');if(!e)return;
+ var d=new Date();
+ e.textContent=d.toLocaleDateString('es-PE',{weekday:'long',day:'numeric',month:'long'})+' · '+d.toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'});
+}
+reloj();setInterval(reloj,30000);
+
+/* ══ Navegar SIEMPRE, aunque haya un formulario abierto ══ */
+if(typeof ir==='function'){var _ir=ir;window.ir=function(s){
+ window.MODO_EDIT=false;
+ window._forzar=true;
+ try{_ir(s)}finally{window._forzar=false;}
+ setTimeout(reloj,50);
+};}
+
+/* ══ Tras asignar la carga: limpiar y volver a "Todos" ══ */
+['cgEnviar','cgGuardar'].forEach(function(fn){
+ if(typeof window[fn]==='function'){var _o=window[fn];window[fn]=async function(){
+  var r=await _o.apply(this,arguments);
+  try{
+   if(typeof pkReset==='function')pkReset('cg');
+   document.querySelectorAll('#content input[type=number]').forEach(function(i){i.value=''});
+   var w=document.getElementById('cg-wrap');if(w)w.style.display='none';
+   if(typeof FKX!=='undefined')FKX='todos';
+   var q=document.getElementById('cg-quien');if(q)q.remove();
+   if(typeof renderForzado==='function')renderForzado();
+  }catch(e){}
+  return r;
+ };}
+});
+})();
+</script>
+<script id="v5deuda">
+(function(){
+/* Al verificar, quitar la tarjeta del evento de inmediato */
+if(typeof evVerif==='function'){var _ev=evVerif;window.evVerif=async function(i){
+ await _ev(i);
+ try{if(Array.isArray(EVS))window.EVS=EVS.filter(function(e,k){return k!==i});}catch(e){}
+ if(typeof renderForzado==='function')renderForzado();
+};}
+if(typeof tVerif==='function'){var _tv=tVerif;window.tVerif=async function(i){
+ await _tv(i);
+ try{var t=TIENDAS[i];if(t)t.nueva=false;
+  if(Array.isArray(EVS))window.EVS=EVS.filter(function(e){return !(e.tipo==='tienda_nueva'&&String(e.ref)===String(t.id))});}catch(e){}
+ if(typeof renderForzado==='function')renderForzado();
+};}
+/* Deuda visible en la ficha de la tienda */
+if(typeof rTiendas==='function'){var _rt=rTiendas;window.rTiendas=function(){
+ var h='';try{h=_rt()}catch(e){}
+ var conDeuda=(typeof TIENDAS!=='undefined'?TIENDAS:[]).filter(function(t){return Number(t.sa||0)>0});
+ if(!conDeuda.length)return h;
+ return '<div class="card"><div class="ct">💳 Tiendas con deuda ('+conDeuda.length+')</div>'
+ +conDeuda.map(function(t){return '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--linea)"><span style="font-size:13px">'+tnomA(t)+'</span><b style="color:#B23B2E">S/'+Number(t.sa).toFixed(2)+'</b></div>'}).join('')
+ +'<div style="font-size:12px;font-weight:800;display:flex;justify-content:space-between;padding-top:9px"><span>Total por cobrar</span><span>S/'+conDeuda.reduce(function(s,t){return s+Number(t.sa||0)},0).toFixed(2)+'</span></div></div>'+h;
+};}
+})();
+</script>
+<script id="v5cred2">
+(function(){
+window.CRED={movimientos:[],saldos:[],total:0};
+window.credCargar=async function(){
+ var r=await apiA('/admin/creditos');
+ if(r&&r.ok){CRED=r;if(CUR==='creditos'&&typeof renderForzado==='function')renderForzado();}
+};
+if(typeof cargarAdm==='function'){var _ca=cargarAdm;window.cargarAdm=async function(){await _ca();credCargar();};}
+
+window.rCreditos=function(){
+ var s=CRED.saldos||[],m=CRED.movimientos||[];
+ var conds=(typeof USRS!=='undefined'?USRS:[]);
+ var filas=s.length?s.map(function(t){
+  return '<div style="padding:10px 0;border-bottom:1px solid var(--linea)">'
+  +'<div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:13px">'+t.nombre+'</b>'
+  +'<b style="color:#B23B2E">S/'+Number(t.sa).toFixed(2)+'</b></div>'
+  +'<div style="font-size:11px;color:var(--tenue);margin:2px 0 6px">Límite S/'+Number(t.li||230).toFixed(2)+(t.cr?'':' · <span style="color:#B97A1F">crédito no habilitado</span>')+'</div>'
+  +'<div style="display:flex;gap:6px"><input id="ab-'+t.id+'" type="number" step="0.5" placeholder="Abono S/" style="flex:1">'
+  +'<button onclick="regAbono('+t.id+')" style="background:#2F7D4F;color:#fff;border:none">Registrar</button></div></div>'
+ }).join(''):'<div style="font-size:12.5px;opacity:.7">Ninguna tienda debe dinero ahora mismo.</div>';
+ var movs=m.length?m.slice(0,40).map(function(x){
+  var esAbono=x.tipo==='abono';
+  return '<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--linea);font-size:12px">'
+  +'<span>'+(esAbono?'✅ ':'💳 ')+x.tienda+'<span style="opacity:.6"> · '+new Date(x.creado).toLocaleDateString('es-PE')+' · '+(x.por||'')+'</span></span>'
+  +'<b style="color:'+(esAbono?'#2F6B4F':'#B23B2E')+'">'+(esAbono?'−':'+')+'S/'+Number(x.monto).toFixed(2)+'</b></div>'
+ }).join(''):'<div style="font-size:12px;opacity:.6">Sin movimientos todavía.</div>';
+ return '<div class="card"><div class="ct">💳 Por cobrar · S/'+Number(CRED.total||0).toFixed(2)+'</div>'+filas
+ +'<button onclick="credCargar()" style="width:100%;margin-top:10px;background:none">🔄 Actualizar</button></div>'
+ +'<div class="card"><div class="ct">Movimientos de crédito</div>'+movs+'</div>';
+};
+window.regAbono=async function(id){
+ var e=document.getElementById('ab-'+id);var m=parseFloat(e&&e.value)||0;
+ if(!m)return alert('Escribe el monto del abono.');
+ var r=await apiA('/admin/creditos/abono',{tienda_id:id,monto:m});
+ if(r&&r.ok){alert('✓ Abono registrado. Nuevo saldo: S/'+Number(r.nuevo_saldo).toFixed(2));await cargarAdm();}
+ else alert((r&&r.error)||'No se pudo registrar');
+};
+if(CFGA.API&&CFGA.TOKEN)setTimeout(credCargar,1200);
+})();
+</script>
+<script id="v5pagos">
+(function(){
+/* Resumen de formas de pago del día en el Kardex */
+if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
+ var base='';try{base=_rk()}catch(e){}
+ var rows=(window.KXS||[]).filter(function(k){return k.tipo==='venta'});
+ if(!rows.length)return base;
+ var tot={efectivo:0,credito:0,mixto:0,otros:0},fiado=0,cobrado=0;
+ rows.forEach(function(k){
+  var d=String(k.detalle||'');
+  var m=d.match(/S\/([\d.]+)/);var v=m?parseFloat(m[1]):0;
+  if(/efectivo/i.test(d))tot.efectivo+=v;
+  else if(/crédito|credito/i.test(d))tot.credito+=v;
+  else if(/mixto/i.test(d))tot.mixto+=v;
+  else tot.otros+=v;
+  var f=d.match(/fiado S\/([\d.]+)/);if(f)fiado+=parseFloat(f[1]);
+  var c=d.match(/cobró S\/([\d.]+)/);if(c)cobrado+=parseFloat(c[1]);
+ });
+ var box=function(l,v,col){return '<div style="text-align:center;padding:10px 6px;border:1px solid var(--linea);border-radius:11px"><div style="font-size:16px;font-weight:800;color:'+col+'">S/'+v.toFixed(2)+'</div><div style="font-size:10.5px;color:var(--tenue);margin-top:2px">'+l+'</div></div>'};
+ return '<div class="card"><div class="ct">Formas de pago registradas</div>'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'
+ +box('💵 Efectivo',tot.efectivo,'#2F6B4F')+box('📋 Crédito',tot.credito,'#5B3FA0')+box('🔀 Mixto',tot.mixto,'#1D4ED8')
+ +'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">'
+ +box('Fiado en total',fiado,'#B23B2E')+box('Cobrado de deudas',cobrado,'#2F6B4F')
+ +'</div></div>'+base;
+};}
+})();
+</script>
+</body>
+</html>
