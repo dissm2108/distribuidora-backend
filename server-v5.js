@@ -210,7 +210,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
   const{data:trsOut}=await db.from("traspasos").select("*").eq("de",u).in("estado",["pendiente","parcial"]);
   const lim3=new Date(Date.now()-3*86400000).toISOString();
   const{data:trsOk}=await db.from("traspasos").select("*").eq("estado","completado").gte("creado",lim3).or(`de.eq.${u},para.eq.${u}`);
-  const{data:cat}=await db.from("catalogo").select("id,cat,nombre,precio,precios,costo,activo").or("activo.is.null,activo.eq.true");
+  const{data:cat}=await db.from("catalogo").select("id,cat,nombre,precio,precios,costo,activo,no_tipos").or("activo.is.null,activo.eq.true");
   const{data:cats}=await db.from("categorias").select("*").eq("activa",true).order("orden");
   res.json({ok:true,params,catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
     dia:{fiado:fiadoHoy,cobrado:cobradoHoy},
@@ -623,6 +623,20 @@ app.post("/admin/catalogo/producto",authA,async(req,res)=>{
   if(error)return res.status(500).json({ok:false,error:error.message});
   res.json({ok:true});
 });
+app.post("/admin/catalogo/:id/tipo",authA,async(req,res)=>{
+  const tipo=limpia(req.body.tipo,20),activo=req.body.activo!==false;
+  if(!tipo)return res.status(400).json({ok:false,error:"Falta el tipo de tienda"});
+  const{data:p,error:e1}=await db.from("catalogo").select("no_tipos,nombre").eq("id",req.params.id).maybeSingle();
+  if(e1||!p)return res.status(404).json({ok:false,error:"Producto no encontrado"});
+  let lista=Array.isArray(p.no_tipos)?p.no_tipos.slice():[];
+  lista=lista.filter(x=>x!==tipo);
+  if(!activo)lista.push(tipo);
+  const{error:e2}=await db.from("catalogo").update({no_tipos:lista}).eq("id",req.params.id);
+  if(e2)return res.status(500).json({ok:false,error:/no_tipos/.test(e2.message||"")
+    ?"Falta ejecutar el SQL en Supabase (columna no_tipos en catalogo)":e2.message});
+  await db.from("logs").insert({tipo:"admin",detalle:(activo?"Devolvió":"Quitó")+" "+(p.nombre||req.params.id)+" para tipo "+tipo});
+  res.json({ok:true,no_tipos:lista});
+});
 app.post("/admin/catalogo/:id/borrar",authA,async(req,res)=>{
   await db.from("catalogo").update({activo:false}).eq("id",req.params.id);
   await db.from("logs").insert({tipo:"admin",detalle:"Quitó del catálogo: "+req.params.id});
@@ -637,7 +651,7 @@ app.post("/admin/catalogo",authA,async(req,res)=>{
   if(!arr.length)return res.status(400).json({ok:false,error:"Sin productos"});
   const filas=arr.map(p=>({id:limpia(p.id,20),cat:limpia(p.cat,20),nombre:limpia(p.nombre,60),
     precio:num(p.precio,0,10000),costo:num(p.costo,0,10000),
-    precios:(function(o){const r={};Object.keys(o||{}).slice(0,12).forEach(k=>{const v=num(o[k],0,10000);if(v)r[limpia(k,20)]=v;});return r;})(p.precios)})).filter(p=>p.id);
+    precios:(function(o){const r={};Object.keys(o||{}).slice(0,12).forEach(k=>{const v=num(o[k],0,10000);if(v)r[limpia(k,20)]=v;});return r;})(p.precios),no_tipos:Array.isArray(p.no_tipos)?p.no_tipos.slice(0,12).map(x=>limpia(x,20)):undefined})).filter(p=>p.id);
   await db.from("logs").insert({tipo:"admin",detalle:"Editó precios/costos de "+filas.length+" producto(s)"});
   const{error}=await db.from("catalogo").upsert(filas);
   if(error)return res.status(500).json({ok:false,error:error.message});
