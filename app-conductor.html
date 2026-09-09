@@ -526,7 +526,7 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
 <div class="sc" id="sc-inicio">
   <div class="hh">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
-      <div><div style="font-size:12px;opacity:.75;margin-bottom:2px">Buenos días,</div><div style="font-size:20px;font-weight:800"><span id="hdr-nom">Conductor</span> 👋 <span id="off-chip" style="display:none;font-size:10px;font-weight:700;color:#D9A32F;background:rgba(217,163,47,.18);padding:2px 8px;border-radius:10px;vertical-align:middle">⛔ Sin conexión</span> <span id="sync-chip" onclick="aov('ov-sync');pintaSync()" style="display:none;font-size:10px;font-weight:700;color:#7DA7E0;background:rgba(125,167,224,.18);padding:2px 8px;border-radius:10px;vertical-align:middle;cursor:pointer">⏳ <b id="sync-n">0</b> por sincronizar</span></div></div><button onclick="abrirAvisos()" style="position:relative;background:rgba(255,255,255,.14);border:none;border-radius:12px;min-width:42px;height:42px;font-size:18px;cursor:pointer;color:#fff">🔔<span id="av-badge" style="position:absolute;top:-4px;right:-4px;background:#E23A2E;color:#fff;font-size:9px;font-weight:800;border-radius:9px;padding:1px 5px;display:none">0</span></button>
+      <div><div style="font-size:12px;opacity:.75;margin-bottom:2px" id="hdr-saludo">Hola,</div><div style="font-size:20px;font-weight:800"><span id="hdr-nom">Conductor</span> 👋 <span id="off-chip" style="display:none;font-size:10px;font-weight:700;color:#D9A32F;background:rgba(217,163,47,.18);padding:2px 8px;border-radius:10px;vertical-align:middle">⛔ Sin conexión</span> <span id="sync-chip" onclick="aov('ov-sync');pintaSync()" style="display:none;font-size:10px;font-weight:700;color:#7DA7E0;background:rgba(125,167,224,.18);padding:2px 8px;border-radius:10px;vertical-align:middle;cursor:pointer">⏳ <b id="sync-n">0</b> por sincronizar</span></div></div><button onclick="abrirAvisos()" style="position:relative;background:rgba(255,255,255,.14);border:none;border-radius:12px;min-width:42px;height:42px;font-size:18px;cursor:pointer;color:#fff">🔔<span id="av-badge" style="position:absolute;top:-4px;right:-4px;background:#E23A2E;color:#fff;font-size:9px;font-weight:800;border-radius:9px;padding:1px 5px;display:none">0</span></button>
       <button onclick="toggleDark()" id="dm-btn" style="width:34px;height:34px;border-radius:9px;background:rgba(255,255,255,.15);border:none;cursor:pointer;font-size:17px;color:#fff;display:flex;align-items:center;justify-content:center;margin-top:4px">🌙</button>
     </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 14px">
@@ -679,7 +679,7 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
 <!-- ═══ VENTA RÁPIDA ═══ -->
 <div class="sc off" id="sc-vr">
   <div class="tb"><button class="ib" onclick="irA(volverDe)">←</button><div class="tbt">⚡ Venta rápida</div><span style="font-size:10px;color:var(--mu);font-family:monospace" id="vr-loc">GPS...</span></div>
-  <div style="background:var(--or-l);padding:7px 14px;font-size:11px;color:#9A3412;font-weight:600;flex-shrink:0">⚡ Venta directa · Toca un precio para cambiar uno o toda la categoría · Se guarda tu GPS</div>
+  <div style="background:var(--or-l);padding:7px 14px;font-size:11px;color:#9A3412;font-weight:600;flex-shrink:0">⚡ Venta directa · Toca un precio para cambiar uno o toda la categoría</div>
   <div style="padding:8px 12px;background:var(--wh);border-bottom:1px solid var(--bd);flex-shrink:0">
     <div style="display:flex;align-items:center;gap:7px;background:var(--bg);border-radius:9px;padding:0 11px;height:36px">
       <span style="font-size:14px">🔍</span>
@@ -1300,8 +1300,7 @@ function confirmarAlm(){
 
 // ══════════ VENTA RÁPIDA ══════════
 function renderVR(){
-  const la=(-14.793+(Math.random()-.5)*.02).toFixed(4),lo=(-71.420+(Math.random()-.5)*.02).toFixed(4);
-  const lel=document.getElementById('vr-loc');if(lel)lel.textContent=`${la},${lo}`;
+  const lel=document.getElementById('vr-loc');if(lel)lel.textContent='';
   vrSearch='';const si=document.getElementById('vr-search');if(si)si.value='';
   document.getElementById('vr-tabs-wrap').style.display='block';
   renderTabs('vr','vr-tabs',vrTab,'vrSetTab');
@@ -1563,7 +1562,12 @@ let CP_TIPOS={};
 window.armarTipos=function(){
   var ts=(window._ultDatos&&_ultDatos.params&&_ultDatos.params.tipos_tienda)||[];
   if(!ts.length)ts=['bodega','minimarket','puesto','mayorista','otro'];
-  CP_TIPOS={};ts.forEach(function(t){CP_TIPOS[t]={ico:'🏪',nombre:t.charAt(0).toUpperCase()+t.slice(1),desc:'Precios de '+t}});
+  var ICO={bodega:'🏪',minimarket:'🛒',puesto:'🧺',mayorista:'📦',cafeteria:'☕','cafetería':'☕',restaurante:'🍽️',panaderia:'🥖','panadería':'🥖',otro:'🏬'};
+  var libres=['🏷️','🔖','🎯','🧭','⭐','🔷','🔶','🟣'];var li=0;
+  CP_TIPOS={};ts.forEach(function(t){
+    var k=String(t).toLowerCase();
+    CP_TIPOS[t]={ico:ICO[k]||libres[li++%libres.length],nombre:t.charAt(0).toUpperCase()+t.slice(1),desc:'Precios de '+t};
+  });
   CP_TIPOS.custom={ico:'✏️',nombre:'Personalizar',desc:'Escribe el precio a mano para esta venta'};
   try{if(!CP_TIPOS[cpTipoSesion])cpTipoSesion=ts[0];}catch(e){}
 };
@@ -1741,8 +1745,13 @@ function cpAbrirTipo(){
 }
 function cpSelTipo(k){
   cpTipoTemp=k;
-  document.querySelectorAll('#cp-tipo-opts .cp-tipo-opt').forEach(o=>o.className='cp-tipo-opt');
-  document.getElementById('cpto-'+k).classList.add('sel-'+k);
+  document.querySelectorAll('#cp-tipo-opts .cp-tipo-opt').forEach(function(o){
+    var on=o.id==='cpto-'+k;
+    o.className='cp-tipo-opt'+(on?' sel-'+k:'');
+    o.style.borderColor=on?'#1D4ED8':'var(--bd)';
+    o.style.background=on?'#EBF1FE':'var(--wh)';
+    o.style.boxShadow=on?'inset 0 0 0 1px #1D4ED8':'none';
+  });
 }
 function cpAplicarTipo(){ cpTipoTocado=true;
   if(cpTipoTemp==='custom'){cpCerrar('cpov-tipo');cpAbrirCustom();return;}
@@ -1779,12 +1788,11 @@ function cpAbrirCustom(){
     const precio=cpPreciosCat[c.id]!==undefined?cpPreciosCat[c.id]:(function(){var g=cpTipoSesion;cpTipoSesion=sel;var v=cpGetPrecio(c.id);cpTipoSesion=g;return v})();
     return `<div class="cp-custom-row" id="cpcr-${c.id}">
       <div class="cp-cr-cat">${c.emoji} ${c.nom}</div>
-      <div class="cp-cr-sub" id="cpcr-sub-${c.id}">S/ ${precio.toFixed(2)} — ${sel==='mayorista'?'Mayorista':sel==='libre'?'Precio libre':'Normal'}</div>
+      <div class="cp-cr-sub" id="cpcr-sub-${c.id}">S/ ${precio.toFixed(2)} — ${sel==='libre'?'Precio libre':((CP_TIPOS[sel]||{nombre:sel}).nombre)}</div>
       <div class="cp-cr-tipo">
-        <button class="cp-crt ${sel==='normal'?'on-n':''}" onclick="cpSelCatTipo('${c.id}','normal',this)">Normal</button>
-        <button class="cp-crt ${sel==='mayorista'?'on-m':''}" onclick="cpSelCatTipo('${c.id}','mayorista',this)">Mayorista</button>
-        <button class="cp-crt ${sel==='libre'?'on-p':''}" onclick="cpSelCatTipo('${c.id}','libre',this)">Precio libre</button>
-      </div>
+        ${Object.keys(CP_TIPOS).filter(function(t){return t!=='custom'}).map(function(t){return `<button class="cp-crt" style="${sel===t?'border-color:#1D4ED8;background:#EBF1FE;color:#1D4ED8':''}" onclick="cpSelCatTipo('${c.id}','${t}',this)">${CP_TIPOS[t].ico} ${CP_TIPOS[t].nombre}</button>`}).join('')}
+      <button class="cp-crt" style="${sel==='libre'?'border-color:#B97A1F;background:#FBF3E4;color:#8A6410':''}" onclick="cpSelCatTipo('${c.id}','libre',this)">✏️ Precio libre</button>
+    </div>
       <input class="cp-cr-input ${sel==='libre'?'show':''}" id="cpcr-inp-${c.id}" type="number" placeholder="0.00" step="0.10" value="${sel==='libre'&&cpPreciosCat[c.id]!==undefined?cpPreciosCat[c.id]:''}" oninput="cpActSub('${c.id}')">
     </div>`;
   }).join('');
@@ -2674,7 +2682,9 @@ window.cargaDif=function(){
 var rtTipo='bodega',_rtm=null,_rtMk=null,_rtFoto=null,_rtPend=null,_dupIdx=-1;
 window.abrirRegT=function(){
  ['rt-n','rt-d','rt-tel','rt-z','rt-no','rt-hi','rt-hf','rt-dn'].forEach(function(id){$(id).value=''});_rtFoto=null;$('rt-foto').value='';
- var tipos=['bodega','minimarket','puesto','cafetería','otro'];
+ var tipos=Object.keys(CP_TIPOS||{}).filter(function(t){return t!=='custom'});
+  if(!tipos.length)tipos=['bodega','minimarket','puesto','mayorista','otro'];
+  if(tipos.indexOf(rtTipo)<0)rtTipo=tipos[0];
  $('rt-tipos').innerHTML=tipos.map(function(t){return '<button onclick="rtSetTipo(this,\''+t+'\')" data-t="'+t+'" style="padding:7px 12px;border-radius:18px;border:1.5px solid '+(t===rtTipo?'#1D4ED8':'var(--bd)')+';background:'+(t===rtTipo?'#EBF1FE':'var(--wh)')+';color:'+(t===rtTipo?'#1D4ED8':'var(--mu)')+';font-size:11.5px;font-weight:700;cursor:pointer">'+t+'</button>'}).join('');
  var zs={};T.forEach(function(t){if(t.z)zs[t.z]=(zs[t.z]||0)+1});var zt=Object.keys(zs).sort(function(a,b){return zs[b]-zs[a]})[0]||'';$('rt-z').value=zt;
  aov('ov-regt');
@@ -3093,7 +3103,7 @@ window.pintaVivo=function(){
  if(wa&&wa.dataset.demo==='1'){var hay=act.filter(function(t){return t.pedido}).length;wa.style.display=hay?'':'none';}
  // stock en ruta desde CARGA real
  var base=window.CARGA_BASE||{};
- document.querySelectorAll('.skv[data-cat]').forEach(function(el){
+ if(typeof pintaStockRuta==='function'){pintaStockRuta();}else document.querySelectorAll('.skv[data-cat]').forEach(function(el){
   var k=MAPCAT[el.dataset.cat]||null;if(!k)return;
   var q=Number((CARGA||{})[k]||0);el.textContent=q;
   var b=Number(base[k]||0),pc=b?Math.round(q*100/b):0;
@@ -3643,7 +3653,12 @@ window.mueveStock=function(pid,delta){
 
 /* la rejilla se dibuja con TODAS las categorías reales */
 window.pintaStockRuta=function(){
- var g=document.querySelector('.sg');if(!g)return;
+ /* todas las rejillas de stock menos la del aviso, que se pinta aparte */
+ var todas=[].slice.call(document.querySelectorAll('.sg')).filter(function(g){return !g.closest||!g.closest('#ov-al')});
+ if(!todas.length)return;
+ todas.forEach(function(g){pintaRejilla(g)});
+};
+window.pintaRejilla=function(g){
  var cats=(CATS||[]).filter(function(c){return c.prods&&c.prods.length});
  if(!cats.length)return;
  g.innerHTML=cats.map(function(c){
@@ -3729,7 +3744,9 @@ window.pintaAlertaStock=function(){
   var q=stockCat(c.id),b=Number((window.SP_BASE||{})[c.id]||0);
   return {c:c,q:q,pc:b?Math.round(q*100/b):null};
  }).filter(function(x){return x.q===0||(x.pc!==null&&x.pc<=25)});
+ var hayDetalle=Object.keys(window.SP||{}).length>0;
  var res=document.getElementById('al-stock');
+ if(res&&!hayDetalle&&!cats.some(function(c){return stockCat(c.id)>0})){res.textContent='Sin carga registrada todavía.';return;}
  if(res)res.textContent=bajas.length?bajas.map(function(x){return (x.c.nom||x.c.id)+': '+(x.q===0?'sin stock':x.q+' restantes')}).join(' · '):'Sin alertas de stock por ahora.';
  var g=document.querySelector('#ov-al .sg');
  if(g)g.innerHTML=(bajas.length?bajas:cats.slice(0,4).map(function(c){return{c:c,q:stockCat(c.id),pc:100}})).map(function(x){
@@ -3757,6 +3774,44 @@ if(typeof abrirEntrega==='function'){var _ae=abrirEntrega;window.abrirEntrega=fu
   var t=T[tiendaActualIdx];
   if(t&&t.tp&&CP_TIPOS[t.tp]){cpTipoSesion=t.tp;cpActualizarBadge();cpRender();}
  }catch(e){}
+ return r;};}
+})();
+</script>
+<script id="v5detalles">
+(function(){
+/* ═══ Saludo según la hora ═══ */
+window.pintaSaludo=function(){
+ var h=new Date().getHours();
+ var s=h<12?'Buenos días,':(h<19?'Buenas tardes,':'Buenas noches,');
+ var e=document.getElementById('hdr-saludo');if(e)e.textContent=s;
+};
+pintaSaludo();setInterval(pintaSaludo,60000);
+
+/* ═══ Registrar tienda: el mapa nace donde está el camión ═══ */
+if(typeof abrirRegT==='function'){var _ar=abrirRegT;window.abrirRegT=function(){
+ var r=_ar.apply(this,arguments);
+ setTimeout(function(){
+  try{
+   var p=(typeof puntoInicial==='function')?puntoInicial():null;
+   if(!p||!window._rtm||!window._rtMk)return;
+   var ll=[p.lat,p.lon];
+   _rtMk.setLatLng(ll);_rtm.setView(ll,18);_rtm.invalidateSize();
+   /* referencia visual del camión, como en Google Maps */
+   if(window._rtCam){try{_rtm.removeLayer(_rtCam)}catch(e){}}
+   if(typeof L!=='undefined'){
+    _rtCam=L.circleMarker(ll,{radius:7,color:'#1D4ED8',fillColor:'#1D4ED8',fillOpacity:.9,weight:2}).addTo(_rtm);
+    _rtCam.bindTooltip('🛰️ '+(p.fuente||'tu posición'),{permanent:false});
+    L.circle(ll,{radius:40,color:'#1D4ED8',opacity:.25,fillOpacity:.06,weight:1}).addTo(_rtm);
+   }
+   var av=document.getElementById('rt-fuente');
+   if(!av){av=document.createElement('div');av.id='rt-fuente';
+    av.style.cssText='font-size:11px;color:var(--mu);margin:-2px 0 8px';
+    var mp=document.getElementById('rt-mapa');if(mp&&mp.parentNode)mp.parentNode.insertBefore(av,mp.nextSibling);}
+   av.innerHTML='📍 Centrado en <b>'+(p.fuente||'tu posición')+'</b> — toca el mapa o arrastra el pin sobre la tienda';
+   /* tocar el mapa mueve el pin, como en Google Maps */
+   if(!_rtm._tocar){_rtm._tocar=true;_rtm.on('click',function(ev){_rtMk.setLatLng(ev.latlng)});}
+  }catch(e){}
+ },320);
  return r;};}
 })();
 </script>

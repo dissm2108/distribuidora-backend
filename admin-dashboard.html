@@ -2214,5 +2214,68 @@ if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
 };}
 })();
 </script>
+<script id="v5cargaprod">
+(function(){
+/* ═══ La carga se arma con el catálogo real, producto por producto ═══ */
+window.CGQ={};
+window.cgCats=function(){
+ return (window.CATA||[]).map(function(cat){
+  return {id:cat.id,nom:cat.nom||cat.nombre||cat.id,prods:(cat.prods||[]).slice()};
+ }).filter(function(c){return c.prods.length});
+};
+window.cgSet=function(pid,v){CGQ[pid]=Math.max(0,Number(v)||0);cgTotales()};
+window.cgTotales=function(){
+ cgCats().forEach(function(cat){
+  var t=cat.prods.reduce(function(s,p){return s+Number(CGQ[p.id]||0)},0);
+  var e=document.getElementById('cgt-'+cat.id);if(e)e.textContent=t;
+ });
+};
+window.cgForm=function(){
+ var cats=cgCats();
+ if(!cats.length)return '<div style="font-size:12px;opacity:.7">Aún no hay productos en el catálogo. Créalos en "Catálogo y precios".</div>';
+ return cats.map(function(cat){
+  return '<details style="border:1px solid var(--linea);border-radius:11px;margin-bottom:7px;padding:9px 11px">'
+  +'<summary style="cursor:pointer;font-weight:800;font-size:12.5px;display:flex;justify-content:space-between;gap:8px">'
+  +'<span>'+cat.nom+'</span><span style="opacity:.8">Total: <b id="cgt-'+cat.id+'">0</b></span></summary>'
+  +cat.prods.map(function(p){
+   return '<div style="display:flex;align-items:center;gap:8px;margin-top:7px">'
+   +'<div style="flex:1;font-size:12px">'+(p.n||p.nombre||p.id)+'</div>'
+   +'<input type="number" min="0" value="'+(CGQ[p.id]||0)+'" onchange="cgSet(\''+p.id+'\',this.value)" '
+   +'style="width:78px;padding:7px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center"></div>';
+  }).join('')+'</details>';
+ }).join('');
+};
+/* pone el catálogo completo dentro de la tarjeta de carga */
+window.cgPintar=function(){
+ var box=document.getElementById('cg-campos');
+ if(!box){
+  var uno=document.getElementById('cg-cond');if(!uno)return;
+  box=document.createElement('div');box.id='cg-campos';
+  uno.parentNode.insertBefore(box,uno.nextSibling);
+  /* oculta los ocho campos fijos anteriores */
+  (window.CATC||[]).forEach(function(x){var v=document.getElementById('cg-'+x[0]);if(v&&v.parentNode)v.parentNode.style.display='none'});
+ }
+ box.innerHTML=cgForm();cgTotales();
+};
+/* envía totales por categoría y el detalle por producto */
+window.cgEnviar=async function(){
+ var s=document.getElementById('cg-cond');
+ if(!s||!s.value)return alert('Elige primero el conductor que lleva la carga.');
+ var items={},prods={},total=0;
+ cgCats().forEach(function(cat){
+  var t=0;cat.prods.forEach(function(p){var q=Number(CGQ[p.id]||0);if(q>0){prods[p.id]=q;t+=q}});
+  items[cat.id]=t;total+=t;
+ });
+ if(!total)return alert('Escribe las cantidades antes de asignar la carga.');
+ var r=await apiA('/cargas',{conductor:s.value,items:items,prods:prods});
+ if(r&&r.ok){CGQ={};cgPintar();
+  alert('✓ Carga asignada con '+total+' unidades — el conductor la confirma en su app.');}
+ else alert('No se pudo asignar: '+((r&&r.error)||'sin respuesta del servidor'));
+};
+var _ir=window.irAdm;
+if(typeof _ir==='function'){window.irAdm=function(s){_ir(s);setTimeout(cgPintar,120)};}
+setTimeout(cgPintar,900);setTimeout(cgPintar,2500);
+})();
+</script>
 </body>
 </html>
