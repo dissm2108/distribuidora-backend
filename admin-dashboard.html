@@ -2217,13 +2217,14 @@ if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
 <script id="v5cargaprod">
 (function(){
 /* ═══ La carga se arma con el catálogo real, producto por producto ═══ */
-window.CGQ={};
+window.CGQ=(function(){try{return JSON.parse(localStorage.getItem('v5a_cgq')||'{}')}catch(e){return{}}})();
+window.cgGuardar=function(){try{localStorage.setItem('v5a_cgq',JSON.stringify(CGQ))}catch(e){}};
 window.cgCats=function(){
  return (window.CATA||[]).map(function(cat){
   return {id:cat.id,nom:cat.nom||cat.nombre||cat.id,prods:(cat.prods||[]).slice()};
  }).filter(function(c){return c.prods.length});
 };
-window.cgSet=function(pid,v){CGQ[pid]=Math.max(0,Number(v)||0);cgTotales()};
+window.cgSet=function(pid,v){CGQ[pid]=Math.max(0,Number(v)||0);cgGuardar();cgTotales()};
 window.cgTotales=function(){
  cgCats().forEach(function(cat){
   var t=cat.prods.reduce(function(s,p){return s+Number(CGQ[p.id]||0)},0);
@@ -2240,7 +2241,7 @@ window.cgForm=function(){
   +cat.prods.map(function(p){
    return '<div style="display:flex;align-items:center;gap:8px;margin-top:7px">'
    +'<div style="flex:1;font-size:12px">'+(p.n||p.nombre||p.id)+'</div>'
-   +'<input type="number" min="0" value="'+(CGQ[p.id]||0)+'" onchange="cgSet(\''+p.id+'\',this.value)" '
+   +'<input type="number" min="0" value="'+(CGQ[p.id]||0)+'" oninput="cgSet(\''+p.id+'\',this.value)" '
    +'style="width:78px;padding:7px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center"></div>';
   }).join('')+'</details>';
  }).join('');
@@ -2255,12 +2256,26 @@ window.cgPintar=function(){
   /* oculta los ocho campos fijos anteriores */
   (window.CATC||[]).forEach(function(x){var v=document.getElementById('cg-'+x[0]);if(v&&v.parentNode)v.parentNode.style.display='none'});
  }
- box.innerHTML=cgForm();cgTotales();
+ var act=document.activeElement;
+ if(act&&act.tagName==='INPUT'&&box.contains(act))return cgTotales();
+ var ult='';try{var u=JSON.parse(localStorage.getItem('v5a_cgq_ult')||'null');
+  if(u)ult='<div style="font-size:11px;opacity:.7;margin:6px 0">Última carga asignada: '+u.total+' unidades a '+u.cond+' · '+new Date(u.fecha).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+'</div>';
+ }catch(e){}
+ box.innerHTML=cgForm()+ult
+  +'<button onclick="cgVaciar()" style="width:100%;margin-top:8px;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px;font-weight:700;cursor:pointer">🧹 Vaciar cantidades</button>';
+ cgTotales();
 };
 /* envía totales por categoría y el detalle por producto */
 window.cgEnviar=async function(){
  var s=document.getElementById('cg-cond');
  if(!s||!s.value)return alert('Elige primero el conductor que lleva la carga.');
+ /* recoger lo escrito aunque no se haya disparado el evento */
+ var box=document.getElementById('cg-campos');
+ if(box)box.querySelectorAll('input[type=number]').forEach(function(inp){
+   var oc=inp.getAttribute('oninput')||'';var m=oc.match(/cgSet\('([^']+)'/);
+   if(m&&Number(inp.value)>0)CGQ[m[1]]=Number(inp.value);
+ });
+ cgGuardar();
  var items={},prods={},total=0;
  cgCats().forEach(function(cat){
   var t=0;cat.prods.forEach(function(p){var q=Number(CGQ[p.id]||0);if(q>0){prods[p.id]=q;t+=q}});
@@ -2268,12 +2283,18 @@ window.cgEnviar=async function(){
  });
  if(!total)return alert('Escribe las cantidades antes de asignar la carga.');
  var r=await apiA('/cargas',{conductor:s.value,items:items,prods:prods});
- if(r&&r.ok){CGQ={};cgPintar();
-  alert('✓ Carga asignada con '+total+' unidades — el conductor la confirma en su app.');}
+ if(r&&r.ok){
+  try{localStorage.setItem('v5a_cgq_ult',JSON.stringify({fecha:new Date().toISOString(),cond:s.value,total:total}))}catch(e){}
+  cgPintar();
+  alert('✓ Carga asignada con '+total+' unidades — el conductor la confirma en su app.\n\nLas cantidades quedan guardadas para el próximo viaje. Usa "Vaciar cantidades" cuando quieras empezar de cero.');}
  else alert('No se pudo asignar: '+((r&&r.error)||'sin respuesta del servidor'));
 };
 var _ir=window.irAdm;
 if(typeof _ir==='function'){window.irAdm=function(s){_ir(s);setTimeout(cgPintar,120)};}
+window.cgVaciar=function(){
+ if(!confirm('¿Poner en cero todas las cantidades de la carga?'))return;
+ CGQ={};cgGuardar();cgPintar();
+};
 setTimeout(cgPintar,900);setTimeout(cgPintar,2500);
 })();
 </script>
