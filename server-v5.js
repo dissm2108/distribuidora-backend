@@ -23,7 +23,10 @@ const MODELO_IA="claude-sonnet-4-6";
 
 const app=express();
 app.use(express.json({limit:"2mb"})); // 2mb: fotos de fachada comprimidas
-app.use(helmet());
+// helmet sin la política de contenido: la app y el panel llevan su código y estilos
+// dentro del propio HTML, y el mapa carga desde OpenStreetMap. Con la política activa
+// el navegador bloquea todo eso y la página queda muerta aunque cargue.
+app.use(helmet({contentSecurityPolicy:false,crossOriginEmbedderPolicy:false,crossOriginResourcePolicy:false,originAgentCluster:false}));
 const ORIG=(process.env.CORS_ORIGINS||"*").split(",").map(s=>s.trim()).filter(Boolean)
   .map(s=>s.replace(/\/+$/,"")).map(s=>/^https?:\/\//.test(s)?s:"https://"+s);
 app.use(cors({origin:(o,cb)=>{
@@ -106,6 +109,7 @@ function sirve(archivo){
     });
   };
 }
+app.get(["/favicon.ico","/favicon.png","/apple-touch-icon.png","/apple-touch-icon-precomposed.png"],(req,res)=>res.status(204).end());
 app.get(["/app","/app.html","/conductor"],sirve("app-conductor.html"));
 app.get(["/panel","/panel.html","/admin"],sirve("admin-dashboard.html"));
 app.get("/",(req,res)=>res.type("html").send('<meta charset="utf-8"><div style="font-family:system-ui;padding:40px;line-height:2"><h3>Distribuidora — sistema</h3><a href="/app">📱 App del conductor</a><br><a href="/panel">🖥️ Panel del dueño</a></div>'));
