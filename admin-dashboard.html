@@ -373,7 +373,7 @@ if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
  +'<div class="card"><div class="ct">📦 Registrar carga del viaje</div>'
  +'<select id="cg-cond" style="width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:10px">'+cOpts+'</select>'
  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-bottom:10px">'+inputs+'</div>'
- +'<div style="display:flex;gap:8px"><button onclick="cgSugerir()" style="flex:1;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">🧮 Sugerir desde el último cierre</button><button onclick="cgEnviar()" style="flex:1.2;border:none;background:#20241E;color:#fff;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Asignar al conductor</button></div>'
+ +'<div style="display:flex;gap:8px"><button onclick="cgSugerir()" style="flex:1;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">🔁 Traer la carga anterior</button><button onclick="cgEnviar()" style="flex:1.2;border:none;background:#20241E;color:#fff;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Asignar al conductor</button></div>'
  +'<div style="font-size:11px;opacity:.65;margin-top:8px;line-height:1.5">Él la <b>cuenta y confirma</b> en su app antes de salir. Sugerencia = vendido del último viaje +10%.</div></div>';
 };}
 window.cgSugerir=async function(){
@@ -2289,13 +2289,48 @@ window.cgEnviar=async function(){
   alert('✓ Carga asignada con '+total+' unidades — el conductor la confirma en su app.\n\nLas cantidades quedan guardadas para el próximo viaje. Usa "Vaciar cantidades" cuando quieras empezar de cero.');}
  else alert('No se pudo asignar: '+((r&&r.error)||'sin respuesta del servidor'));
 };
+/* se inyecta dentro del propio repintado: así nunca reaparecen los campos viejos */
+if(typeof rKardex==='function'){var _rk2=rKardex;window.rKardex=function(){
+ var html='';try{html=_rk2.apply(this,arguments)}catch(e){return ''}
+ var i=html.indexOf('id="cg-cond"');if(i<0)return html;
+ var ini=html.indexOf('</select>',i);if(ini<0)return html;
+ ini+=9;
+ var fin=html.indexOf('<div style="display:flex;gap:8px"><button onclick="cgSugerir()"',ini);
+ if(fin<0)return html;
+ var ult='';try{var u=JSON.parse(localStorage.getItem('v5a_cgq_ult')||'null');
+  if(u)ult='<div style="font-size:11px;opacity:.7;margin:6px 0">Última carga asignada: '+u.total+' unidades a '+u.cond+' · '+new Date(u.fecha).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+'</div>';
+ }catch(e){}
+ var form='<div id="cg-campos">'+cgForm()+'</div>'+ult
+  +'<button onclick="cgVaciar()" style="width:100%;margin:8px 0;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px;font-weight:700;cursor:pointer">🧹 Vaciar cantidades</button>';
+ return html.slice(0,ini)+form+html.slice(fin);
+};}
 var _ir=window.irAdm;
-if(typeof _ir==='function'){window.irAdm=function(s){_ir(s);setTimeout(cgPintar,120)};}
+if(typeof _ir==='function'){window.irAdm=function(s){_ir(s);setTimeout(cgTotales,120)};}
+window.cgSugerir=async function(){
+ var s=document.getElementById('cg-cond');
+ if(!s||!s.value)return alert('Elige primero el conductor.');
+ if(!CFGA.API)return alert('Necesitas el servidor conectado.');
+ var r=await apiA('/liquidaciones/sugerencia-prod?conductor='+encodeURIComponent(s.value));
+ if(!r||!r.ok){
+  var m={sin_historial:'Este conductor todavia no tiene ninguna carga registrada.',
+         sin_detalle:'Su carga anterior se asigno solo por categoria, sin el detalle de cada producto.',
+         sin_conductor:'Elige el conductor.'};
+  return alert('No se pudo traer la carga anterior: '+(m[r&&r.motivo]||'sin datos'));
+ }
+ var n=0,total=0;
+ CGQ={};
+ Object.keys(r.prods||{}).forEach(function(id){CGQ[id]=Number(r.prods[id])||0;n++;total+=CGQ[id]});
+ cgGuardar();
+ if(typeof cargarAdm==='function')cargarAdm();else if(typeof render==='function')render();
+ setTimeout(cgTotales,150);
+ var f=r.fecha?new Date(r.fecha).toLocaleDateString('es-PE',{day:'2-digit',month:'short'}):'';
+ alert('Carga anterior cargada: '+n+' productos, '+total+' unidades'+(f?' (del '+f+')':'')+'.\n\nRevisa y ajusta lo que sobro o falto antes de asignar.');
+};
 window.cgVaciar=function(){
  if(!confirm('¿Poner en cero todas las cantidades de la carga?'))return;
  CGQ={};cgGuardar();cgPintar();
 };
-setTimeout(cgPintar,900);setTimeout(cgPintar,2500);
+setTimeout(cgTotales,900);setTimeout(cgTotales,2500);
 })();
 </script>
 </body>
