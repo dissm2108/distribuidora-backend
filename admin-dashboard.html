@@ -2331,5 +2331,79 @@ if(typeof catCargar==='function'){var _cc=catCargar;window.catCargar=async funct
  return r;};}
 })();
 </script>
+<script id="v5pedtipo">
+(function(){
+/* ═══ Pedidos WhatsApp: precios y productos del tipo de esa tienda ═══ */
+function tiendaSel(){
+ try{
+  var s=document.getElementById('pd-tienda');
+  if(!s||s.value==='')return null;
+  return (typeof TIENDAS!=='undefined')?TIENDAS[Number(s.value)]:null;
+ }catch(e){return null}
+}
+window.tipoPedido=function(){var t=tiendaSel();return (t&&t.tp)||''};
+/* traer precios por tipo y exclusiones al iniciar, sin entrar a Catálogo */
+(async function(){
+ try{
+  if(!CFGA.API)return;
+  var rc=await apiA('/admin/catalogo');
+  if(rc&&rc.ok){
+   window.PRECIOS=window.PRECIOS||{};window.NOTIPOS=window.NOTIPOS||{};window.CATE=window.CATE||{};
+   (rc.productos||[]).forEach(function(p){
+    if(p.precios)PRECIOS[p.id]=p.precios;
+    if(Array.isArray(p.no_tipos)&&p.no_tipos.length)NOTIPOS[p.id]=p.no_tipos;
+    if(p.precio!=null)CATE[p.id]=Object.assign(CATE[p.id]||{},{precio:Number(p.precio)});
+   });
+  }
+ }catch(e){}
+})();
+window.precioTipo=function(prodId,cat){
+ var tipo=tipoPedido();
+ var pr=(window.PRECIOS&&PRECIOS[prodId])||null;
+ if(tipo&&pr&&pr[tipo]!=null)return Number(pr[tipo]);
+ var e=(window.CATE&&CATE[prodId])||null;
+ if(e&&e.precio!=null)return Number(e.precio);
+ return Number((cat&&cat.precio)||0);
+};
+/* el selector respeta el tipo: oculta lo quitado y usa su precio */
+if(typeof pkPinta==='function'){var _pp=pkPinta;window.pkPinta=function(p){
+ var r=_pp.apply(this,arguments);
+ if(p!=='pd')return r;
+ try{
+  var tipo=tipoPedido();
+  var cont=document.getElementById('pd-prods');if(!cont)return r;
+  var cat=CATA[(window._PK&&_PK.pd&&_PK.pd.cat)||0];
+  /* ocultar los productos que no se venden a este tipo */
+  if(tipo&&window.NOTIPOS){
+   (cat&&cat.prods||[]).forEach(function(pr){
+    if((NOTIPOS[pr.id]||[]).indexOf(tipo)<0)return;
+    var filas=cont.querySelectorAll('div');
+    filas.forEach(function(f){
+     if(f.textContent.indexOf(pr.n)===0&&f.querySelector('button'))f.style.display='none';
+    });
+   });
+  }
+  /* cabecera: decir con qué precios se está registrando */
+  var cab=cont.firstElementChild;
+  if(cab&&cat)cab.textContent=cat.nom+' · '+(tipo?('precios de '+tipo):'precios generales');
+ }catch(e){}
+ return r;};}
+/* al elegir la tienda, repintar con sus precios */
+setTimeout(function(){
+ var s=document.getElementById('pd-tienda');
+ if(s&&!s._tp){s._tp=true;s.addEventListener('change',function(){try{pkPinta('pd')}catch(e){}});}
+},1200);
+/* el total del pedido usa el precio del tipo */
+if(typeof pkItems==='function'){var _pi=pkItems;window.pkItems=function(p){
+ var arr=_pi.apply(this,arguments);
+ if(p==='pd'&&Array.isArray(arr)){
+  arr.forEach(function(x){
+   try{var cat=(CATA||[]).find(function(c){return (c.prods||[]).some(function(y){return y.id===x.id})});
+    x.pu=precioTipo(x.id,cat);}catch(e){}
+  });
+ }
+ return arr;};}
+})();
+</script>
 </body>
 </html>

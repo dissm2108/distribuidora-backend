@@ -1214,8 +1214,8 @@ function prodBtnHTML(p,cat,mode){
   }
   if(mode==='vr'){
     const q=vrQty[p.id]||0;
-    const precio=vrPrecios[p.id]!==undefined?vrPrecios[p.id]:cat.precio;
-    const editado=vrPrecios[p.id]!==undefined&&vrPrecios[p.id]!==cat.precio;
+    const precio=vrPrecios[p.id]!==undefined?vrPrecios[p.id]:cpGetPrecio(cat.id,p.id);
+    const editado=vrPrecios[p.id]!==undefined&&vrPrecios[p.id]!==cpGetPrecio(cat.id,p.id);
     return `<div class="pbtn ${q>0?'activo':''}" id="vr-btn-${p.id}">
       <div class="pb-plus" onclick="vrPlus('${p.id}')">+</div>
       <div class="pb-info"><div class="pb-nom">${p.n}</div>
@@ -1244,8 +1244,8 @@ function renderCatList(mode,catElId,activeTab,stock){
     // En venta rápida, la cabecera trae botón para cambiar el precio de TODA la categoría
     let hdr;
     if(mode==='vr'){
-      const precioCat=vrPrecioCat[c.id]!==undefined?vrPrecioCat[c.id]:c.precio;
-      const editadoCat=vrPrecioCat[c.id]!==undefined&&vrPrecioCat[c.id]!==c.precio;
+      const precioCat=vrPrecioCat[c.id]!==undefined?vrPrecioCat[c.id]:cpGetPrecio(c.id,null);
+      const editadoCat=vrPrecioCat[c.id]!==undefined&&vrPrecioCat[c.id]!==cpGetPrecio(c.id,null);
       hdr=`<div class="sec-hdr">
         <div class="sec-titulo">${c.emoji} ${c.nom}</div>
         <div style="display:flex;align-items:center;gap:5px">
@@ -1640,7 +1640,7 @@ function cpSetTab(id,el){cpTab=id;cpBusq='';document.getElementById('cp-buscador
 function cpBtnHTML(p,cat){
   const q=cpQty[p.id]||0;
   const sug=CP_HIST[p.id]&&!q?CP_HIST[p.id]:null;
-  const precio=cpGetPrecio(cat.id);
+  const precio=cpGetPrecio(cat.id,p.id);
   const es0=precio===0;
   return `<div class="cp-prod-btn ${q>0?'activo':sug?'sugerido':''}" id="cp-btn-${p.id}">
     <div class="cp-pb-minus" onclick="cpMinus('${p.id}')">−</div>
@@ -1657,7 +1657,10 @@ function cpContarCat(catId){const c=catById(catId);if(!c)return 0;return c.prods
 function cpRender(){
   const el=document.getElementById('cp-catalogo');
   if(cpBusq){cpRenderBusqueda();return;}
-  const cats=cpTab==='todos'?CATS.filter(c=>c.prods&&c.prods.length):CATS.filter(c=>c.id===cpTab);
+  var _vis=function(pr){return (typeof prodVisible==='function')?prodVisible(pr.id):true};
+  const cats=(cpTab==='todos'?CATS:CATS.filter(c=>c.id===cpTab))
+    .map(c=>({...c,prods:(c.prods||[]).filter(_vis)}))
+    .filter(c=>c.prods.length);
   el.innerHTML=cats.map(c=>{
     const n=cpContarCat(c.id);
     return `<div class="cp-sec-hdr"><div class="cp-sec-titulo">${c.emoji} ${c.nom}</div>${n>0?`<div class="cp-sec-count">${n} items</div>`:''}</div>
@@ -1666,7 +1669,7 @@ function cpRender(){
   cpActualizarTotal();
 }
 function cpRenderBusqueda(){
-  const todos=CATS.filter(c=>c.prods&&c.prods.length).flatMap(c=>c.prods.map(p=>({...p,cat:c})));
+  const todos=CATS.filter(c=>c.prods&&c.prods.length).flatMap(c=>c.prods.filter(function(pr){return (typeof prodVisible==='function')?prodVisible(pr.id):true}).map(p=>({...p,cat:c})));
   const res=todos.filter(p=>p.n.toLowerCase().includes(cpBusq.toLowerCase()));
   const el=document.getElementById('cp-catalogo');
   if(!res.length){el.innerHTML='<div style="text-align:center;padding:40px 20px;color:var(--mu)"><div style="font-size:36px;margin-bottom:10px">🔍</div><div style="font-size:13px">Sin resultados</div></div>';return;}
@@ -2602,7 +2605,22 @@ window.cargarDatos=async function(){
   var vivas={};r.categorias.forEach(function(sc){vivas[sc.id]=1});
   for(var i=CATS.length-1;i>=0;i--)if(!vivas[CATS[i].id]&&!(CARGA[CATS[i].id]>0))CATS.splice(i,1);
  }
- if(r.catalogo&&r.catalogo.length){window.PRECIOP={};window.PRECIOT={};r.catalogo.forEach(function(p){if(p.precio)PRECIOP[p.id]=Number(p.precio);if(p.precios)PRECIOT[p.id]=p.precios;var lc=CATS.find(function(x){return x.id===p.cat});if(lc){var lp=lc.prods.find(function(x){return x.id===p.id});if(lp){if(p.nombre)lp.n=p.nombre;}else lc.prods.push({id:p.id,n:p.nombre});}});}
+ if(r.catalogo&&r.catalogo.length){window.PRECIOP={};window.PRECIOT={};
+  var _vivos={},_cats={};
+  r.catalogo.forEach(function(p){
+    _vivos[p.id]=1;_cats[p.cat]=1;
+    if(p.precio)PRECIOP[p.id]=Number(p.precio);
+    if(p.precios)PRECIOT[p.id]=p.precios;
+    var lc=CATS.find(function(x){return x.id===p.cat});
+    if(lc){var lp=lc.prods.find(function(x){return x.id===p.id});
+      if(lp){if(p.nombre)lp.n=p.nombre;}else lc.prods.push({id:p.id,n:p.nombre});}
+  });
+  /* productos borrados en el panel: quitarlos también aquí */
+  CATS.forEach(function(cc){
+    if(!_cats[cc.id]||!cc.prods)return;
+    cc.prods=cc.prods.filter(function(p){return _vivos[p.id]});
+  });
+ }
  if(r.tiendas&&r.tiendas.length){var _loc={};T.forEach(function(t){_loc[t.n]={enRuta:t.enRuta,noEstaba:t.noEstaba}});T.length=0;r.tiendas.forEach(function(t){var l=_loc[t.n]||{};if(l.enRuta&&!t.enRuta)t.enRuta=true;if(l.noEstaba)t.noEstaba=true;T.push(t)});}
  if(r.colegas)window.COLEGAS=r.colegas;if(r.avisos)AVISOS=r.avisos;if(r.colegas)window.COLEGAS=r.colegas;
  if(r.carga_pendiente)CARGA_PEND=r.carga_pendiente;
@@ -3932,6 +3950,37 @@ if(typeof renderCatList==='function'){var _rl=renderCatList;window.renderCatList
  }
  var r=_rl.apply(this,arguments);
  quitados.forEach(function(x){x.c.prods=x.orig});
+ return r;};}
+})();
+</script>
+<script id="v5preciosvivo">
+(function(){
+/* ═══ Al abrir una tienda, traer precios y catálogo frescos ═══ */
+if(typeof abrirEntrega==='function'){var _ae=abrirEntrega;window.abrirEntrega=function(){
+ var r=_ae.apply(this,arguments);
+ try{
+  if(typeof cargarDatos==='function'&&navigator.onLine){
+   window._cdSilent=true;
+   cargarDatos().then(function(){
+    window._cdSilent=false;
+    try{if(typeof armarTipos==='function')armarTipos();
+     var t=T[tiendaActualIdx];
+     if(t&&t.tp&&CP_TIPOS[t.tp]&&!window.cpTipoTocado){cpTipoSesion=t.tp;cpActualizarBadge();}
+     cpRenderTabs();cpRender();
+    }catch(e){}
+   }).catch(function(){window._cdSilent=false});
+  }
+ }catch(e){}
+ return r;};}
+/* lo mismo al abrir la venta rápida */
+if(typeof abrirVR==='function'){var _av=abrirVR;window.abrirVR=function(){
+ var r=_av.apply(this,arguments);
+ try{
+  if(typeof cargarDatos==='function'&&navigator.onLine){
+   window._cdSilent=true;
+   cargarDatos().then(function(){window._cdSilent=false;try{renderVR&&renderVR()}catch(e){}}).catch(function(){window._cdSilent=false});
+  }
+ }catch(e){}
  return r;};}
 })();
 </script>
