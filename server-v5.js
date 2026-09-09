@@ -93,6 +93,22 @@ function authA(req,res,next){
 }
 
 // ════════ SALUD ════════
+const fs=require("fs");
+const path=require("path");
+// ═══ SIRVE LAS APPS DESDE EL MISMO SERVIDOR (sin Netlify) ═══
+function sirve(archivo){
+  return (req,res)=>{
+    const p=path.join(__dirname,archivo);
+    fs.readFile(p,"utf8",(err,html)=>{
+      if(err)return res.status(404).send("Falta el archivo "+archivo+" en el repositorio.");
+      res.set("Cache-Control","no-store");
+      res.type("html").send(html);
+    });
+  };
+}
+app.get(["/app","/app.html","/conductor"],sirve("app-conductor.html"));
+app.get(["/panel","/panel.html","/admin"],sirve("admin-dashboard.html"));
+app.get("/",(req,res)=>res.type("html").send('<meta charset="utf-8"><div style="font-family:system-ui;padding:40px;line-height:2"><h3>Distribuidora — sistema</h3><a href="/app">📱 App del conductor</a><br><a href="/panel">🖥️ Panel del dueño</a></div>'));
 app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString()}));
 
 // ════════ AUTENTICACIÓN ════════
