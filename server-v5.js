@@ -479,6 +479,20 @@ app.post("/admin/cargas/:id/cancelar",authA,async(req,res)=>{
   await db.from("logs").insert({tipo:"admin",detalle:"Canceló la carga #"+req.params.id});
   res.json({ok:true});
 });
+app.get("/liquidaciones/sugerencia-prod",authA,async(req,res)=>{
+  const u=String(req.query.conductor||"");
+  if(!u)return res.json({ok:false,motivo:"sin_conductor"});
+  // la carga anterior de ese conductor, tal cual fue
+  const{data:cgs}=await db.from("cargas").select("prods,items,estado,creado").eq("conductor",u)
+    .in("estado",["confirmada","con_diferencias","pendiente"]).order("id",{ascending:false}).limit(1);
+  const ult=(cgs||[])[0];
+  if(!ult)return res.json({ok:false,motivo:"sin_historial"});
+  const prods=(ult.prods&&typeof ult.prods==="object")?ult.prods:null;
+  if(!prods||!Object.keys(prods).length)return res.json({ok:false,motivo:"sin_detalle"});
+  const limpio={};
+  Object.keys(prods).forEach(id=>{const q=num(prods[id],0,99999);if(q>0)limpio[id]=q;});
+  res.json({ok:true,prods:limpio,fecha:ult.creado||null,estado:ult.estado});
+});
 app.get("/liquidaciones/sugerencia",authA,async(req,res)=>{
   const u=String(req.query.conductor||"");
   // 1) historial de cargas realmente confirmadas por ese conductor
