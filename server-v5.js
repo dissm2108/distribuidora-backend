@@ -649,9 +649,19 @@ app.get("/admin/catalogo",authA,async(req,res)=>{
 app.post("/admin/catalogo",authA,async(req,res)=>{
   const arr=Array.isArray(req.body.productos)?req.body.productos.slice(0,400):[];
   if(!arr.length)return res.status(400).json({ok:false,error:"Sin productos"});
-  const filas=arr.map(p=>({id:limpia(p.id,20),cat:limpia(p.cat,20),nombre:limpia(p.nombre,60),
-    precio:num(p.precio,0,10000),costo:num(p.costo,0,10000),
-    precios:(function(o){const r={};Object.keys(o||{}).slice(0,12).forEach(k=>{const v=num(o[k],0,10000);if(v)r[limpia(k,20)]=v;});return r;})(p.precios),no_tipos:Array.isArray(p.no_tipos)?p.no_tipos.slice(0,12).map(x=>limpia(x,20)):undefined})).filter(p=>p.id);
+  // precios que YA existen, para no borrar los de otros tipos de tienda
+  const ids=arr.map(p=>limpia(p.id,20)).filter(Boolean);
+  const{data:previos}=await db.from("catalogo").select("id,precios").in("id",ids);
+  const antes={};(previos||[]).forEach(p=>{antes[p.id]=(p.precios&&typeof p.precios==="object")?p.precios:{}});
+  const filas=arr.map(p=>{
+    const id=limpia(p.id,20);
+    const nuevos={};
+    Object.keys(p.precios||{}).slice(0,12).forEach(k=>{const v=num(p.precios[k],0,10000);if(v)nuevos[limpia(k,20)]=v;});
+    // se mezclan: lo que llega manda sobre su tipo, lo demás se conserva
+    const precios=Object.assign({},antes[id]||{},nuevos);
+    return{id,cat:limpia(p.cat,20),nombre:limpia(p.nombre,60),
+      precio:num(p.precio,0,10000),costo:num(p.costo,0,10000),precios};
+  }).filter(p=>p.id);
   await db.from("logs").insert({tipo:"admin",detalle:"Editó precios/costos de "+filas.length+" producto(s)"});
   const{error}=await db.from("catalogo").upsert(filas);
   if(error)return res.status(500).json({ok:false,error:error.message});
