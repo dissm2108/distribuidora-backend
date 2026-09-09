@@ -462,9 +462,18 @@ app.post("/cargas",authA,async(req,res)=>{
   if(!ex)return res.status(400).json({ok:false,error:"Ese conductor no existe: "+cond});
   const items=catsOK(req.body.items);
   if(!items)return res.status(400).json({ok:false,error:"La carga no tiene productos"});
-  const{data:nc}=await db.from("cargas").insert({conductor:cond,items,prods:(req.body.prods&&typeof req.body.prods==="object")?req.body.prods:null,detalle:req.body.detalle||null,estado:"pendiente"}).select().single();
+  const prods=(req.body.prods&&typeof req.body.prods==="object"&&Object.keys(req.body.prods).length)?req.body.prods:null;
+  let{data:nc,error:eIns}=await db.from("cargas").insert({conductor:cond,items,prods,detalle:req.body.detalle||null,estado:"pendiente"}).select().single();
+  let aviso="";
+  if(eIns&&/prods/.test(eIns.message||"")){
+    // la columna prods todavía no existe en la base: guardar sin el detalle y avisarlo
+    const r2=await db.from("cargas").insert({conductor:cond,items,detalle:req.body.detalle||null,estado:"pendiente"}).select().single();
+    nc=r2.data;eIns=r2.error;
+    aviso="Falta ejecutar el SQL en Supabase (columna prods en cargas). La carga se guardó SIN el detalle por producto, así que el conductor no verá el stock producto por producto.";
+  }
+  if(eIns||!nc)return res.status(500).json({ok:false,error:"No se pudo guardar la carga: "+((eIns&&eIns.message)||"sin respuesta de la base")});
   await avisoA(cond,"📦 Tienes una carga asignada: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confírmala antes de salir.");
-  res.json({ok:true,id:nc?nc.id:null});
+  res.json({ok:true,id:nc.id,aviso:aviso||undefined,con_detalle:!!prods&&!aviso});
 });
 app.post("/admin/cargas/:id/reasignar",authA,async(req,res)=>{
   const cond=String(req.body.conductor||"").trim();
