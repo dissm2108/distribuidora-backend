@@ -2268,5 +2268,68 @@ window.cgSugerirTxt=async function(){
 };
 })();
 </script>
+<script id="v5tipoprod">
+(function(){
+/* ═══ Quitar un producto SOLO del tipo de tienda elegido ═══
+   Antes la ✕ llamaba a prodBorrar, que lo desactivaba en TODO el catálogo:
+   por eso lo quitado en bodega desaparecía también en mayorista. */
+window.NOTIPOS={};   /* idProducto -> [tipos donde no se vende] */
+window.prodQuitarTipo=async function(id){
+ var p=null;(CATA||[]).forEach(function(c){(c.prods||[]).forEach(function(x){if(x.id===id)p=x})});
+ var nom=(p&&p.n)||id;
+ var q=prompt('¿Qué quieres hacer con "'+nom+'"?\n\n'
+  +'1 = Quitarlo solo para '+TIPOSEL+'\n'
+  +'2 = Quitarlo de todo el catálogo (todos los tipos)\n\n'
+  +'Escribe 1 o 2:','1');
+ if(q==='2'){
+  if(!confirm('Se quitará de TODOS los tipos de tienda. El historial de ventas se conserva.'))return;
+  return prodBorrar(id);
+ }
+ if(q!=='1')return;
+ var r=await apiA('/admin/catalogo/'+id+'/tipo',{tipo:TIPOSEL,activo:false});
+ if(!(r&&r.ok))return alert('No se pudo quitar: '+((r&&r.error)||'sin respuesta'));
+ NOTIPOS[id]=r.no_tipos||[];
+ renderForzado();
+};
+window.prodDevolverTipo=async function(id){
+ var r=await apiA('/admin/catalogo/'+id+'/tipo',{tipo:TIPOSEL,activo:true});
+ if(!(r&&r.ok))return alert('No se pudo devolver: '+((r&&r.error)||'sin respuesta'));
+ NOTIPOS[id]=r.no_tipos||[];
+ renderForzado();
+};
+window.noEsteTipo=function(id){return (NOTIPOS[id]||[]).indexOf(TIPOSEL)>=0};
+
+/* la ✕ ahora pregunta, y los quitados se listan aparte para poder devolverlos */
+if(typeof rCatalogo==='function'){var _rc=rCatalogo;window.rCatalogo=function(){
+ var h='';try{h=_rc()}catch(e){return ''}
+ h=h.replace(/onclick="prodBorrar\('([^']+)'\)"/g,function(m,id){return 'onclick="prodQuitarTipo(\''+id+'\')"'});
+ /* ocultar del listado los que no se venden en este tipo */
+ var c=CATA[CATCAT]||{prods:[]};
+ var fuera=(c.prods||[]).filter(function(p){return noEsteTipo(p.id)});
+ fuera.forEach(function(p){
+  var re=new RegExp('<div style="display:grid;grid-template-columns:1fr 92px 92px 34px[\\s\\S]*?prodQuitarTipo\\(\''+p.id+'\'\\)[\\s\\S]*?<\\/div>','');
+  h=h.replace(re,'');
+ });
+ if(fuera.length){
+  h+='<div class="card"><div class="ct">Quitados para '+TIPOSEL+'</div>'
+   +'<div style="font-size:11.5px;opacity:.7;margin-bottom:8px">No se le muestran al conductor cuando atiende una tienda de este tipo. Siguen disponibles en los demás tipos.</div>'
+   +fuera.map(function(p){
+     return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--linea)">'
+      +'<span style="font-size:12.5px;opacity:.7">'+p.n+'</span>'
+      +'<button onclick="prodDevolverTipo(\''+p.id+'\')" style="padding:5px 10px;border-radius:9px;border:1.5px solid #2F6B4F;background:none;color:#2F6B4F;font-size:11px;font-weight:800;cursor:pointer">Devolver</button></div>';
+   }).join('')+'</div>';
+ }
+ return h;
+};}
+/* cargar el estado al traer el catálogo */
+if(typeof catCargar==='function'){var _cc=catCargar;window.catCargar=async function(){
+ var r=await _cc.apply(this,arguments);
+ try{
+  var rc=await apiA('/admin/catalogo');
+  if(rc&&rc.ok)(rc.productos||[]).forEach(function(p){if(Array.isArray(p.no_tipos)&&p.no_tipos.length)NOTIPOS[p.id]=p.no_tipos});
+ }catch(e){}
+ return r;};}
+})();
+</script>
 </body>
 </html>

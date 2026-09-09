@@ -3850,5 +3850,90 @@ if(typeof cargarDatos==='function'){var _cg=cargarDatos;window.cargarDatos=async
  return r;};}
 })();
 </script>
+<script id="v5ux3">
+(function(){
+/* ═══ 1. Sesión: 30 días, u 8 días sin entrar ═══ */
+var DIA=86400000;
+window.tocarSesion=function(){try{localStorage.setItem('v5_ses_uso',String(Date.now()))}catch(e){}};
+(function(){
+ try{
+  if(!SES)return;
+  var uso=Number(localStorage.getItem('v5_ses_uso')||0);
+  if(uso&&(Date.now()-uso)>8*DIA){
+   localStorage.removeItem('v5_ses');localStorage.removeItem('v5_ses_uso');
+   location.reload();return;
+  }
+  tocarSesion();
+ }catch(e){}
+})();
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);tocarSesion();return r;};}
+/* un 401 suelto (servidor reiniciando, red mala) ya no borra la sesión:
+   hacen falta dos seguidos para pedir la contraseña otra vez */
+if(typeof cerrarSesion==='function'){var _cs=cerrarSesion;window.cerrarSesion=function(forzar){
+ if(forzar===true){localStorage.removeItem('v5_ses_uso');return _cs.apply(this,arguments)}
+ var n=Number(sessionStorage.getItem('v5_401')||0)+1;
+ sessionStorage.setItem('v5_401',String(n));
+ if(n<2){toast('Reintentando conexión…','w');return;}
+ localStorage.removeItem('v5_ses_uso');return _cs.apply(this,arguments);
+};}
+
+/* ═══ 2. Inicio: no repintar si nada cambió (era el cuadro que parpadeaba) ═══ */
+if(typeof pintaInicio==='function'){var _pi=pintaInicio;window.pintaInicio=function(){
+ var d=document.getElementById('ini-v5');
+ var antes=d?d.innerHTML:null;
+ var r=_pi.apply(this,arguments);
+ var d2=document.getElementById('ini-v5');
+ if(d2&&antes!==null&&d2.innerHTML===antes)return r;
+ return r;};}
+
+/* ═══ 3. Al confirmar el cobro, volver a la tienda ═══ */
+if(typeof cpMostrarPaso==='function'){var _mp=cpMostrarPaso;window.cpMostrarPaso=function(n){
+ var r=_mp.apply(this,arguments);
+ if(n===4){
+  setTimeout(function(){
+   try{
+    cov('ov-entrega');
+    var i=(typeof tiendaActualIdx!=='undefined')?tiendaActualIdx:-1;
+    if(i>=0&&typeof vtd==='function'){vtd(i);aov('ov-det');}
+    toast('✓ Entrega registrada','g');
+   }catch(e){}
+  },900);
+ }
+ return r;};}
+})();
+</script>
+<script id="v5notipos">
+(function(){
+/* ═══ Cada tipo de tienda ve solo sus productos ═══ */
+window.NOTIPOS={};
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{
+  var cat=(window._ultDatos&&_ultDatos.catalogo)||[];
+  NOTIPOS={};
+  cat.forEach(function(p){if(p&&p.id&&Array.isArray(p.no_tipos)&&p.no_tipos.length)NOTIPOS[p.id]=p.no_tipos});
+ }catch(e){}
+ return r;};}
+window.prodVisible=function(pid){
+ var t=(typeof cpTipoSesion!=='undefined')?cpTipoSesion:null;
+ if(!t||t==='custom')return true;
+ return (NOTIPOS[pid]||[]).indexOf(t)<0;
+};
+/* filtrar en la pantalla de cobro y en la venta rápida */
+if(typeof renderCatList==='function'){var _rl=renderCatList;window.renderCatList=function(mode,catElId,activeTab,stock){
+ var quitados=[];
+ if(mode!=='carga'&&mode!=='alm'&&mode!=='tr'){
+  (CATS||[]).forEach(function(c){
+   var orig=c.prods||[];
+   var vis=orig.filter(function(p){return prodVisible(p.id)});
+   if(vis.length!==orig.length){quitados.push({c:c,orig:orig});c.prods=vis;}
+  });
+ }
+ var r=_rl.apply(this,arguments);
+ quitados.forEach(function(x){x.c.prods=x.orig});
+ return r;};}
+})();
+</script>
 </body>
 </html>
