@@ -780,7 +780,7 @@ window.rKardex=function(){
  +(conds.length?selCondsG('cg-cond','— elige conductor —'):'<div style="font-size:12px;color:#B97A1F">Primero crea usuarios en Conductores.</div>')
  +'<div id="cg-sug" style="font-size:11.5px;color:#B97A1F;font-weight:700;margin:8px 0;display:none"></div>'
  +'<div style="margin-top:10px">'+pickerHTML('cg')+'</div>'
- +'<div style="border:1.5px dashed rgba(128,128,128,.4);border-radius:12px;padding:11px;margin-bottom:10px"><div style="font-size:12.5px;font-weight:800;margin-bottom:4px">📄 Cargar desde tu documento</div><div style="font-size:11.5px;opacity:.7;line-height:1.5;margin-bottom:7px">Sube la foto del papel o PDF escaneado que te pasan. El sistema lee las cantidades y las coloca; tú solo verificas producto por producto antes de asignar.</div><input type="file" accept="image/*" id="cg-doc" style="font-size:11.5px"><div id="cg-doc-msg" style="font-size:11.5px;font-weight:700;margin-top:7px"></div></div>'+'<div style="display:flex;gap:8px"><button onclick="cgSugerirTxt()" style="flex:1;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">🧮 Ver sugerencia del último viaje</button><button onclick="cgEnviar()" style="flex:1.2;border:none;background:#20241E;color:#fff;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Asignar carga al conductor</button></div>'
+ +'<div style="border:1.5px dashed rgba(128,128,128,.4);border-radius:12px;padding:11px;margin-bottom:10px"><div style="font-size:12.5px;font-weight:800;margin-bottom:4px">📄 Cargar desde tu documento</div><div style="font-size:11.5px;opacity:.7;line-height:1.5;margin-bottom:7px">Sube la foto del papel o PDF escaneado que te pasan. El sistema lee las cantidades y las coloca; tú solo verificas producto por producto antes de asignar.</div><input type="file" accept="image/*" id="cg-doc" style="font-size:11.5px"><div id="cg-doc-msg" style="font-size:11.5px;font-weight:700;margin-top:7px"></div></div>'+'<div style="display:flex;gap:8px"><button onclick="cgSugerirTxt()" style="flex:1;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">🔁 Traer la carga anterior</button><button onclick="cgEnviar()" style="flex:1.2;border:none;background:#20241E;color:#fff;border-radius:11px;padding:11px;font-weight:800;font-size:12px;cursor:pointer">Asignar carga al conductor</button></div>'
  +'<div style="font-size:11px;opacity:.65;margin-top:8px;line-height:1.5">Él la <b>cuenta y confirma producto por producto</b> en su app antes de salir (o marca diferencias con motivo).</div>'
  +'</div>'
  +lista+'</div>';
@@ -2214,123 +2214,57 @@ if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
 };}
 })();
 </script>
-<script id="v5cargaprod">
+
+<script id="v5carga3">
 (function(){
-/* ═══ La carga se arma con el catálogo real, producto por producto ═══ */
-window.CGQ=(function(){try{return JSON.parse(localStorage.getItem('v5a_cgq')||'{}')}catch(e){return{}}})();
-window.cgGuardar=function(){try{localStorage.setItem('v5a_cgq',JSON.stringify(CGQ))}catch(e){}};
-window.cgCats=function(){
- return (window.CATA||[]).map(function(cat){
-  return {id:cat.id,nom:cat.nom||cat.nombre||cat.id,prods:(cat.prods||[]).slice()};
- }).filter(function(c){return c.prods.length});
-};
-window.cgSet=function(pid,v){CGQ[pid]=Math.max(0,Number(v)||0);cgGuardar();cgTotales()};
-window.cgTotales=function(){
- cgCats().forEach(function(cat){
-  var t=cat.prods.reduce(function(s,p){return s+Number(CGQ[p.id]||0)},0);
-  var e=document.getElementById('cgt-'+cat.id);if(e)e.textContent=t;
- });
-};
-window.cgForm=function(){
- var cats=cgCats();
- if(!cats.length)return '<div style="font-size:12px;opacity:.7">Aún no hay productos en el catálogo. Créalos en "Catálogo y precios".</div>';
- return cats.map(function(cat){
-  return '<details style="border:1px solid var(--linea);border-radius:11px;margin-bottom:7px;padding:9px 11px">'
-  +'<summary style="cursor:pointer;font-weight:800;font-size:12.5px;display:flex;justify-content:space-between;gap:8px">'
-  +'<span>'+cat.nom+'</span><span style="opacity:.8">Total: <b id="cgt-'+cat.id+'">0</b></span></summary>'
-  +cat.prods.map(function(p){
-   return '<div style="display:flex;align-items:center;gap:8px;margin-top:7px">'
-   +'<div style="flex:1;font-size:12px">'+(p.n||p.nombre||p.id)+'</div>'
-   +'<input type="number" min="0" value="'+(CGQ[p.id]||0)+'" oninput="cgSet(\''+p.id+'\',this.value)" '
-   +'style="width:78px;padding:7px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center"></div>';
-  }).join('')+'</details>';
- }).join('');
-};
-/* pone el catálogo completo dentro de la tarjeta de carga */
-window.cgPintar=function(){
- var box=document.getElementById('cg-campos');
- if(!box){
-  var uno=document.getElementById('cg-cond');if(!uno)return;
-  box=document.createElement('div');box.id='cg-campos';
-  uno.parentNode.insertBefore(box,uno.nextSibling);
-  /* oculta los ocho campos fijos anteriores */
-  (window.CATC||[]).forEach(function(x){var v=document.getElementById('cg-'+x[0]);if(v&&v.parentNode)v.parentNode.style.display='none'});
- }
- var act=document.activeElement;
- if(act&&act.tagName==='INPUT'&&box.contains(act))return cgTotales();
- var ult='';try{var u=JSON.parse(localStorage.getItem('v5a_cgq_ult')||'null');
-  if(u)ult='<div style="font-size:11px;opacity:.7;margin:6px 0">Última carga asignada: '+u.total+' unidades a '+u.cond+' · '+new Date(u.fecha).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+'</div>';
- }catch(e){}
- box.innerHTML=cgForm()+ult
-  +'<button onclick="cgVaciar()" style="width:100%;margin-top:8px;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px;font-weight:700;cursor:pointer">🧹 Vaciar cantidades</button>';
- cgTotales();
-};
-/* envía totales por categoría y el detalle por producto */
+/* ═══ La carga usa el selector de productos que ya tiene el panel ═══
+   El envío anterior leía _PK['cg'] como si fuera {id:cantidad}, pero su
+   forma real es {cat:0, items:{id:{id,n,c,cat}}}. Por eso el detalle por
+   producto viajaba SIEMPRE vacío y la app no recibía nada. */
+function itemsCarga(){
+ try{return (typeof pkItems==='function')?pkItems('cg'):[]}catch(e){return[]}
+}
 window.cgEnviar=async function(){
  var s=document.getElementById('cg-cond');
  if(!s||!s.value)return alert('Elige primero el conductor que lleva la carga.');
- /* recoger lo escrito aunque no se haya disparado el evento */
- var box=document.getElementById('cg-campos');
- if(box)box.querySelectorAll('input[type=number]').forEach(function(inp){
-   var oc=inp.getAttribute('oninput')||'';var m=oc.match(/cgSet\('([^']+)'/);
-   if(m&&Number(inp.value)>0)CGQ[m[1]]=Number(inp.value);
+ var it=itemsCarga(),prods={},items={},total=0;
+ it.forEach(function(x){
+  var q=Number(x.c)||0;if(q<=0)return;
+  prods[x.id]=q;items[x.cat]=(items[x.cat]||0)+q;total+=q;
  });
- cgGuardar();
- var items={},prods={},total=0;
- cgCats().forEach(function(cat){
-  var t=0;cat.prods.forEach(function(p){var q=Number(CGQ[p.id]||0);if(q>0){prods[p.id]=q;t+=q}});
-  items[cat.id]=t;total+=t;
- });
- if(!total)return alert('Escribe las cantidades antes de asignar la carga.');
+ if(!total)return alert('Marca las cantidades con los botones + de cada producto antes de asignar.');
  var r=await apiA('/cargas',{conductor:s.value,items:items,prods:prods});
  if(r&&r.ok){
   try{localStorage.setItem('v5a_cgq_ult',JSON.stringify({fecha:new Date().toISOString(),cond:s.value,total:total}))}catch(e){}
-  cgPintar();
-  alert('✓ Carga asignada con '+total+' unidades — el conductor la confirma en su app.\n\nLas cantidades quedan guardadas para el próximo viaje. Usa "Vaciar cantidades" cuando quieras empezar de cero.');}
- else alert('No se pudo asignar: '+((r&&r.error)||'sin respuesta del servidor'));
+  alert('✓ Carga asignada: '+Object.keys(prods).length+' productos, '+total+' unidades.\n\nEl conductor la confirma en su app. Las cantidades quedan en pantalla por si quieres repetirlas.');
+ }else alert('No se pudo asignar: '+((r&&r.error)||'sin respuesta del servidor'));
 };
-/* se inyecta dentro del propio repintado: así nunca reaparecen los campos viejos */
-if(typeof rKardex==='function'){var _rk2=rKardex;window.rKardex=function(){
- var html='';try{html=_rk2.apply(this,arguments)}catch(e){return ''}
- var i=html.indexOf('id="cg-cond"');if(i<0)return html;
- var ini=html.indexOf('</select>',i);if(ini<0)return html;
- ini+=9;
- var fin=html.indexOf('<div style="display:flex;gap:8px"><button onclick="cgSugerir()"',ini);
- if(fin<0)return html;
- var ult='';try{var u=JSON.parse(localStorage.getItem('v5a_cgq_ult')||'null');
-  if(u)ult='<div style="font-size:11px;opacity:.7;margin:6px 0">Última carga asignada: '+u.total+' unidades a '+u.cond+' · '+new Date(u.fecha).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+'</div>';
- }catch(e){}
- var form='<div id="cg-campos">'+cgForm()+'</div>'+ult
-  +'<button onclick="cgVaciar()" style="width:100%;margin:8px 0;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px;font-weight:700;cursor:pointer">🧹 Vaciar cantidades</button>';
- return html.slice(0,ini)+form+html.slice(fin);
-};}
-var _ir=window.irAdm;
-if(typeof _ir==='function'){window.irAdm=function(s){_ir(s);setTimeout(cgTotales,120)};}
-window.cgSugerir=async function(){
+/* Traer la carga anterior tal cual, para verificar y ajustar */
+window.cgSugerirTxt=async function(){
+ var el=document.getElementById('cg-sug');
  var s=document.getElementById('cg-cond');
- if(!s||!s.value)return alert('Elige primero el conductor.');
- if(!CFGA.API)return alert('Necesitas el servidor conectado.');
+ function di(t){if(el){el.style.display='block';el.textContent=t}else alert(t)}
+ if(!s||!s.value)return di('Elige primero el conductor.');
+ if(!CFGA.API)return di('Necesita el servidor conectado.');
+ di('Buscando su carga anterior…');
  var r=await apiA('/liquidaciones/sugerencia-prod?conductor='+encodeURIComponent(s.value));
  if(!r||!r.ok){
-  var m={sin_historial:'Este conductor todavia no tiene ninguna carga registrada.',
-         sin_detalle:'Su carga anterior se asigno solo por categoria, sin el detalle de cada producto.',
+  var m={sin_historial:'Este conductor todavía no tiene ninguna carga registrada.',
+         sin_detalle:'Su carga anterior se asignó solo por categoría, sin detalle de productos.',
          sin_conductor:'Elige el conductor.'};
-  return alert('No se pudo traer la carga anterior: '+(m[r&&r.motivo]||'sin datos'));
+  return di(m[r&&r.motivo]||'No se pudo traer la carga anterior.');
  }
+ /* vaciar y volver a marcar producto por producto */
+ if(typeof pkReset==='function')pkReset('cg');
  var n=0,total=0;
- CGQ={};
- Object.keys(r.prods||{}).forEach(function(id){CGQ[id]=Number(r.prods[id])||0;n++;total+=CGQ[id]});
- cgGuardar();
- if(typeof cargarAdm==='function')cargarAdm();else if(typeof render==='function')render();
- setTimeout(cgTotales,150);
+ Object.keys(r.prods||{}).forEach(function(id){
+  var q=Number(r.prods[id])||0;if(q>0&&typeof pkAdd==='function'){pkAdd('cg',id,q);n++;total+=q;}
+ });
+ if(typeof pkPinta==='function')pkPinta('cg');
  var f=r.fecha?new Date(r.fecha).toLocaleDateString('es-PE',{day:'2-digit',month:'short'}):'';
- alert('Carga anterior cargada: '+n+' productos, '+total+' unidades'+(f?' (del '+f+')':'')+'.\n\nRevisa y ajusta lo que sobro o falto antes de asignar.');
+ di(n?('Carga anterior'+(f?' del '+f:'')+': '+n+' productos, '+total+' unidades. Verifica y ajusta con + y −.')
+     :'Su carga anterior no tenía productos.');
 };
-window.cgVaciar=function(){
- if(!confirm('¿Poner en cero todas las cantidades de la carga?'))return;
- CGQ={};cgGuardar();cgPintar();
-};
-setTimeout(cgTotales,900);setTimeout(cgTotales,2500);
 })();
 </script>
 </body>
