@@ -3700,10 +3700,19 @@ if(typeof cpConfirmarCobro==='function'){var _cc=cpConfirmarCobro;window.cpConfi
  return r;};}
 /* la carga confirmada fija el stock inicial */
 if(typeof cargaOK==='function'){var _ok=cargaOK;window.cargaOK=function(){
+ /* leer ANTES: la función original borra CARGA_PEND al confirmar */
+ var pr=null;
+ try{pr=(window.CARGA_PEND&&CARGA_PEND.prods)||null}catch(e){}
  var r=_ok.apply(this,arguments);
- try{var pr=(window.CARGA_PEND&&CARGA_PEND.prods)||null;
-  if(pr){Object.keys(pr).forEach(function(id){SP[id]=Number(pr[id]||0)});
-   (CATS||[]).forEach(function(c){SP_BASE[c.id]=stockCat(c.id)});guardar();}
+ try{
+  if(pr&&Object.keys(pr).length){
+   Object.keys(pr).forEach(function(id){SP[id]=Number(pr[id]||0)});
+   (CATS||[]).forEach(function(c){SP_BASE[c.id]=stockCat(c.id)});
+   guardar();
+   toast('📦 Stock cargado: '+Object.keys(pr).length+' productos','g');
+  }else{
+   toast('La carga llegó sin detalle por producto — el stock solo se verá por categoría','w');
+  }
  }catch(e){}
  pintaStockRuta();return r;};}
 /* lo que se recibe del almacén suma */
@@ -3812,6 +3821,32 @@ if(typeof abrirRegT==='function'){var _ar=abrirRegT;window.abrirRegT=function(){
    if(!_rtm._tocar){_rtm._tocar=true;_rtm.on('click',function(ev){_rtMk.setLatLng(ev.latlng)});}
   }catch(e){}
  },320);
+ return r;};}
+})();
+</script>
+<script id="v5cargafix">
+(function(){
+/* confirmar con diferencias también fija el stock */
+if(typeof cargaDif==='function'){var _cd=cargaDif;window.cargaDif=function(){
+ var pr=null;try{pr=(window.CARGA_PEND&&CARGA_PEND.prods)||null}catch(e){}
+ var r=_cd.apply(this,arguments);
+ try{
+  if(pr&&window.SP){
+   Object.keys(pr).forEach(function(id){SP[id]=Number(pr[id]||0)});
+   (CATS||[]).forEach(function(c){SP_BASE[c.id]=stockCat(c.id)});
+   localStorage.setItem('v5_stockp',JSON.stringify(SP));
+   localStorage.setItem('v5_stockp_base',JSON.stringify(SP_BASE));
+  }
+ }catch(e){}
+ if(typeof pintaStockRuta==='function')pintaStockRuta();
+ return r;};}
+/* si la carga sigue pendiente al abrir, dejar listo el detalle */
+if(typeof cargarDatos==='function'){var _cg=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cg.apply(this,arguments);
+ try{
+  var p=window.CARGA_PEND;
+  if(p&&p.prods&&!Object.keys(window.SP||{}).length)window._prodsPend=p.prods;
+ }catch(e){}
  return r;};}
 })();
 </script>

@@ -2236,7 +2236,8 @@ window.cgEnviar=async function(){
  var r=await apiA('/cargas',{conductor:s.value,items:items,prods:prods});
  if(r&&r.ok){
   try{localStorage.setItem('v5a_cgq_ult',JSON.stringify({fecha:new Date().toISOString(),cond:s.value,total:total}))}catch(e){}
-  alert('✓ Carga asignada: '+Object.keys(prods).length+' productos, '+total+' unidades.\n\nEl conductor la confirma en su app. Las cantidades quedan en pantalla por si quieres repetirlas.');
+  alert('✓ Carga asignada: '+Object.keys(prods).length+' productos, '+total+' unidades.'
+   +(r.aviso?('\n\n⚠️ '+r.aviso):'\n\nEl conductor la confirma en su app.'));
  }else alert('No se pudo asignar: '+((r&&r.error)||'sin respuesta del servidor'));
 };
 /* Traer la carga anterior tal cual, para verificar y ajustar */
