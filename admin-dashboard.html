@@ -2463,5 +2463,52 @@ if(typeof catGuardar==='function'){var _cg=catGuardar;window.catGuardar=async fu
  return r;};}
 })();
 </script>
+<script id="v5sinfuga">
+(function(){
+/* ═══ Guardar un tipo ya no toca el precio general ═══
+   Antes se escribía también `precio` (el general) y el otro tipo, al no tener
+   precio propio, lo heredaba: por eso un cambio en bodega aparecía en mayorista. */
+window.catGuardar=async function(){
+ var c=CATA[CATCAT];if(!c)return;
+ var general=(TIPOSEL==='general');
+ var prods=c.prods.map(function(p){
+  var precio=parseFloat((document.getElementById('px-'+p.id)||{}).value)||0;
+  var costo=parseFloat((document.getElementById('pc-'+p.id)||{}).value)||0;
+  var fila={id:p.id,cat:c.id,nombre:p.n,costo:costo};
+  if(general){
+   fila.precio=precio;                       /* precio base, sin tipo */
+   fila.precios=PRECIOS[p.id]||{};           /* los de cada tipo, intactos */
+  }else{
+   PRECIOS[p.id]=PRECIOS[p.id]||{};
+   PRECIOS[p.id][TIPOSEL]=precio;            /* solo el tipo elegido */
+   fila.precios=PRECIOS[p.id];
+   var g=(CATE[p.id]||{}).precio;
+   fila.precio=(g!=null?Number(g):0);        /* el general se conserva tal cual */
+  }
+  return fila;
+ });
+ var r=await apiA('/admin/catalogo',{productos:prods});
+ var m=document.getElementById('cat-msg');
+ if(m)m.textContent=(r&&r.ok)
+  ?('✓ Guardado '+(general?'como precio general':'solo para '+TIPOSEL)+' — los conductores lo reciben al sincronizar')
+  :'No se pudo guardar';
+ await cargarPreciosTipo();
+ try{renderForzado()}catch(e){}
+};
+/* chip "General" junto a los tipos, para el precio base */
+if(typeof rCatalogo==='function'){var _rc=rCatalogo;window.rCatalogo=function(){
+ var h='';try{h=_rc()}catch(e){return ''}
+ var on=(TIPOSEL==='general');
+ var chip='<button onclick="TIPOSEL=\'general\';renderForzado()" style="padding:6px 11px;border-radius:14px;font-size:11.5px;font-weight:800;cursor:pointer;'
+  +'border:1.5px solid '+(on?'#B97A1F':'rgba(128,128,128,.35)')+';background:'+(on?'rgba(185,122,31,.12)':'none')+';color:'+(on?'#8A6410':'inherit')+'">💲 General</button>';
+ /* se inserta antes del primer chip de tipo */
+ h=h.replace(/(<button onclick="TIPOSEL=)/,chip+'$1');
+ var nota=on
+  ? '<div style="font-size:11px;color:#8A6410;margin:6px 0">Estás editando el <b>precio general</b>: lo usa cualquier tipo de tienda que no tenga precio propio.</div>'
+  : '<div style="font-size:11px;opacity:.7;margin:6px 0">Estás editando solo los precios de <b>'+TIPOSEL+'</b>. Los demás tipos no cambian.</div>';
+ h=h.replace(/(<div class="card">\s*<div class="ct">[^<]*[Pp]recios)/,nota+'$1');
+ return h;};}
+})();
+</script>
 </body>
 </html>
