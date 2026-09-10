@@ -2561,5 +2561,117 @@ if(typeof rCatalogo==='function'){var _rc=rCatalogo;window.rCatalogo=function(){
  return h;};}
 })();
 </script>
+<script id="v5sinprestamo">
+(function(){
+/* ═══ Una casilla vacía es "sin precio propio", no el precio de otro tipo ═══
+   Antes se rellenaba con el precio del primer tipo que tuviera valor, y al
+   guardar ese préstamo se volvía real: así se contagiaban los tipos. */
+function propio(pid){var p=PRECIOS[pid]||{};return p[TIPOSEL]!=null}
+function fallback(pid,cat){
+ var pc=((PARAMS_A.precios_cat||{})[TIPOSEL]||{})[cat.id];
+ if(pc!=null)return Number(pc);
+ return Number(cat.precio||0);
+}
+if(typeof rCatalogo==='function'){var _rc=rCatalogo;window.rCatalogo=function(){
+ var h='';try{h=_rc()}catch(e){return ''}
+ if(TIPOSEL==='general')return h;
+ var c=CATA[CATCAT];if(!c)return h;
+ (c.prods||[]).forEach(function(p){
+  if(propio(p.id))return;
+  var re=new RegExp('(id="px-'+p.id+'"[^>]*?)value="[^"]*"');
+  h=h.replace(re,'$1value="" placeholder="'+fallback(p.id,c).toFixed(2)+'"');
+ });
+ h=h.replace(/(<div class="card"><div class="ct">🏷️ Precios · [^<]*<\/div>)/,
+  '$1<div style="font-size:11px;color:#8A6410;background:#FDF6E4;border:1px solid #EFDCA8;border-radius:9px;padding:8px 10px;margin-bottom:9px;line-height:1.5">'
+  +'Las casillas <b>vacías</b> no tienen precio propio en <b>'+TIPOSEL+'</b>: se usará el precio de la categoría para este tipo (el número gris). '
+  +'Escribe uno solo si quieres que ese producto cueste distinto aquí. Lo que escribas <b>no toca los demás tipos</b>.</div>');
+ return h;};}
+
+/* al guardar: vacío = quitar el precio propio de ese tipo */
+window.catGuardar=async function(){
+ var c=CATA[CATCAT];if(!c)return;
+ var general=(TIPOSEL==='general');
+ var prods=c.prods.map(function(p){
+  var el=document.getElementById('px-'+p.id);
+  var txt=el?String(el.value).trim():'';
+  var costo=parseFloat((document.getElementById('pc-'+p.id)||{}).value)||0;
+  var fila={id:p.id,cat:c.id,nombre:p.n,costo:costo};
+  if(general){
+   fila.precio=parseFloat(txt)||0;
+   fila.precios=PRECIOS[p.id]||{};
+  }else{
+   PRECIOS[p.id]=PRECIOS[p.id]||{};
+   if(txt===''){delete PRECIOS[p.id][TIPOSEL];}
+   else{PRECIOS[p.id][TIPOSEL]=parseFloat(txt)||0;}
+   fila.precios=PRECIOS[p.id];
+   fila.reemplazar_precios=true;              /* que el servidor no reviva lo borrado */
+   var g=(CATE[p.id]||{}).precio;
+   fila.precio=(g!=null?Number(g):0);
+  }
+  return fila;
+ });
+ var r=await apiA('/admin/catalogo',{productos:prods});
+ var m=document.getElementById('cat-msg');
+ if(m)m.textContent=(r&&r.ok)
+  ?('✓ Guardado '+(general?'como precio general':'solo para '+TIPOSEL)+' — los conductores lo reciben al sincronizar')
+  :'No se pudo guardar';
+ await cargarPreciosTipo();
+ try{renderForzado()}catch(e){}
+};
+/* vaciar de una vez los precios de un tipo en esta categoría */
+window.catVaciarTipo=async function(){
+ if(TIPOSEL==='general')return alert('Elige un tipo de tienda.');
+ var c=CATA[CATCAT];if(!c)return;
+ if(!confirm('¿Quitar los precios propios de "'+TIPOSEL+'" en '+(c.nom||c.id)+'?\n\nEsos productos pasarán a usar el precio de la categoría para este tipo. Los demás tipos no se tocan.'))return;
+ (c.prods||[]).forEach(function(p){var el=document.getElementById('px-'+p.id);if(el)el.value='';});
+ await catGuardar();
+};
+})();
+</script>
+<script id="v5nuevos">
+(function(){
+/* ═══ Añadir producto o categoría sin tocar lo que ya existe ═══ */
+window.prodAgregar=async function(){
+ var el=document.getElementById('np-nom');
+ var n=el?el.value.trim():'';if(!n)return alert('Escribe el nombre del producto.');
+ var c=CATA[CATCAT];if(!c)return;
+ if((c.prods||[]).some(function(p){return (p.n||'').toLowerCase()===n.toLowerCase()}))
+  return alert('Ya hay un producto con ese nombre en esta categoría.');
+ var pv=parseFloat((document.getElementById('np-pv')||{}).value);
+ var cuerpo={id:c.id+'_'+slug(n),cat:c.id,nombre:n,costo:0,precio:0,precios:{}};
+ if(!isNaN(pv)&&pv>0){
+  if(TIPOSEL==='general')cuerpo.precio=pv;      /* precio base */
+  else cuerpo.precios[TIPOSEL]=pv;              /* solo para el tipo elegido */
+ }
+ var r=await apiA('/admin/catalogo/producto',cuerpo);
+ if(!(r&&r.ok))return alert('No se pudo crear: '+((r&&r.error)||'sin respuesta del servidor'));
+ var id=r.id||cuerpo.id;
+ c.prods.push({id:id,n:n});
+ CATE[id]={precio:cuerpo.precio,costo:0};
+ PRECIOS[id]=Object.assign({},cuerpo.precios);
+ if(el)el.value='';
+ var pvi=document.getElementById('np-pv');if(pvi)pvi.value='';
+ await cargarPreciosTipo();
+ renderForzado();
+ if(!isNaN(pv)&&pv>0&&TIPOSEL!=='general')
+  setTimeout(function(){alert('✓ "'+n+'" creado con precio S/'+pv.toFixed(2)+' solo para '+TIPOSEL+'. Los demás tipos usarán el precio de la categoría hasta que les pongas uno.')},60);
+};
+/* categoría nueva: nombre libre y sin precios de tipo heredados */
+window.catAgregar=async function(){
+ var el=document.getElementById('nc-nom');
+ var n=el?el.value.trim():'';if(!n)return alert('Escribe el nombre de la categoría.');
+ var base=slug(n).slice(0,20),id=base,k=2;
+ while(CATA.find(function(x){return x.id===id})){id=base.slice(0,18)+'_'+k;k++;if(k>50)break;}
+ CATA.push({id:id,nom:n,
+  emoji:((document.getElementById('nc-emo')||{}).value||'').trim()||'📦',
+  precio:parseFloat((document.getElementById('nc-pre')||{}).value)||0,prods:[]});
+ await catsGuardar();
+ CATCAT=CATA.length-1;
+ if(el)el.value='';
+ renderForzado();
+ setTimeout(function(){alert('✓ Categoría "'+n+'" creada. Sus productos empiezan sin precio en todos los tipos de tienda: ponles el precio de categoría por tipo o uno por producto.')},60);
+};
+})();
+</script>
 </body>
 </html>
