@@ -2676,5 +2676,77 @@ window.catAgregar=async function(){
 };
 })();
 </script>
+<script id="v5dupids">
+(function(){
+/* ═══ Hay casillas repetidas con el mismo id (dos tarjetas de catálogo).
+   getElementById devolvía siempre la primera, casi siempre vacía: por eso
+   "Añadir categoría" no hacía nada. Se lee la que el usuario está usando. ═══ */
+window.campo=function(id){
+ var els=document.querySelectorAll('[id="'+id+'"]');
+ if(!els.length)return null;
+ for(var i=0;i<els.length;i++){var e=els[i];
+  if(e.offsetParent!==null&&String(e.value||'').trim()!=='')return e;}
+ for(var j=0;j<els.length;j++){if(els[j].offsetParent!==null)return els[j];}
+ return els[0];
+};
+window.valorCampo=function(id){var e=campo(id);return e?String(e.value||'').trim():''};
+window.limpiaCampo=function(id){var els=document.querySelectorAll('[id="'+id+'"]');for(var i=0;i<els.length;i++)els[i].value='';};
+
+window.catAgregar=async function(){
+ var n=valorCampo('nc-nom');
+ if(!n)return alert('Escribe el nombre de la categoría en la casilla y vuelve a pulsar Añadir.');
+ var base=slug(n).slice(0,20),id=base,k=2;
+ while(CATA.find(function(x){return x.id===id})){id=base.slice(0,18)+'_'+k;k++;if(k>50)break;}
+ if(CATA.find(function(x){return (x.nom||'').toLowerCase()===n.toLowerCase()}))
+  return alert('Ya existe una categoría con ese nombre.');
+ CATA.push({id:id,nom:n,emoji:valorCampo('nc-emo')||'📦',precio:parseFloat(valorCampo('nc-pre'))||0,prods:[]});
+ var r=await catsGuardar();
+ CATCAT=CATA.length-1;
+ limpiaCampo('nc-nom');limpiaCampo('nc-emo');limpiaCampo('nc-pre');
+ await sincronizarCatalogo();
+ alert('✓ Categoría "'+n+'" creada. Ya aparece en Catálogo, en Pedidos WhatsApp y en la app del conductor tras sincronizar.');
+};
+window.prodAgregar=async function(){
+ var n=valorCampo('np-nom');
+ if(!n)return alert('Escribe el nombre del producto en la casilla y vuelve a pulsar Añadir.');
+ var c=CATA[CATCAT];if(!c)return alert('Elige primero una categoría.');
+ if((c.prods||[]).some(function(p){return (p.n||'').toLowerCase()===n.toLowerCase()}))
+  return alert('Ya hay un producto con ese nombre en esta categoría.');
+ var pv=parseFloat(valorCampo('np-pv'));
+ var cuerpo={id:c.id+'_'+slug(n),cat:c.id,nombre:n,costo:0,precio:0,precios:{}};
+ if(!isNaN(pv)&&pv>0){
+  if(TIPOSEL==='general'){
+   if(!confirm('Vas a crear "'+n+'" con precio general S/'+pv.toFixed(2)+'.\n\nLo usarán TODOS los tipos que no tengan precio propio. ¿Continuar?'))return;
+   cuerpo.precio=pv;
+  }else cuerpo.precios[TIPOSEL]=pv;
+ }
+ var r=await apiA('/admin/catalogo/producto',cuerpo);
+ if(!(r&&r.ok))return alert('No se pudo crear: '+((r&&r.error)||'sin respuesta del servidor'));
+ var id=r.id||cuerpo.id;
+ c.prods.push({id:id,n:n});CATE[id]={precio:cuerpo.precio,costo:0};PRECIOS[id]=Object.assign({},cuerpo.precios);
+ limpiaCampo('np-nom');limpiaCampo('np-pv');
+ await sincronizarCatalogo();
+ alert('✓ "'+n+'" creado'+((!isNaN(pv)&&pv>0&&TIPOSEL!=='general')?(' con precio S/'+pv.toFixed(2)+' solo para '+TIPOSEL):'')+'. Ya está en Pedidos WhatsApp.');
+};
+
+/* ═══ Un solo lugar que refresca catálogo, pedidos y selectores ═══ */
+window.sincronizarCatalogo=async function(){
+ try{
+  if(typeof catCargar==='function')await catCargar();
+  if(typeof cargarPreciosTipo==='function')await cargarPreciosTipo();
+  if(typeof pkReset==='function'){/* el selector de pedidos vuelve a leer el catálogo */}
+  if(typeof pkPinta==='function'&&document.getElementById('pd-prods'))pkPinta('pd');
+  if(typeof renderForzado==='function')renderForzado();
+ }catch(e){console.error('sincronizar:',e)}
+};
+/* borrar producto o tipo también refresca pedidos */
+['prodBorrar','prodQuitarTipo','prodDevolverTipo','tipoNuevo','tipoQuitar','catsGuardar'].forEach(function(fn){
+ if(typeof window[fn]==='function'){var _o=window[fn];window[fn]=async function(){
+  var r=await _o.apply(this,arguments);
+  try{if(typeof pkPinta==='function'&&document.getElementById('pd-prods'))pkPinta('pd')}catch(e){}
+  return r;};}
+});
+})();
+</script>
 </body>
 </html>
