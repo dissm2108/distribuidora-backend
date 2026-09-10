@@ -2510,5 +2510,56 @@ if(typeof rCatalogo==='function'){var _rc=rCatalogo;window.rCatalogo=function(){
  return h;};}
 })();
 </script>
+<script id="v5catipo">
+(function(){
+/* ═══ Precio de categoría por tipo + copiar precios entre tipos ═══ */
+window.PRECIOS_CAT=(PARAMS_A&&PARAMS_A.precios_cat)||{};
+window.catPrecioTipo=async function(){
+ var c=CATA[CATCAT];if(!c)return;
+ if(TIPOSEL==='general')return alert('Elige un tipo de tienda para fijarle su precio de categoría.');
+ var v=prompt('Precio para toda la categoría "'+(c.nom||c.id)+'" en tiendas de tipo "'+TIPOSEL+'".\n\nLo usarán los productos que no tengan precio propio para este tipo.','');
+ if(v===null)return;
+ var n=parseFloat(v);if(isNaN(n)||n<0)return alert('Escribe un número válido.');
+ PRECIOS_CAT[TIPOSEL]=PRECIOS_CAT[TIPOSEL]||{};
+ PRECIOS_CAT[TIPOSEL][c.id]=n;
+ PARAMS_A.precios_cat=PRECIOS_CAT;savePA();
+ var r=await apiA('/admin/params',PARAMS_A);
+ alert((r&&r.ok)?('✓ '+(c.nom||c.id)+' a S/'+n.toFixed(2)+' para '+TIPOSEL):'No se pudo guardar');
+ renderForzado();
+};
+window.catCopiarTipo=async function(){
+ var tp=(PARAMS_A.tipos_tienda||[]).filter(function(t){return t!==TIPOSEL});
+ if(!tp.length)return alert('No hay otro tipo de tienda para copiar.');
+ var de=prompt('Copiar los precios de qué tipo hacia "'+TIPOSEL+'":\n\n'+tp.join(', '),tp[0]);
+ if(!de||tp.indexOf(de)<0)return;
+ var c=CATA[CATCAT];if(!c)return;
+ if(!confirm('Se copiarán los precios de "'+de+'" a "'+TIPOSEL+'" en la categoría '+(c.nom||c.id)+'.\n\nLos que ya tengan precio propio en '+TIPOSEL+' se sobrescriben.'))return;
+ var n=0;
+ c.prods.forEach(function(p){
+  var v=(PRECIOS[p.id]||{})[de];
+  if(v!=null){PRECIOS[p.id]=PRECIOS[p.id]||{};PRECIOS[p.id][TIPOSEL]=v;n++;}
+ });
+ if((PRECIOS_CAT[de]||{})[c.id]!=null){
+  PRECIOS_CAT[TIPOSEL]=PRECIOS_CAT[TIPOSEL]||{};
+  PRECIOS_CAT[TIPOSEL][c.id]=PRECIOS_CAT[de][c.id];
+  PARAMS_A.precios_cat=PRECIOS_CAT;savePA();await apiA('/admin/params',PARAMS_A);
+ }
+ await catGuardar();
+ alert('✓ Copiados '+n+' precios de '+de+' a '+TIPOSEL+'. Revísalos antes de que salga el conductor.');
+};
+/* botones dentro de la tarjeta de precios */
+if(typeof rCatalogo==='function'){var _rc=rCatalogo;window.rCatalogo=function(){
+ var h='';try{h=_rc()}catch(e){return ''}
+ if(TIPOSEL!=='general'){
+  var c=CATA[CATCAT]||{};
+  var pc=(PRECIOS_CAT[TIPOSEL]||{})[c.id];
+  var extra='<div style="display:flex;gap:7px;flex-wrap:wrap;margin:8px 0">'
+   +'<button onclick="catPrecioTipo()" style="flex:1;min-width:150px;padding:8px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-size:11.5px;font-weight:800;cursor:pointer">🏷️ Precio de la categoría para '+TIPOSEL+(pc!=null?(' (S/'+Number(pc).toFixed(2)+')'):'')+'</button>'
+   +'<button onclick="catCopiarTipo()" style="flex:1;min-width:150px;padding:8px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-size:11.5px;font-weight:800;cursor:pointer">📋 Copiar precios de otro tipo</button></div>';
+  h=h.replace(/(<button[^>]*onclick="catGuardar\(\)")/,extra+'$1');
+ }
+ return h;};}
+})();
+</script>
 </body>
 </html>

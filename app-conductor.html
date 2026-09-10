@@ -1587,12 +1587,15 @@ function cpPrecioMayorista(catId){
   return Math.round(c.precio*(1-desc/100)*10)/10;
 }
 function cpGetPrecio(catId,prodId){
-  // precio escrito a mano para esta venta: manda sobre todo
+  // 1) precio escrito a mano para esta venta
   if(cpCustomSel&&cpCustomSel[catId]==='libre'&&cpPreciosCat[catId]!==undefined)return cpPreciosCat[catId];
-  // tipo elegido para esa categoría, o el de la sesión
   var tipo=(cpCustomSel&&cpCustomSel[catId]&&cpCustomSel[catId]!=='libre')?cpCustomSel[catId]:cpTipoSesion;
+  // 2) precio del producto para ESE tipo
   if(prodId&&window.PRECIOT&&PRECIOT[prodId]&&PRECIOT[prodId][tipo]!=null)return Number(PRECIOT[prodId][tipo]);
-  if(prodId&&window.PRECIOP&&PRECIOP[prodId]!=null)return Number(PRECIOP[prodId]);
+  // 3) precio de la categoría para ESE tipo
+  var pc=window.PRECIOCAT&&PRECIOCAT[tipo];
+  if(pc&&pc[catId]!=null)return Number(pc[catId]);
+  // 4) último recurso: precio base de la categoría (nunca el de otro tipo)
   if(cpPreciosCat[catId]!==undefined)return cpPreciosCat[catId];
   var cat=catById(catId);return cat?Number(cat.precio||0):0;
 }
@@ -2608,7 +2611,7 @@ window.cargarDatos=async function(){
   var vivas={};r.categorias.forEach(function(sc){vivas[sc.id]=1});
   for(var i=CATS.length-1;i>=0;i--)if(!vivas[CATS[i].id]&&!(CARGA[CATS[i].id]>0))CATS.splice(i,1);
  }
- if(r.catalogo&&r.catalogo.length){window.PRECIOP={};window.PRECIOT={};
+ if(r.catalogo&&r.catalogo.length){window.PRECIOP={};window.PRECIOT={};window.PRECIOCAT=(r.params&&r.params.precios_cat)||window.PRECIOCAT||{};
   var _vivos={},_cats={};
   r.catalogo.forEach(function(p){
     _vivos[p.id]=1;_cats[p.cat]=1;
