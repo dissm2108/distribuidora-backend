@@ -2640,9 +2640,12 @@ window.prodAgregar=async function(){
  var pv=parseFloat((document.getElementById('np-pv')||{}).value);
  var cuerpo={id:c.id+'_'+slug(n),cat:c.id,nombre:n,costo:0,precio:0,precios:{}};
  if(!isNaN(pv)&&pv>0){
-  if(TIPOSEL==='general')cuerpo.precio=pv;      /* precio base */
-  else cuerpo.precios[TIPOSEL]=pv;              /* solo para el tipo elegido */
+  if(TIPOSEL==='general'){
+   if(!confirm('Vas a crear "'+n+'" con precio general S/'+pv.toFixed(2)+'.\n\nLo usarán TODOS los tipos de tienda que no tengan precio propio.\n\n¿Continuar? (Cancela y elige un tipo si solo quieres ese precio para uno.)'))return;
+   cuerpo.precio=pv;
+  }else cuerpo.precios[TIPOSEL]=pv;             /* solo para el tipo elegido */
  }
+ cuerpo.precio=cuerpo.precio||0;                /* nunca un general por descuido */
  var r=await apiA('/admin/catalogo/producto',cuerpo);
  if(!(r&&r.ok))return alert('No se pudo crear: '+((r&&r.error)||'sin respuesta del servidor'));
  var id=r.id||cuerpo.id;
