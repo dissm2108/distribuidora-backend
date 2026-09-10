@@ -215,7 +215,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
   res.json({ok:true,params,catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
     dia:{fiado:fiadoHoy,cobrado:cobradoHoy},
     gps_camion:(yo&&yo.lat&&yo.gps_fuente&&yo.gps_fuente!=="celular")?{lat:yo.lat,lon:yo.lon,fuente:yo.gps_fuente,hora:yo.gps_hora}:null,
-    carga_pendiente:cg?{id:cg.id,items:cg.items,detalle:cg.detalle||null}:null,
+    carga_pendiente:cg?{id:cg.id,items:cg.items,prods:cg.prods||null,detalle:cg.detalle||null}:null,
     traspasos_entrantes:(trs||[]).map(t=>({id:String(t.id),de:t.de_nombre||t.de,items:t.items,estado:t.estado,yo_confirme:!!t.conf_para,otro_confirmo:!!t.conf_de})),
     traspasos_completados:(trsOk||[]).map(t=>({id:String(t.id),items:t.items,rol:t.para===u?"recibe":"entrega",otro:t.para===u?(t.de_nombre||t.de):t.para})),
     traspasos_salientes:(trsOut||[]).map(t=>({id:String(t.id),para:t.para,items:t.items,estado:t.estado,yo_confirme:!!t.conf_de,otro_confirmo:!!t.conf_para}))});
@@ -837,6 +837,16 @@ app.post("/admin/params",authA,async(req,res)=>{
   kv.gasto_cats=['combustible','comida','peaje','mecanico','hospedaje','otros'];
   kv.precio_tipo={};["bodega","minimarket","puesto","cafetería","mayorista","otro"].forEach(t=>kv.precio_tipo[t]=num(b.precio_tipo&&b.precio_tipo[t],-50,100));
   kv.tipos_tienda=(Array.isArray(b.tipos_tienda)?b.tipos_tienda.slice(0,12):[]).map(t=>limpia(t,20)).filter(Boolean);
+  // precios de categoría por tipo de tienda: {tipo:{categoria:precio}}
+  kv.precios_cat={};
+  Object.keys((b.precios_cat)||{}).slice(0,12).forEach(t=>{
+    const tt=limpia(t,20);if(!tt)return;
+    kv.precios_cat[tt]={};
+    Object.keys(b.precios_cat[t]||{}).slice(0,40).forEach(k=>{
+      const kk=limpia(k,20),v=num(b.precios_cat[t][k],0,10000);
+      if(kk&&v)kv.precios_cat[tt][kk]=v;
+    });
+  });
   kv.precio_conductor={};Object.keys((b.precio_conductor)||{}).slice(0,20).forEach(u=>{if(USR_RE.test(u))kv.precio_conductor[u]=num(b.precio_conductor[u],-50,100)});
   kv.zonas=(Array.isArray(b.zonas)?b.zonas.slice(0,12):[]).map(z=>({
     id:num(z.id,0),nombre:limpia(z.nombre,40)||"Zona",ajuste:num(z.ajuste,-50,100),
