@@ -1587,10 +1587,13 @@ function cpPrecioMayorista(catId){
   return Math.round(c.precio*(1-desc/100)*10)/10;
 }
 function cpGetPrecio(catId,prodId){
-  if(cpPreciosCat[catId]!==undefined)return cpPreciosCat[catId];
-  var tipo=cpTipoSesion;
+  // precio escrito a mano para esta venta: manda sobre todo
+  if(cpCustomSel&&cpCustomSel[catId]==='libre'&&cpPreciosCat[catId]!==undefined)return cpPreciosCat[catId];
+  // tipo elegido para esa categoría, o el de la sesión
+  var tipo=(cpCustomSel&&cpCustomSel[catId]&&cpCustomSel[catId]!=='libre')?cpCustomSel[catId]:cpTipoSesion;
   if(prodId&&window.PRECIOT&&PRECIOT[prodId]&&PRECIOT[prodId][tipo]!=null)return Number(PRECIOT[prodId][tipo]);
   if(prodId&&window.PRECIOP&&PRECIOP[prodId]!=null)return Number(PRECIOP[prodId]);
+  if(cpPreciosCat[catId]!==undefined)return cpPreciosCat[catId];
   var cat=catById(catId);return cat?Number(cat.precio||0):0;
 }
 function abrirEntrega(){
@@ -3610,11 +3613,11 @@ if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async
   if(d&&d.categorias&&d.categorias.length){
    d.categorias.forEach(function(sc){
     if(!CATS.find(function(x){return x.id===sc.id})){
-     CATS.push({id:sc.id,nom:(sc.emoji||'📦')+' '+(sc.nombre||sc.nom||sc.id),emoji:sc.emoji||'📦',precio:Number(sc.precio||0),prods:[]});
+     CATS.push({id:sc.id,nom:(sc.nombre||sc.nom||sc.id),emoji:sc.emoji||'📦',precio:Number(sc.precio||0),prods:[]});
      if(CARGA[sc.id]==null)CARGA[sc.id]=0;
     }else{
      var ex=CATS.find(function(x){return x.id===sc.id});
-     ex.nom=(sc.emoji||ex.emoji||'📦')+' '+(sc.nombre||sc.nom||ex.nom);
+     ex.nom=(sc.nombre||sc.nom||ex.nom);if(sc.emoji)ex.emoji=sc.emoji;
      if(sc.precio!=null)ex.precio=Number(sc.precio);
     }
    });
@@ -3982,6 +3985,26 @@ if(typeof abrirVR==='function'){var _av=abrirVR;window.abrirVR=function(){
   }
  }catch(e){}
  return r;};}
+})();
+</script>
+<script id="v5origen">
+(function(){
+/* Línea visible: de dónde salen los precios que se están usando */
+window.pintaOrigenPrecios=function(){
+ var host=document.getElementById('cp-tabs');if(!host||!host.parentElement)return;
+ var d=document.getElementById('cp-origen');
+ if(!d){d=document.createElement('div');d.id='cp-origen';
+  d.style.cssText='margin:6px 10px 0;font-size:11px;color:var(--mu);line-height:1.5';
+  host.parentElement.insertBefore(d,host);}
+ var n=Object.keys(window.PRECIOT||{}).length,g=Object.keys(window.PRECIOP||{}).length;
+ var t=(typeof cpTipoSesion!=='undefined')?cpTipoSesion:'—';
+ var conTipo=0;
+ Object.keys(window.PRECIOT||{}).forEach(function(id){if(PRECIOT[id]&&PRECIOT[id][t]!=null)conTipo++});
+ d.innerHTML=n||g
+  ? '💲 Precios de <b>'+t+'</b> · '+conTipo+' productos con precio propio de este tipo, '+g+' con precio general · catálogo del panel'
+  : '⚠️ Todavía no llegó el catálogo del panel: se están usando los precios guardados en el equipo.';
+};
+if(typeof cpRenderTabs==='function'){var _rt=cpRenderTabs;window.cpRenderTabs=function(){var r=_rt.apply(this,arguments);try{pintaOrigenPrecios()}catch(e){}return r};}
 })();
 </script>
 </body>
