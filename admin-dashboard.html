@@ -1117,8 +1117,8 @@ window.exparFiltro=function(tipo){
 </script>
 <script id="v5rep">
 (function(){
-window.CIERRES=[];
-if(typeof cargarAdm==='function'){var _ca=cargarAdm;window.cargarAdm=async function(){await _ca();var r=await apiA('/admin/cierres');if(r&&r.ok)CIERRES=r.cierres||[];};}
+
+if(typeof cargarAdm==='function'){var _ca=cargarAdm;window.cargarAdm=async function(){await _ca();try{var r=await apiA('/admin/cierres');if(r&&r.ok){var lista=r.cierres||[];CIERRES.length=0;lista.forEach(function(x){CIERRES.push(x)});}}catch(e){}};}
 window.rPerdidas=function(){
  var ps=(window.KXS||[]).filter(function(k){return k.tipo==='perdida'});
  if(!ps.length)return '<div class="card"><div class="ct">🍄 Pérdidas</div><div style="font-size:12.5px;opacity:.75;line-height:1.7">'+(CFGA.API?'Sin pérdidas registradas todavía. Aparecerán aquí cuando los conductores marquen producto dañado, perdido o consumido.':'Conecta el servidor para ver las pérdidas reales.')+'</div></div>';
@@ -2681,6 +2681,8 @@ window.catAgregar=async function(){
 /* ═══ Hay casillas repetidas con el mismo id (dos tarjetas de catálogo).
    getElementById devolvía siempre la primera, casi siempre vacía: por eso
    "Añadir categoría" no hacía nada. Se lee la que el usuario está usando. ═══ */
+/* slug vive dentro de otro bloque cerrado: aquí se define el propio */
+function slug(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'').slice(0,14)}
 window.campo=function(id){
  var els=document.querySelectorAll('[id="'+id+'"]');
  if(!els.length)return null;
@@ -2731,13 +2733,11 @@ window.prodAgregar=async function(){
 
 /* ═══ Un solo lugar que refresca catálogo, pedidos y selectores ═══ */
 window.sincronizarCatalogo=async function(){
- try{
-  if(typeof catCargar==='function')await catCargar();
-  if(typeof cargarPreciosTipo==='function')await cargarPreciosTipo();
-  if(typeof pkReset==='function'){/* el selector de pedidos vuelve a leer el catálogo */}
-  if(typeof pkPinta==='function'&&document.getElementById('pd-prods'))pkPinta('pd');
-  if(typeof renderForzado==='function')renderForzado();
- }catch(e){console.error('sincronizar:',e)}
+ /* cada paso por separado: si uno falla, los demás siguen */
+ try{if(typeof catCargar==='function')await catCargar()}catch(e){}
+ try{if(typeof cargarPreciosTipo==='function')await cargarPreciosTipo()}catch(e){}
+ try{if(typeof pkPinta==='function'&&document.getElementById('pd-prods'))pkPinta('pd')}catch(e){}
+ try{if(typeof renderForzado==='function')renderForzado()}catch(e){}
 };
 /* borrar producto o tipo también refresca pedidos */
 ['prodBorrar','prodQuitarTipo','prodDevolverTipo','tipoNuevo','tipoQuitar','catsGuardar'].forEach(function(fn){
