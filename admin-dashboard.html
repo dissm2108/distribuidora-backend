@@ -2341,7 +2341,24 @@ function tiendaSel(){
   return (typeof TIENDAS!=='undefined')?TIENDAS[Number(s.value)]:null;
  }catch(e){return null}
 }
-window.tipoPedido=function(){var t=tiendaSel();return (t&&t.tp)||''};
+window.PD_TIPO='';
+window.tipoPedido=function(){
+ if(PD_TIPO)return PD_TIPO;
+ var t=tiendaSel();return (t&&(t.tp||t.tipo))||'';
+};
+window.pdSetTipo=function(v){PD_TIPO=v;try{pkPinta('pd')}catch(e){}};
+/* selector de tipo dentro de Pedidos WhatsApp */
+window.pdTipoChips=function(){
+ var TP=(PARAMS_A.tipos_tienda&&PARAMS_A.tipos_tienda.length)?PARAMS_A.tipos_tienda:['bodega','minimarket','puesto','mayorista','otro'];
+ var t=tiendaSel(),suyo=(t&&(t.tp||t.tipo))||'';
+ var act=tipoPedido()||suyo;
+ return '<div style="font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;opacity:.6;margin:8px 0 4px">Precios de</div>'
+ +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'
+ +TP.map(function(x){var on=x===act;
+   return '<button onclick="pdSetTipo(\''+x+'\')" style="padding:6px 10px;border-radius:14px;border:1.5px solid '+(on?'#1D4ED8':'rgba(128,128,128,.35)')+';background:'+(on?'rgba(29,78,216,.12)':'none')+';color:'+(on?'#1D4ED8':'inherit')+';font-size:11px;font-weight:800;cursor:pointer">'+x+(x===suyo?' ·':'')+'</button>';
+  }).join('')
+ +'</div><div style="font-size:10.5px;opacity:.6;margin-bottom:6px">El punto marca el tipo que tiene registrada la tienda.</div>';
+};
 /* traer precios por tipo y exclusiones al iniciar, sin entrar a Catálogo */
 (async function(){
  try{
@@ -2369,6 +2386,14 @@ window.precioTipo=function(prodId,cat){
 if(typeof pkPinta==='function'){var _pp=pkPinta;window.pkPinta=function(p){
  var r=_pp.apply(this,arguments);
  if(p!=='pd')return r;
+ try{
+  var ch=document.getElementById('pd-chips');
+  if(ch&&!document.getElementById('pd-tipo')){
+   var d=document.createElement('div');d.id='pd-tipo';
+   ch.parentNode.insertBefore(d,ch);
+  }
+  var dt=document.getElementById('pd-tipo');if(dt)dt.innerHTML=pdTipoChips();
+ }catch(e){}
  try{
   var tipo=tipoPedido();
   var cont=document.getElementById('pd-prods');if(!cont)return r;
@@ -2403,6 +2428,39 @@ if(typeof pkItems==='function'){var _pi=pkItems;window.pkItems=function(p){
   });
  }
  return arr;};}
+})();
+</script>
+<script id="v5preciosload">
+(function(){
+/* ═══ El panel carga los precios por tipo que ya están guardados ═══
+   Sin esto, PRECIOS arrancaba vacío y al guardar un tipo se perdían los demás. */
+window.PRECIOS=window.PRECIOS||{};
+window.cargarPreciosTipo=async function(){
+ try{
+  if(!CFGA.API)return;
+  var r=await apiA('/admin/catalogo');
+  if(!(r&&r.ok))return;
+  (r.productos||[]).forEach(function(p){
+   if(p.precios&&typeof p.precios==='object')PRECIOS[p.id]=Object.assign({},p.precios);
+   if(Array.isArray(p.no_tipos)&&p.no_tipos.length){window.NOTIPOS=window.NOTIPOS||{};NOTIPOS[p.id]=p.no_tipos;}
+   window.CATE=window.CATE||{};
+   if(p.precio!=null)CATE[p.id]=Object.assign(CATE[p.id]||{},{precio:Number(p.precio),costo:Number(p.costo||0)});
+  });
+ }catch(e){}
+};
+cargarPreciosTipo();
+/* al entrar a Catálogo, refrescar antes de pintar */
+var _r=window.render;
+window.render=function(){
+ if(CUR==='catalogo'&&!window._pcOK){window._pcOK=true;cargarPreciosTipo().then(function(){try{_r()}catch(e){}});}
+ return _r.apply(this,arguments);
+};
+/* tras guardar precios, releer para que quede lo que hay en la base */
+if(typeof catGuardar==='function'){var _cg=catGuardar;window.catGuardar=async function(){
+ var r=await _cg.apply(this,arguments);
+ await cargarPreciosTipo();
+ try{renderForzado()}catch(e){}
+ return r;};}
 })();
 </script>
 </body>
