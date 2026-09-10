@@ -616,12 +616,30 @@ app.post("/admin/categorias/:id/borrar",authA,async(req,res)=>{
 });
 app.post("/admin/catalogo/producto",authA,async(req,res)=>{
   const p=req.body||{};
-  const id=limpia(p.id,20).toLowerCase().replace(/[^a-z0-9_]/g,"");
+  let id=limpia(p.id,20).toLowerCase().replace(/[^a-z0-9_]/g,"");
   if(!id||!p.cat||!p.nombre)return res.status(400).json({ok:false,error:"Faltan datos"});
-  const{error}=await db.from("catalogo").upsert({id,cat:limpia(p.cat,20),nombre:limpia(p.nombre,60),
-    precio:num(p.precio,0,10000),costo:num(p.costo,0,10000),activo:p.activo!==false});
+  const nombre=limpia(p.nombre,60),cat=limpia(p.cat,20);
+  // el identificador se recorta a 20 caracteres: dos nombres largos parecidos
+  // podían acabar con el mismo y pisarse. Se busca uno libre.
+  const{data:ya}=await db.from("catalogo").select("id,nombre,cat").eq("id",id).maybeSingle();
+  if(ya&&(ya.nombre!==nombre||ya.cat!==cat)){
+    let base=id.slice(0,18),n=2,libre=null;
+    while(n<50){
+      const cand=base+"_"+n;
+      const{data:ex}=await db.from("catalogo").select("id").eq("id",cand).maybeSingle();
+      if(!ex){libre=cand;break;}
+      n++;
+    }
+    if(!libre)return res.status(409).json({ok:false,error:"No se pudo crear: demasiados productos con nombre parecido"});
+    id=libre;
+  }
+  const precios={};
+  if(p.precios&&typeof p.precios==="object")
+    Object.keys(p.precios).slice(0,12).forEach(k=>{const v=num(p.precios[k],0,10000);if(v)precios[limpia(k,20)]=v;});
+  const{error}=await db.from("catalogo").upsert({id,cat,nombre,
+    precio:num(p.precio,0,10000),costo:num(p.costo,0,10000),precios,activo:p.activo!==false});
   if(error)return res.status(500).json({ok:false,error:error.message});
-  res.json({ok:true});
+  res.json({ok:true,id});
 });
 app.post("/admin/catalogo/:id/tipo",authA,async(req,res)=>{
   const tipo=limpia(req.body.tipo,20),activo=req.body.activo!==false;
@@ -658,7 +676,9 @@ app.post("/admin/catalogo",authA,async(req,res)=>{
     const nuevos={};
     Object.keys(p.precios||{}).slice(0,12).forEach(k=>{const v=num(p.precios[k],0,10000);if(v)nuevos[limpia(k,20)]=v;});
     // se mezclan: lo que llega manda sobre su tipo, lo demás se conserva
-    const precios=Object.assign({},antes[id]||{},nuevos);
+    // si el panel manda la lista completa de ese producto, se respeta tal cual
+    // (así puede QUITAR el precio de un tipo); si no, se mezcla con lo guardado
+    const precios=(p.reemplazar_precios===true)?nuevos:Object.assign({},antes[id]||{},nuevos);
     return{id,cat:limpia(p.cat,20),nombre:limpia(p.nombre,60),
       precio:num(p.precio,0,10000),costo:num(p.costo,0,10000),precios};
   }).filter(p=>p.id);
