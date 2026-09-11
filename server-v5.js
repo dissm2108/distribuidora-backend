@@ -22,6 +22,9 @@ let anthropic=null;if(process.env.ANTHROPIC_API_KEY){try{const A=require("@anthr
 const MODELO_IA="claude-sonnet-4-6";
 
 const app=express();
+// Sin ETag: Express respondía 304 "sin cambios" a la app, con cuerpo VACÍO.
+// La app intentaba leer ese cuerpo, fallaba y se quedaba con el catálogo viejo.
+app.set("etag",false);
 app.use(express.json({limit:"2mb"})); // 2mb: fotos de fachada comprimidas
 // helmet sin la política de contenido: la app y el panel llevan su código y estilos
 // dentro del propio HTML, y el mapa carga desde OpenStreetMap. Con la política activa
@@ -162,6 +165,7 @@ app.post("/auth/evento",authC,async(req,res)=>{await db.from("logs").insert({tip
 
 // ════════ DATOS DEL CONDUCTOR (todo en el formato que la app espera) ════════
 app.get("/conductor/datos",authC,async(req,res)=>{
+  res.set("Cache-Control","no-store");
   const u=req.cond.u;
   const params=await getParams();await zonasVivas();
   const{data:tds}=await db.from("tiendas").select("*").eq("act",true);
