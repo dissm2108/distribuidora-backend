@@ -2748,5 +2748,67 @@ window.sincronizarCatalogo=async function(){
 });
 })();
 </script>
+<script id="v5pdprecios">
+(function(){
+/* ═══ El resumen del pedido usaba SIEMPRE el precio de la categoría.
+   Ahora usa el mismo orden que la app: precio del producto para el tipo →
+   precio de la categoría para el tipo → precio base de la categoría. ═══ */
+window.precioPedido=function(prodId,cat){
+ var tipo=(typeof tipoPedido==='function')?tipoPedido():'';
+ if(tipo){
+  var pp=(window.PRECIOS||{})[prodId];
+  if(pp&&pp[tipo]!=null)return Number(pp[tipo]);
+  var pc=((PARAMS_A.precios_cat||{})[tipo]||{})[cat.id];
+  if(pc!=null)return Number(pc);
+ }
+ var g=((window.CATE||{})[prodId]||{}).precio;
+ if(g!=null&&Number(g)>0)return Number(g);
+ return Number(cat.precio||0);
+};
+function pintarResumen(p){
+ var res=document.getElementById(p+'-res');if(!res)return;
+ var it=(typeof pkItems==='function')?pkItems(p):[];
+ if(!it.length)return;
+ var tipo=(typeof tipoPedido==='function')?tipoPedido():'';
+ var grupos={};it.forEach(function(x){(grupos[x.cat]=grupos[x.cat]||[]).push(x)});
+ var tot=0,uni=0;
+ var h='<div style="border:1.5px solid rgba(128,128,128,.25);border-radius:12px;padding:8px 10px">';
+ CATA.forEach(function(c){
+  var g=grupos[c.id];if(!g)return;var sub=0;
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;background:rgba(128,128,128,.12);border-radius:8px;padding:6px 9px;margin-top:6px">'
+   +'<b style="font-size:11.5px">'+c.emoji+' '+c.nom+'</b></div>';
+  g.forEach(function(x){
+   var pu=precioPedido(x.id,c),sx=x.c*pu;sub+=sx;uni+=x.c;
+   h+='<div style="display:flex;align-items:center;gap:7px;padding:6px 2px;border-bottom:1px solid rgba(128,128,128,.14)">'
+    +'<div style="flex:1;font-size:12px">'+x.n+' <span style="opacity:.6;font-size:10.5px">S/'+pu.toFixed(2)+' c/u</span></div>'
+    +'<button onclick="pkAdd(\''+p+'\',\''+x.id+'\',-1)" style="width:26px;height:26px;border-radius:8px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-weight:800;cursor:pointer">−</button>'
+    +'<b style="min-width:24px;text-align:center;font-size:12.5px;color:#1D4ED8">'+x.c+'</b>'
+    +'<button onclick="pkAdd(\''+p+'\',\''+x.id+'\',1)" style="width:26px;height:26px;border-radius:8px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-weight:800;cursor:pointer">+</button>'
+    +'<span style="min-width:60px;text-align:right;font-size:11.5px;font-weight:800">S/'+sx.toFixed(2)+'</span></div>';
+  });
+  tot+=sub;
+  h+='<div style="text-align:right;font-size:11px;opacity:.7;padding:3px 2px">Subtotal '+c.nom+': S/'+sub.toFixed(2)+'</div>';
+ });
+ h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:9px;padding-top:8px;border-top:1.5px solid rgba(128,128,128,.25)">'
+  +'<b style="font-size:13px">'+uni+' unidades</b><b style="font-size:15px;color:#1D4ED8">S/'+tot.toFixed(2)+'</b></div>'
+  +'<div style="font-size:10.5px;opacity:.65;margin-top:4px">Precios de <b>'+(tipo||'la categoría')+'</b> · desde Catálogo y precios</div></div>';
+ res.innerHTML=h;
+}
+if(typeof pkPinta==='function'){var _pp=pkPinta;window.pkPinta=function(p){
+ var r=_pp.apply(this,arguments);
+ if(p==='pd'){
+  try{pintarResumen('pd')}catch(e){console.error('resumen pedido:',e)}
+  /* cabecera de la lista: sin el precio único de la categoría */
+  try{
+   var cont=document.getElementById('pd-prods');
+   var cab=cont&&cont.firstElementChild;
+   var cat=CATA[(window._PK&&_PK.pd&&_PK.pd.cat)||0];
+   var tipo=(typeof tipoPedido==='function')?tipoPedido():'';
+   if(cab&&cat)cab.textContent=cat.nom+(tipo?(' · precios de '+tipo):' · precios de la categoría');
+  }catch(e){}
+ }
+ return r;};}
+})();
+</script>
 </body>
 </html>
