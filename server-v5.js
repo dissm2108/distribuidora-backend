@@ -167,12 +167,26 @@ app.post("/auth/evento",authC,async(req,res)=>{await db.from("logs").insert({tip
 app.get("/conductor/datos",authC,async(req,res)=>{
   res.set("Cache-Control","no-store");
   const u=req.cond.u;
+  const lim3=new Date(Date.now()-3*24*60*60*1000).toISOString();
+  const [tds, vHoy, peds, ultV, cols, avs, leidos, movHoy, yo, cg, trs, trsOut, trsOk, cat, cats] = await Promise.all([
+    db.from("tiendas").select("*").eq("act",true),
+    db.from("visitas").select("*").eq("fecha",hoy()),
+    db.from("pedidos").select("*").eq("fecha",hoy()).eq("conductor",u).eq("estado","pendiente"),
+    db.from("ventas").select("tienda_id,creado,total,resumen,items").order("creado",{ascending:false}).limit(400),
+    db.from("conductores").select("usuario,nombre,tipo").eq("activo",true).neq("usuario",u),
+    db.from("avisos").select("*").or(`para.eq.${u},para.eq.todos`).order("id",{ascending:false}).limit(20),
+    db.from("avisos_leidos").select("aviso_id").eq("usuario",u),
+    db.from("creditos_mov").select("tipo,monto,por,creado").eq("por",u).gte("creado",hoy()+"T00:00:00"),
+    db.from("conductores").select("lat,lon,gps_fuente,gps_hora").eq("usuario",u).maybeSingle(),
+    db.from("cargas").select("*").eq("conductor",u).eq("estado","pendiente").order("id",{ascending:false}).limit(1).maybeSingle(),
+    db.from("traspasos").select("*").eq("para",u).in("estado",["pendiente","parcial"]),
+    db.from("traspasos").select("*").eq("de",u).in("estado",["pendiente","parcial"]),
+    db.from("traspasos").select("*").eq("estado","completado").gte("creado",lim3).or(`de.eq.${u},para.eq.${u}`),
+    db.from("catalogo").select("id,cat,nombre,precio,precios,costo,activo,no_tipos").or("activo.is.null,activo.eq.true"),
+    db.from("categorias").select("*").eq("activa",true).order("orden")
+  ]).then(rs=>rs.map(x=>x&&x.data));
   const params=await getParams();await zonasVivas();
-  const{data:tds}=await db.from("tiendas").select("*").eq("act",true);
-  const{data:vHoy}=await db.from("visitas").select("*").eq("fecha",hoy());
-  const{data:peds}=await db.from("pedidos").select("*").eq("fecha",hoy()).eq("conductor",u).eq("estado","pendiente");
-  const{data:ultV}=await db.from("ventas").select("tienda_id,creado,total,resumen,items").order("creado",{ascending:false}).limit(400);
-  const tiendas=(tds||[]).map(t=>{
+          const tiendas=(tds||[]).map(t=>{
     const vs=(ultV||[]).filter(v=>v.tienda_id===t.id).slice(0,5);
     const UMB=num(params.umbral_repo,1,100000)||40, RESTA=num(params.repo_resta_parcial,0,30)||2;
     const vsAll=(ultV||[]).filter(v=>v.tienda_id===t.id);
@@ -200,23 +214,11 @@ app.get("/conductor/datos",authC,async(req,res)=>{
       asigA:(t.conductor_asig&&t.conductor_asig!==u)?t.conductor_asig:null,
       miZona:zonaDeCond(t.lat,t.lon,u)};
   });
-  const{data:cols}=await db.from("conductores").select("usuario,nombre,tipo").eq("activo",true).neq("usuario",u);
-  const{data:avs}=await db.from("avisos").select("*").or(`para.eq.${u},para.eq.todos`).order("id",{ascending:false}).limit(20);
-  const{data:leidos}=await db.from("avisos_leidos").select("aviso_id").eq("usuario",u);
-  const setL=new Set((leidos||[]).map(x=>x.aviso_id));
+        const setL=new Set((leidos||[]).map(x=>x.aviso_id));
   const avisos=(avs||[]).map(a=>({id:a.id,txt:a.txt,hora:a.hora,leido:setL.has(a.id)}));
-  const{data:movHoy}=await db.from("creditos_mov").select("tipo,monto,por,creado").eq("por",u).gte("creado",hoy()+"T00:00:00");
-  const fiadoHoy=(movHoy||[]).filter(m=>m.tipo==="cargo").reduce((s,m)=>s+Number(m.monto||0),0);
+    const fiadoHoy=(movHoy||[]).filter(m=>m.tipo==="cargo").reduce((s,m)=>s+Number(m.monto||0),0);
   const cobradoHoy=(movHoy||[]).filter(m=>m.tipo==="abono").reduce((s,m)=>s+Number(m.monto||0),0);
-  const{data:yo}=await db.from("conductores").select("lat,lon,gps_fuente,gps_hora").eq("usuario",u).maybeSingle();
-  const{data:cg}=await db.from("cargas").select("*").eq("conductor",u).eq("estado","pendiente").order("id",{ascending:false}).limit(1).maybeSingle();
-  const{data:trs}=await db.from("traspasos").select("*").eq("para",u).in("estado",["pendiente","parcial"]);
-  const{data:trsOut}=await db.from("traspasos").select("*").eq("de",u).in("estado",["pendiente","parcial"]);
-  const lim3=new Date(Date.now()-3*86400000).toISOString();
-  const{data:trsOk}=await db.from("traspasos").select("*").eq("estado","completado").gte("creado",lim3).or(`de.eq.${u},para.eq.${u}`);
-  const{data:cat}=await db.from("catalogo").select("id,cat,nombre,precio,precios,costo,activo,no_tipos").or("activo.is.null,activo.eq.true");
-  const{data:cats}=await db.from("categorias").select("*").eq("activa",true).order("orden");
-  res.json({ok:true,params,catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
+        res.json({ok:true,params,catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
     dia:{fiado:fiadoHoy,cobrado:cobradoHoy},
     gps_camion:(yo&&yo.lat&&yo.gps_fuente&&yo.gps_fuente!=="celular")?{lat:yo.lat,lon:yo.lon,fuente:yo.gps_fuente,hora:yo.gps_hora}:null,
     carga_pendiente:cg?{id:cg.id,items:cg.items,prods:cg.prods||null,detalle:cg.detalle||null}:null,
