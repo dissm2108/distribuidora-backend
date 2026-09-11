@@ -2498,7 +2498,7 @@ function saveCola(){localStorage.setItem('v5_cola',JSON.stringify(COLA));updateS
 window.updateSyncChip=function(){var n=COLA.length,ch=$('sync-chip');if(ch){ch.style.display=n?'inline-block':'none';var b=$('sync-n');if(b)b.textContent=n;}};
 window.api=async function(ruta,datos,metodo){
  if(!CFG.API)return{local:true};
- try{var ctl=new AbortController();var to=setTimeout(function(){ctl.abort()},8000);
+ try{var ctl=new AbortController();var to=setTimeout(function(){ctl.abort()},(String(ruta).indexOf('/conductor/datos')===0?30000:15000));
   var r=await fetch(CFG.API+ruta,{method:metodo||(datos?'POST':'GET'),headers:{'Content-Type':'application/json','x-token':(SES&&SES.token)||''},body:datos?JSON.stringify(datos):undefined,signal:ctl.signal});
   clearTimeout(to);
   if(r.status===401){toast('Sesión expirada — vuelve a entrar','w');cerrarSesion();return{auth:false};}
