@@ -116,6 +116,23 @@ app.get(["/favicon.ico","/favicon.png","/apple-touch-icon.png","/apple-touch-ico
 app.get(["/app","/app.html","/conductor"],sirve("app-conductor.html"));
 app.get(["/panel","/panel.html","/admin"],sirve("admin-dashboard.html"));
 app.get("/",(req,res)=>res.type("html").send('<meta charset="utf-8"><div style="font-family:system-ui;padding:40px;line-height:2"><h3>Distribuidora — sistema</h3><a href="/app">📱 App del conductor</a><br><a href="/panel">🖥️ Panel del dueño</a></div>'));
+app.get("/version",(req,res)=>{
+  const marcas={
+    "app-conductor.html":["v5no304","v5origen","v5notipos","v5stockp","cpGetPrecio(cat.id,p.id)"],
+    "admin-dashboard.html":["v5sinprestamo","v5pdprecios","v5dupids","v5catipo"]
+  };
+  const out={servidor:{etag_desactivado:app.get("etag")===false,consultas_en_paralelo:true,hora:new Date().toISOString()},archivos:{}};
+  Object.keys(marcas).forEach(f=>{
+    try{
+      const txt=fs.readFileSync(path.join(__dirname,f),"utf8");
+      const faltan=marcas[f].filter(m=>txt.indexOf(m)<0);
+      out.archivos[f]={kb:Math.round(txt.length/1024),
+        al_dia:faltan.length===0,
+        faltan:faltan.length?faltan:undefined};
+    }catch(e){out.archivos[f]={error:"no está en el repositorio"};}
+  });
+  res.set("Cache-Control","no-store").json(out);
+});
 app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString()}));
 
 // ════════ AUTENTICACIÓN ════════
