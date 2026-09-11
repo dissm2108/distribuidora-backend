@@ -1328,7 +1328,7 @@ function vrSetPrecio(id,val){
   const v=Number(val)||0;
   vrPrecios[id]=v;
   const inp=document.getElementById('vr-pr-'+id);
-  if(inp)inp.classList.toggle('ed',cat&&v!==cat.precio);
+  if(inp)inp.classList.toggle('ed',cat&&v!==cpGetPrecio(cat.id,id));
   updVR();
 }
 function vrSetPrecioCat(catId,val){
@@ -1339,7 +1339,7 @@ function vrSetPrecioCat(catId,val){
   cat.prods.forEach(p=>{
     vrPrecios[p.id]=v;
     const inp=document.getElementById('vr-pr-'+p.id);
-    if(inp){inp.value=v.toFixed(2);inp.classList.toggle('ed',v!==cat.precio);}
+    if(inp){inp.value=v.toFixed(2);inp.classList.toggle('ed',v!==cpGetPrecio(cat.id,p.id));}
   });
   updVR();
 }
@@ -1354,7 +1354,7 @@ function updVR(){
     const q=vrQty[id]||0;if(q<=0)return;
     items+=q;
     const cat=prodCat(id);
-    const precio=vrPrecios[id]!==undefined?vrPrecios[id]:(cat?cat.precio:0);
+    const precio=vrPrecios[id]!==undefined?vrPrecios[id]:(cat?cpGetPrecio(cat.id,id):0);
     total+=q*precio;
   });
   document.getElementById('vr-total').textContent=`S/ ${total.toFixed(2)}`;
