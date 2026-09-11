@@ -4010,5 +4010,15 @@ window.pintaOrigenPrecios=function(){
 if(typeof cpRenderTabs==='function'){var _rt=cpRenderTabs;window.cpRenderTabs=function(){var r=_rt.apply(this,arguments);try{pintaOrigenPrecios()}catch(e){}return r};}
 })();
 </script>
+<script id="v5no304">
+(function(){
+/* Defensa por si vuelve a llegar un 304: pedir los datos sin caché */
+if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,metodo){
+ if(typeof ruta==='string'&&ruta.indexOf('/conductor/datos')===0){
+  ruta=ruta+(ruta.indexOf('?')>=0?'&':'?')+'_t='+Date.now();
+ }
+ return _api.call(this,ruta,body,metodo);};}
+})();
+</script>
 </body>
 </html>
