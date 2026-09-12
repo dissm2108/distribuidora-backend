@@ -126,8 +126,12 @@ app.get("/version",(req,res)=>{
     try{
       const txt=fs.readFileSync(path.join(__dirname,f),"utf8");
       const faltan=marcas[f].filter(m=>txt.indexOf(m)<0);
+      const mb=txt.match(/window\.BUILD='([^']+)'/);
       out.archivos[f]={kb:Math.round(txt.length/1024),
         al_dia:faltan.length===0,
+        build_del_servidor:mb?mb[1]:undefined,
+        build_del_telefono:(f==="app-conductor.html"&&req.query.build)?String(req.query.build).slice(0,30):undefined,
+        telefono_al_dia:(f==="app-conductor.html"&&req.query.build&&mb)?(String(req.query.build)===mb[1]):undefined,
         faltan:faltan.length?faltan:undefined};
     }catch(e){out.archivos[f]={error:"no está en el repositorio"};}
   });
@@ -235,7 +239,8 @@ app.get("/conductor/datos",authC,async(req,res)=>{
   const avisos=(avs||[]).map(a=>({id:a.id,txt:a.txt,hora:a.hora,leido:setL.has(a.id)}));
     const fiadoHoy=(movHoy||[]).filter(m=>m.tipo==="cargo").reduce((s,m)=>s+Number(m.monto||0),0);
   const cobradoHoy=(movHoy||[]).filter(m=>m.tipo==="abono").reduce((s,m)=>s+Number(m.monto||0),0);
-        res.json({ok:true,params,catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
+        console.log(`datos->${u}: categorias=${(cats||[]).length} productos=${(cat||[]).length} tiendas=${tiendas.length}`);
+  res.json({ok:true,params,catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
     dia:{fiado:fiadoHoy,cobrado:cobradoHoy},
     gps_camion:(yo&&yo.lat&&yo.gps_fuente&&yo.gps_fuente!=="celular")?{lat:yo.lat,lon:yo.lon,fuente:yo.gps_fuente,hora:yo.gps_hora}:null,
     carga_pendiente:cg?{id:cg.id,items:cg.items,prods:cg.prods||null,detalle:cg.detalle||null}:null,
