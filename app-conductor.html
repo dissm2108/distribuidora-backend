@@ -4020,5 +4020,38 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
  return _api.call(this,ruta,body,metodo);};}
 })();
 </script>
+<script id="v5build">
+(function(){
+/* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
+window.BUILD='2026-09-11-T21';
+window.comprobarVersion=async function(){
+ try{
+  var base=(window.CFG&&CFG.API)||'';if(!base)return;
+  var r=await fetch(base+'/version?build='+encodeURIComponent(BUILD)+'&_t='+Date.now(),{cache:'no-store'});
+  var j=await r.json();
+  var f=j&&j.archivos&&j.archivos['app-conductor.html'];
+  if(f&&f.build_del_servidor&&f.build_del_servidor!==BUILD){
+   var d=document.createElement('div');
+   d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#7A1F1F;color:#fff;padding:12px 14px;font-size:12.5px;line-height:1.5;font-weight:700';
+   d.innerHTML='⚠️ Tu teléfono está usando una versión antigua de la app guardada en memoria ('+BUILD+' frente a '+f.build_del_servidor+').<br>'
+    +'<span style="font-weight:400">Cierra la app, borra los datos del sitio en el navegador y vuelve a abrir el enlace.</span>'
+    +'<button onclick="location.reload(true)" style="margin-top:8px;width:100%;padding:9px;border-radius:9px;border:0;background:#fff;color:#7A1F1F;font-weight:800">Recargar ahora</button>';
+   document.body.appendChild(d);
+  }
+ }catch(e){}
+};
+setTimeout(comprobarVersion,4000);
+/* el sello también visible en Mi perfil */
+setTimeout(function(){
+ try{
+  var s=document.getElementById('sc-perfil');if(!s)return;
+  var d=document.createElement('div');
+  d.style.cssText='text-align:center;font-size:10.5px;opacity:.5;padding:10px 0 4px';
+  d.textContent='Versión de la app: '+BUILD;
+  s.appendChild(d);
+ }catch(e){}
+},1500);
+})();
+</script>
 </body>
 </html>
