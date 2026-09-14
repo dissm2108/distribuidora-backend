@@ -2826,5 +2826,33 @@ if(typeof catBorrar==='function'){var _cb=catBorrar;window.catBorrar=async funct
  return r;};}
 })();
 </script>
+<script id="v5catsserver">
+(function(){
+/* ═══ Las categorías del panel salen del servidor, no de la copia local ═══
+   El panel guardaba su lista en el navegador: si borrabas una, desaparecía de
+   tu pantalla pero seguía activa en la base y le llegaba al conductor. */
+window.cargarCategorias=async function(){
+ try{
+  if(!CFGA.API)return;
+  var r=await apiA('/admin/categorias');
+  if(!(r&&r.ok)||!Array.isArray(r.categorias))return;
+  var vivas=r.categorias.filter(function(c){return c.activa!==false});
+  var antes=CATA.length;
+  var nuevas=vivas.map(function(sc){
+   var loc=CATA.find(function(x){return x.id===sc.id});
+   return {id:sc.id,nom:sc.nom,emoji:sc.emoji||'📦',precio:Number(sc.precio)||0,
+           prods:(loc&&loc.prods)||[]};
+  });
+  CATA.length=0;nuevas.forEach(function(x){CATA.push(x)});
+  if(CATCAT>=CATA.length)CATCAT=0;
+  if(antes!==CATA.length&&typeof renderForzado==='function')renderForzado();
+ }catch(e){}
+};
+if(typeof catCargar==='function'){var _cc=catCargar;window.catCargar=async function(){
+ await cargarCategorias();
+ return await _cc.apply(this,arguments);};}
+cargarCategorias();
+})();
+</script>
 </body>
 </html>

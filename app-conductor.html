@@ -1813,16 +1813,18 @@ function cpSelCatTipo(catId,tipo,el){
   cpCustomSel[catId]=tipo;
   const row=document.getElementById('cpcr-'+catId);
   row.querySelectorAll('.cp-crt').forEach(b=>b.className='cp-crt');
-  el.classList.add({normal:'on-n',mayorista:'on-m',libre:'on-p'}[tipo]);
+  el.classList.add(tipo==='libre'?'on-p':'on-n');
+  el.style.cssText=(tipo==='libre')?'border-color:#B97A1F;background:#FBF3E4;color:#8A6410':'border-color:#1D4ED8;background:#EBF1FE;color:#1D4ED8';
+  row.querySelectorAll('.cp-crt').forEach(function(b){if(b!==el)b.style.cssText='';});
   document.getElementById('cpcr-inp-'+catId).className='cp-cr-input '+(tipo==='libre'?'show':'');
   cpActSub(catId);
 }
 function cpActSub(catId){
   const tipo=cpCustomSel[catId]||'normal';
   const inp=document.getElementById('cpcr-inp-'+catId);
-  const precio=tipo==='libre'?(Number(inp.value)||0):(tipo==='mayorista'?cpPrecioMayorista(catId):cpPrecioBase(catId));
+  const precio=tipo==='libre'?(Number(inp.value)||0):(function(){var g=cpTipoSesion;cpTipoSesion=tipo;var v=cpGetPrecio(catId,null);cpTipoSesion=g;return v})();
   const sub=document.getElementById('cpcr-sub-'+catId);
-  if(sub)sub.textContent=`S/ ${precio.toFixed(2)} — ${tipo==='libre'?'Precio libre':tipo==='mayorista'?'Mayorista':'Normal'}`;
+  if(sub)sub.textContent='S/ '+precio.toFixed(2)+' — '+(tipo==='libre'?'Precio libre':('Precios de '+((CP_TIPOS[tipo]||{nombre:tipo}).nombre)));
 }
 function cpAplicarCustom(){
   const cats=CATS.filter(c=>c.prods&&c.prods.length);
@@ -2119,15 +2121,10 @@ window.onload=()=>{
 </style>
 
 <div class="ov" id="ov-devol"><div class="sh">
-  <div class="sh-top"><div class="sh-tit">🍞 Devolución por hongo</div><button class="sh-x" onclick="cov('ov-devol')">✕</button></div>
-  <div class="sh-sub">Regla única: reemplazo con producto del <b>mismo valor</b> en el momento. Sin dinero, la deuda no se toca. Lo hongueado = pérdida total.</div>
-  <div style="padding:0 16px 16px">
-    <button class="bt2" style="width:100%;margin-bottom:8px" onclick="devolHongo('bianka','Pasteles Bianka')">Pasteles Bianka ×2 hongueados → repongo ×2</button>
-    <button class="bt2" style="width:100%;margin-bottom:8px" onclick="devolHongo('sm','Pasteles San Miguel')">Pasteles SM ×2 hongueados → repongo ×2</button>
-    <button class="bt2" style="width:100%" onclick="devolHongo('panes','Panes')">Panes ×2 hongueados → repongo ×2</button>
-  </div>
+ <div class="sh-top"><div class="sh-tit">🍞 Devolución</div><button class="sh-x" onclick="cov('ov-devol')">✕</button></div>
+ <div class="sh-sub">Solo se puede devolver lo que la tienda compró en sus <b>dos últimas visitas</b>. Se repone producto del mismo valor; no se mueve dinero ni deuda.</div>
+ <div style="padding:0 16px 16px" id="devol-body"></div>
 </div></div>
-
 <div class="ov" id="ov-merma"><div class="sh">
   <div class="sh-top"><div class="sh-tit">📉 Registrar merma</div><button class="sh-x" onclick="cov('ov-merma')">✕</button></div>
   <div class="sh-sub">Marca el motivo. Resta de tu stock y va al reporte de pérdidas del dueño.</div>
@@ -4036,7 +4033,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-12-B';
+window.BUILD='2026-09-12-C';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4064,6 +4061,95 @@ setTimeout(function(){
   s.appendChild(d);
  }catch(e){}
 },1500);
+})();
+</script>
+<script id="v5devol">
+(function(){
+/* ═══ Devolución sobre las compras reales de la tienda ═══ */
+window.DEVQ={};
+function tienda(){return (typeof tiendaActualIdx!=='undefined')?T[tiendaActualIdx]:null}
+function compras(){
+ var t=tienda();if(!t)return [];
+ if(Array.isArray(t.compras)&&t.compras.length)return t.compras;
+ if(Array.isArray(t.ultima_compra)&&t.ultima_compra.length)
+  return [{id:'ult',fecha:null,items:t.ultima_compra}];
+ return [];
+}
+window.devSet=function(vid,pid,d){
+ var k=vid+'|'+pid;
+ var cs=compras(),v=cs.find(function(x){return String(x.id)===String(vid)});
+ var it=v&&(v.items||[]).find(function(x){return x.id===pid});
+ var max=it?Number(it.c||0):0;
+ var q=Math.max(0,Math.min(max,(Number(DEVQ[k])||0)+d));
+ if(q)DEVQ[k]=q;else delete DEVQ[k];
+ pintaDevol();
+};
+window.pintaDevol=function(){
+ var box=document.getElementById('devol-body');if(!box)return;
+ var cs=compras();
+ if(!cs.length){
+  box.innerHTML='<div style="font-size:12.5px;color:var(--mu);line-height:1.6;padding:6px 2px">Esta tienda no tiene compras registradas todavía, así que no hay nada que devolver. Cuando le vendas, sus dos últimas compras aparecerán aquí.</div>';
+  return;
+ }
+ var tot=0,uni=0;
+ var h=cs.map(function(v,i){
+  var f=v.fecha?new Date(v.fecha).toLocaleDateString('es-PE',{day:'2-digit',month:'short'}):'compra anterior';
+  var filas=(v.items||[]).map(function(it){
+   var k=v.id+'|'+it.id,q=Number(DEVQ[k])||0;
+   var pu=Number(it.pu||0)||(typeof cpGetPrecio==='function'?cpGetPrecio((prodCat(it.id)||{}).id,it.id):0);
+   return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--linea)">'
+    +'<div style="flex:1;font-size:12.5px">'+it.n+' <span style="opacity:.6;font-size:10.5px">llevó '+it.c+' · S/'+pu.toFixed(2)+'</span></div>'
+    +'<button onclick="devSet(\''+v.id+'\',\''+it.id+'\',-1)" style="width:28px;height:28px;border-radius:8px;border:1.5px solid var(--linea);background:none;color:inherit;font-weight:800">−</button>'
+    +'<b style="min-width:24px;text-align:center;color:'+(q?'#B23B2E':'inherit')+'">'+q+'</b>'
+    +'<button onclick="devSet(\''+v.id+'\',\''+it.id+'\',1)" style="width:28px;height:28px;border-radius:8px;border:1.5px solid #B23B2E;background:#FDEBE9;color:#B23B2E;font-weight:800">+</button></div>';
+  }).join('');
+  return '<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;opacity:.6;margin-bottom:4px">'
+   +(i===0?'Última compra':'Compra anterior')+' · '+f+'</div>'+(filas||'<div style="font-size:12px;opacity:.6">Sin detalle de productos.</div>')+'</div>';
+ }).join('');
+ Object.keys(DEVQ).forEach(function(k){
+  var p=k.split('|'),v=cs.find(function(x){return String(x.id)===p[0]});
+  var it=v&&(v.items||[]).find(function(x){return x.id===p[1]});
+  if(!it)return;
+  var pu=Number(it.pu||0)||(typeof cpGetPrecio==='function'?cpGetPrecio((prodCat(it.id)||{}).id,it.id):0);
+  tot+=pu*DEVQ[k];uni+=DEVQ[k];
+ });
+ h+='<div style="border-top:1.5px solid var(--linea);padding-top:9px;margin-top:4px;display:flex;justify-content:space-between;align-items:center">'
+  +'<b style="font-size:12.5px">'+uni+' unidades</b><b style="font-size:15px;color:#B23B2E">S/'+tot.toFixed(2)+'</b></div>'
+  +'<div style="font-size:11px;color:var(--mu);margin:6px 0 10px">Se repone la misma cantidad con producto del mismo valor. Lo devuelto se registra como pérdida.</div>'
+  +'<button class="bt2 r" style="width:100%" onclick="devolConfirmar()"'+(uni?'':' disabled style="width:100%;opacity:.5"')+'>Registrar devolución</button>';
+ box.innerHTML=h;
+};
+window.devolConfirmar=function(){
+ var cs=compras(),det=[],tot=0,uni=0;
+ Object.keys(DEVQ).forEach(function(k){
+  var p=k.split('|'),v=cs.find(function(x){return String(x.id)===p[0]});
+  var it=v&&(v.items||[]).find(function(x){return x.id===p[1]});
+  if(!it)return;
+  var q=DEVQ[k];
+  var pu=Number(it.pu||0)||(typeof cpGetPrecio==='function'?cpGetPrecio((prodCat(it.id)||{}).id,it.id):0);
+  det.push(it.n+' ×'+q);tot+=pu*q;uni+=q;
+  var cat=prodCat(it.id);
+  if(cat&&window.CARGA&&CARGA[cat.id]!=null)CARGA[cat.id]=Math.max(0,CARGA[cat.id]-q);
+  if(typeof mueveStock==='function')mueveStock(it.id,-q);
+ });
+ if(!uni)return;
+ var t=tienda(),tn=t?t.n:'—';
+ if(!confirm('Devolución de '+uni+' unidades ('+money(tot)+') en '+tn+'.\n\n'+det.join(', ')+'\n\nSe repone la misma cantidad y se registra como pérdida. ¿Confirmas?'))return;
+ PERDIDAS.push({motivo:'Devolución',tienda:tn,val:tot,det:det.join(', ')});
+ KX.unshift({h:hora(),tipo:'Devolución',det:tn+' · '+det.join(', '),val:tot});
+ try{sync('/perdidas',{motivo:'Devolución',tienda:tn,valor:tot,detalle:det.join(', ')})}catch(e){}
+ DEVQ={};
+ toast('Devolución registrada: '+money(tot),'e');
+ cov('ov-devol');
+ if(typeof renderDash==='function')renderDash();
+ if(typeof pintaStockRuta==='function')pintaStockRuta();
+};
+/* al abrir el menú, cargar las compras de esa tienda */
+var _aov=window.aov;
+window.aov=function(id){
+ if(id==='ov-devol'){DEVQ={};setTimeout(pintaDevol,60);}
+ return _aov.apply(this,arguments);
+};
 })();
 </script>
 </body>
