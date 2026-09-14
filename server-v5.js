@@ -634,6 +634,13 @@ app.post("/admin/categorias",authA,async(req,res)=>{
     emoji:limpia(x.emoji,4)||"📦",precio:num(x.precio,0,10000),orden:i,activa:x.activa!==false})).filter(x=>x.id&&x.nom);
   if(!filas.length)return res.status(400).json({ok:false,error:"Sin categorías"});
   const{error}=await db.from("categorias").upsert(filas);
+  // el panel manda la lista completa: lo que no está en ella se desactiva.
+  // Antes, borrar una categoría en el panel no la desactivaba aquí y seguía
+  // llegándole al conductor.
+  if(!error&&req.body.exclusivo===true){
+    const vivos=filas.map(f=>f.id);
+    await db.from("categorias").update({activa:false}).not("id","in","("+vivos.map(v=>'"'+v+'"').join(",")+")");
+  }
   if(error)return res.status(500).json({ok:false,error:error.message});
   res.json({ok:true,guardadas:filas.length});
 });
