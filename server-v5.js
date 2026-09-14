@@ -226,6 +226,8 @@ app.get("/conductor/datos",authC,async(req,res)=>{
       nueva:!!t.nueva,verificada:!!t.verificada,foto:t.foto||null,id:t.id,
       h:vs.map(v=>({f:new Date(v.creado).toLocaleDateString("es-PE"),p:v.resumen||"",m:Number(v.total)})),
       ultima_compra:(vs[0]&&Array.isArray(vs[0].items))?vs[0].items.filter(x=>x&&x.id).map(x=>({id:x.id,n:x.n,c:num(x.c,0,9999)})):[],
+      compras:(vs||[]).slice(0,2).map(v=>({id:v.id,fecha:v.creado,total:Number(v.total||0),
+        items:(Array.isArray(v.items)?v.items:[]).filter(x=>x&&x.id).map(x=>({id:x.id,n:x.n,c:num(x.c,0,9999),pu:num(x.pu,0,10000)}))})),
       pedido:pd?{items:pd.items,hora:pd.hora,nota:pd.nota||""}:undefined,
       pedidoHoy:!!pd,
       visitadaPor:vo?{n:vo.conductor,h:vo.hora}:undefined,
