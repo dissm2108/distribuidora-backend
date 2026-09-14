@@ -137,6 +137,86 @@ app.get("/version",(req,res)=>{
   });
   res.set("Cache-Control","no-store").json(out);
 });
+// ═══ STOCK DEL CAMIÓN EN LA BASE ═══
+// Fuente de verdad del inventario de cada conductor. El teléfono guarda su
+// propia copia para trabajar sin señal, pero al reconectar manda lo pendiente
+// y vuelve a leer de aquí.
+async function moverStock(conductor,cambios,motivo,ref){
+  if(!conductor||!cambios||!Object.keys(cambios).length)return;
+  const ids=Object.keys(cambios).slice(0,300);
+  const{data:act}=await db.from("stock_conductor").select("prod_id,cant,base").eq("conductor",conductor).in("prod_id",ids);
+  const ahora={};(act||[]).forEach(r=>ahora[r.prod_id]={cant:Number(r.cant||0),base:Number(r.base||0)});
+  const filas=[],movs=[];
+  ids.forEach(id=>{
+    const d=num(cambios[id],-99999,99999);
+    if(!d)return;
+    const prev=ahora[id]||{cant:0,base:0};
+    const nueva=Math.max(0,prev.cant+d);
+    filas.push({conductor,prod_id:id,cant:nueva,
+      base:(motivo==="carga")?(prev.base+d):prev.base,
+      actualizado:new Date().toISOString()});
+    movs.push({conductor,prod_id:id,delta:d,motivo:motivo||"ajuste",ref:ref?String(ref).slice(0,40):null});
+  });
+  if(filas.length)await db.from("stock_conductor").upsert(filas);
+  if(movs.length)await db.from("stock_mov").insert(movs);
+}
+async function leerStock(conductor){
+  const{data}=await db.from("stock_conductor").select("prod_id,cant,base").eq("conductor",conductor);
+  const prods={},base={};
+  (data||[]).forEach(r=>{if(Number(r.cant)!==0||Number(r.base)!==0){prods[r.prod_id]=Number(r.cant||0);base[r.prod_id]=Number(r.base||0);}});
+  return{prods,base};
+}
+function limpiaProds(o){
+  const r={};
+  Object.keys((o&&typeof o==="object")?o:{}).slice(0,300).forEach(k=>{
+    const id=limpia(k,20),v=num(o[k],0,9999);
+    if(id&&v)r[id]=v;
+  });
+  return r;
+}
+async function porCategoria(prods){
+  const ids=Object.keys(prods||{});
+  if(!ids.length)return{};
+  const{data}=await db.from("catalogo").select("id,cat").in("id",ids);
+  const cat={};(data||[]).forEach(p=>cat[p.id]=p.cat);
+  const r={};ids.forEach(id=>{const k=cat[id]||"—";r[k]=(r[k]||0)+Number(prods[id]||0)});
+  return r;
+}
+app.get("/conductor/stock",authC,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  const s=await leerStock(req.cond.u);
+  res.json({ok:true,prods:s.prods,base:s.base,por_categoria:await porCategoria(s.prods)});
+});
+app.post("/conductor/stock/ajuste",authC,async(req,res)=>{
+  const p=req.body.prods;
+  if(!p||typeof p!=="object")return res.status(400).json({ok:false,error:"Faltan datos"});
+  const cambios={};Object.keys(p).slice(0,300).forEach(id=>{cambios[id]=num(p[id],-9999,9999)});
+  await moverStock(req.cond.u,cambios,limpia(req.body.motivo,20)||"ajuste",null);
+  const s=await leerStock(req.cond.u);
+  res.json({ok:true,prods:s.prods});
+});
+app.get("/admin/stock",authA,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  const{data:us}=await db.from("conductores").select("usuario,nombre,activo,en_turno");
+  const{data:st}=await db.from("stock_conductor").select("conductor,prod_id,cant,base,actualizado");
+  const{data:cat}=await db.from("catalogo").select("id,cat,nombre");
+  const nom={},cDe={};(cat||[]).forEach(p=>{nom[p.id]=p.nombre;cDe[p.id]=p.cat});
+  const porCond={};
+  (st||[]).forEach(r=>{
+    if(Number(r.cant)<=0)return;
+    const c0=porCond[r.conductor]||(porCond[r.conductor]={total:0,actualizado:null,cats:{},prods:[]});
+    c0.total+=Number(r.cant);
+    c0.prods.push({id:r.prod_id,n:nom[r.prod_id]||r.prod_id,cat:cDe[r.prod_id]||"—",cant:Number(r.cant),base:Number(r.base||0)});
+    const k=cDe[r.prod_id]||"—";c0.cats[k]=(c0.cats[k]||0)+Number(r.cant);
+    if(!c0.actualizado||r.actualizado>c0.actualizado)c0.actualizado=r.actualizado;
+  });
+  const alm=porCond["almacen"];
+  res.json({ok:true,almacen:alm||{total:0,cats:{},prods:[],actualizado:null},
+    conductores:(us||[]).filter(u=>u.activo).map(u=>({
+    usuario:u.usuario,nombre:u.nombre,en_turno:!!u.en_turno,
+    ...(porCond[u.usuario]||{total:0,cats:{},prods:[],actualizado:null})
+  }))});
+});
 app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString()}));
 
 // ════════ AUTENTICACIÓN ════════
@@ -260,6 +340,12 @@ app.post("/ventas",authC,async(req,res)=>{
   if(!t)return res.status(400).json({ok:false,error:"No identifiqué la tienda: "+tienda});
   const resumen=(items||[]).map(x=>`${x.n} x${x.c}`).join(", ");
   const{data:v}=await db.from("ventas").insert({efectivo:num(req.body.efectivo,0,999999),credito:num(req.body.credito,0,999999),abono:num(req.body.abono,0,999999),tienda_id:t?t.id:null,tienda:tienda,conductor:req.cond.u,items:items||[],total:num(total,0,999999),metodo:(["efectivo","yape","credito","mixto"].includes(metodo)?metodo:"efectivo"),resumen}).select().single();
+  // descontar del stock lo que salió del camión
+  try{
+    const salida={};
+    (Array.isArray(req.body.items)?req.body.items:[]).forEach(it=>{if(it&&it.id)salida[it.id]=-(num(it.c,0,9999));});
+    if(Object.keys(salida).length)await moverStock(req.cond.u,salida,"venta",v&&v.id);
+  }catch(e){console.error("stock venta:",e.message);}
   if(t)await db.from("visitas").insert({tienda_id:t.id,tienda:t.nombre,conductor:req.cond.u,tipo:"venta",fecha:hoy(),hora:horaPE()});
   if(t&&t.dr_ajuste)await db.from("tiendas").update({dr_ajuste:0}).eq("id",t.id);
   const fiado=num(req.body.credito,0,999999)||((metodo==="credito")?num(total,0,999999):0);
@@ -305,7 +391,9 @@ app.post("/correcciones",authC,async(req,res)=>{
   res.json({ok:true,id:c.id});
 });
 app.post("/traspasos",authC,async(req,res)=>{
-  const{data:t}=await db.from("traspasos").insert({de:req.body.de,de_nombre:req.body.de_nombre||req.body.de,para:req.cond.u,items:catsOK(req.body.items)||{},estado:"pendiente"}).select().single();
+  const prodsT=limpiaProds(req.body.prods||req.body.items);
+  const itemsT=await porCategoria(prodsT);
+  const{data:t}=await db.from("traspasos").insert({de:req.body.de,de_nombre:req.body.de_nombre||req.body.de,para:req.cond.u,prods:prodsT,items:itemsT,estado:"pendiente"}).select().single();
   await avisoA(req.body.de,"↔ "+req.cond.u+" te solicita traspaso: "+Object.entries(req.body.items||{}).map(([k,v])=>k+"×"+v).join(", ")+". Si aceptas, entrégalo y él lo confirmará en su app.");
   await evento("traspaso","↔ Solicitud de traspaso",req.cond.u+" pidió a "+(req.body.de_nombre||req.body.de)+". Se mueve solo cuando el receptor confirme.",t.id);
   res.json({ok:true,id:t.id});
@@ -325,6 +413,16 @@ app.post("/traspasos/estado",authC,async(req,res)=>{
   if(esDe)upd.conf_de=true; if(esPara)upd.conf_para=true;
   const cDe=upd.conf_de||t.conf_de, cPara=upd.conf_para||t.conf_para;
   upd.estado=(cDe&&cPara)?"completado":"parcial";
+  // cuando ambos confirman, la mercadería cambia de manos en el inventario
+  if(upd.estado==="completado"&&t.estado!=="completado"){
+    const pr=limpiaProds(t.prods);
+    if(Object.keys(pr).length){
+      const menos={},mas={};
+      Object.keys(pr).forEach(id=>{menos[id]=-pr[id];mas[id]=pr[id];});
+      await moverStock(t.de,menos,"traspaso_envia",t.id);
+      await moverStock(t.para,mas,"traspaso_recibe",t.id);
+    }
+  }
   await db.from("traspasos").update(upd).eq("id",t.id);
   if(cDe&&cPara){
     const det=JSON.stringify(t.items);
@@ -346,6 +444,9 @@ app.post("/cargas/confirmar",authC,async(req,res)=>{
   if(c){
     await db.from("cargas").update({estado:req.body.conforme?"confirmada":"con_diferencias",items_final:catsOK(req.body.items)||c.items,motivo:req.body.motivo||""}).eq("id",c.id);
     await db.from("kardex").insert({conductor:req.cond.u,tipo:"carga_inicial",detalle:JSON.stringify(req.body.items||c.items)});
+    // el detalle por producto entra al stock del camión
+    const prodsCarga=(req.body.prods&&typeof req.body.prods==="object")?req.body.prods:(c.prods||null);
+    if(prodsCarga)await moverStock(req.cond.u,prodsCarga,"carga",c.id);
     if(!req.body.conforme){
       await evento("carga","📦 Carga con diferencias — "+req.cond.u,"Motivo: "+(req.body.motivo||"—"),c.id);
       avisarAdmin("📦 Carga con diferencias ("+req.cond.u+"): "+(req.body.motivo||""));
@@ -374,6 +475,13 @@ app.post("/conductor/turno",authC,async(req,res)=>{
 });
 app.post("/rutas/armada",authC,async(req,res)=>{await db.from("rutas").insert({conductor:req.cond.u,tienda:req.body.tienda,en_ruta:!!req.body.enRuta,fecha:hoy()});res.json({ok:true});});
 app.post("/perdidas",authC,async(req,res)=>{
+  try{
+    const p=req.body.prods;
+    if(p&&typeof p==="object"){
+      const menos={};Object.keys(p).forEach(id=>{menos[id]=-num(p[id],0,9999)});
+      await moverStock(req.cond.u,menos,limpia(req.body.motivo,20)||"perdida",null);
+    }
+  }catch(e){}
   const motivo=limpia(req.body.motivo,40)||"otro";
   const val=num(req.body.valor,0,99999);
   await db.from("kardex").insert({conductor:req.cond.u,tipo:"perdida",
@@ -697,6 +805,40 @@ app.post("/admin/catalogo/:id/borrar",authA,async(req,res)=>{
   await db.from("logs").insert({tipo:"admin",detalle:"Quitó del catálogo: "+req.params.id});
   res.json({ok:true});
 });
+app.get("/admin/utilidad",authA,async(req,res)=>{
+  const d=String(req.query.desde||"").slice(0,10)||hoy();
+  const h=String(req.query.hasta||"").slice(0,10)||hoy();
+  const cond=limpia(req.query.conductor,20);
+  let qv=db.from("ventas").select("items,total,creado,conductor").gte("creado",d+"T00:00:00").lte("creado",h+"T23:59:59");
+  if(cond&&cond!=="todos")qv=qv.eq("conductor",cond);
+  const [vts,prods,params]=await Promise.all([
+    qv,
+    db.from("catalogo").select("id,cat,nombre,costo"),
+    getParams()
+  ]).then(r=>[r[0].data||[],r[1].data||[],r[2]]);
+  const costoProd={},catDe={},nomDe={};
+  prods.forEach(p=>{costoProd[p.id]=Number(p.costo||0);catDe[p.id]=p.cat;nomDe[p.id]=p.nombre;});
+  const costoCat=params.costos||{};
+  let venta=0,costo=0,sinCosto=0;
+  const porCat={};
+  vts.forEach(v=>{
+    (Array.isArray(v.items)?v.items:[]).forEach(it=>{
+      if(!it||!it.id)return;
+      const q=num(it.c,0,9999),pu=num(it.pu,0,10000);
+      const cat=catDe[it.id]||"—";
+      const cu=costoProd[it.id]>0?costoProd[it.id]:num(costoCat[cat],0,10000);
+      if(!cu)sinCosto+=q;
+      venta+=q*pu;costo+=q*cu;
+      const r0=porCat[cat]||(porCat[cat]={venta:0,costo:0,unid:0});
+      r0.venta+=q*pu;r0.costo+=q*cu;r0.unid+=q;
+    });
+  });
+  res.json({ok:true,desde:d,hasta:h,venta,costo,utilidad:venta-costo,
+    margen:venta>0?Math.round((venta-costo)/venta*1000)/10:0,
+    unidades_sin_costo:sinCosto,
+    por_categoria:Object.keys(porCat).map(k=>({cat:k,...porCat[k],utilidad:porCat[k].venta-porCat[k].costo}))
+      .sort((a,b)=>b.utilidad-a.utilidad)});
+});
 app.get("/admin/catalogo",authA,async(req,res)=>{
   const{data}=await db.from("catalogo").select("*").order("cat");
   res.json({ok:true,productos:data||[]});
@@ -819,16 +961,20 @@ app.post("/almacen",authC,async(req,res)=>{
   res.json({ok:true});
 });
 app.post("/admin/almacen/enviar",authA,async(req,res)=>{
-  const items=catsOK(req.body.items),para=String(req.body.conductor||"");
-  if(!items||!USR_RE.test(para))return res.status(400).json({ok:false,error:"Faltan datos"});
-  const{data:t}=await db.from("traspasos").insert({de:"almacen",de_nombre:"Almacén",para,items,conf_de:true,estado:"parcial"}).select().single();
+  const para=String(req.body.conductor||"");
+  const prodsA=limpiaProds(req.body.prods||req.body.items);
+  if(!Object.keys(prodsA).length||!USR_RE.test(para))return res.status(400).json({ok:false,error:"Faltan datos"});
+  const items=await porCategoria(prodsA);
+  const{data:t}=await db.from("traspasos").insert({de:"almacen",de_nombre:"Almacén",para,prods:prodsA,items,conf_de:true,estado:"parcial"}).select().single();
   await avisoA(para,"🏬 El almacén te envía: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confírmalo al recibirlo.");
   res.json({ok:true,id:t.id});
 });
 app.post("/admin/almacen/pedir",authA,async(req,res)=>{
-  const items=catsOK(req.body.items),de=String(req.body.conductor||"");
-  if(!items||!USR_RE.test(de))return res.status(400).json({ok:false,error:"Faltan datos"});
-  const{data:t}=await db.from("traspasos").insert({de,de_nombre:de,para:"almacen",items,conf_para:true,estado:"parcial"}).select().single();
+  const de=String(req.body.conductor||"");
+  const prodsR=limpiaProds(req.body.prods||req.body.items);
+  if(!Object.keys(prodsR).length||!USR_RE.test(de))return res.status(400).json({ok:false,error:"Faltan datos"});
+  const items=await porCategoria(prodsR);
+  const{data:t}=await db.from("traspasos").insert({de,de_nombre:de,para:"almacen",prods:prodsR,items,conf_para:true,estado:"parcial"}).select().single();
   await avisoA(de,"🏬 Debes entregar al almacén: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confirma cuando lo dejes.");
   res.json({ok:true,id:t.id});
 });
@@ -869,113 +1015,25 @@ app.post("/admin/almacen/ajuste",authA,async(req,res)=>{
   res.json({ok:true});
 });
 app.get("/admin/kardex",authA,async(req,res)=>{
-  const{data:kx}=await db.from("kardex").select("*").order("id",{ascending:false}).limit(150);
-  const{data:vt}=await db.from("ventas").select("*").order("id",{ascending:false}).limit(150);
-  const rows=(kx||[]).concat((vt||[]).map(v=>({conductor:v.conductor,tipo:"venta",
+  // rango opcional: ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+  const d=String(req.query.desde||"").slice(0,10);
+  const h=String(req.query.hasta||"").slice(0,10);
+  const rango=/^\d{4}-\d{2}-\d{2}$/.test(d)&&/^\d{4}-\d{2}-\d{2}$/.test(h);
+  let qk=db.from("kardex").select("*").order("id",{ascending:false});
+  let qv=db.from("ventas").select("*").order("id",{ascending:false});
+  if(rango){
+    qk=qk.gte("creado",d+"T00:00:00").lte("creado",h+"T23:59:59").limit(800);
+    qv=qv.gte("creado",d+"T00:00:00").lte("creado",h+"T23:59:59").limit(800);
+  }else{ qk=qk.limit(150); qv=qv.limit(150); }
+  const [kx,vt]=await Promise.all([qk,qv]).then(r=>[r[0].data||[],r[1].data||[]]);
+  const rows=kx.concat(vt.map(v=>({conductor:v.conductor,tipo:"venta",
     detalle:v.tienda+" · S/"+Number(v.total||0).toFixed(2)+" · "+({efectivo:"💵 efectivo",credito:"📋 crédito",mixto:"🔀 mixto",yape:"📱 Yape"}[v.metodo]||v.metodo||"")
       +(Number(v.credito||0)>0?" · fiado S/"+Number(v.credito).toFixed(2):"")
       +(Number(v.abono||0)>0?" · cobró S/"+Number(v.abono).toFixed(2):"")
       +(v.resumen?" · "+v.resumen:""),creado:v.creado})))
-    .sort((a,b)=>new Date(b.creado)-new Date(a.creado)).slice(0,250);
-  res.json({ok:true,rows});
+    .sort((a,b)=>new Date(b.creado)-new Date(a.creado)).slice(0,rango?1200:250);
+  res.json({ok:true,rows,desde:rango?d:null,hasta:rango?h:null});
 });
-app.post("/admin/params",authA,async(req,res)=>{
-  await db.from("logs").insert({tipo:"admin",detalle:"Cambió parámetros del sistema"});
-  const b=req.body||{};
-  const kv={limite_credito:num(b.limite_credito,0,100000),umbral_repo:num(b.umbral_repo,1,100000)||40,
-    repo_resta_parcial:num(b.repo_resta_parcial,0,30),
-    margen_liq:num(b.margen_liq,0,1000),vida_util:num(b.vida_util,1,30),
-    deuda_dias:num(b.deuda_dias,1,120),yape_umbral:num(b.yape_umbral,0,100000),costos:{}};
-  CATS_OK.forEach(k=>kv.costos[k]=num(b.costos&&b.costos[k],0,10000));
-  kv.dup_radio_m=num(b.dup_radio_m,1,200)||15;
-  kv.tope_gastos=num(b.tope_gastos,0,100000)||350;
-  kv.inactiva_dias=num(b.inactiva_dias,1,365)||10;
-  kv.almacen={nombre:limpia(b.almacen&&b.almacen.nombre,60),ref:limpia(b.almacen&&b.almacen.ref,120),lat:(b.almacen&&b.almacen.lat!=null)?num(b.almacen.lat,-90,90):null,lon:(b.almacen&&b.almacen.lon!=null)?num(b.almacen.lon,-180,180):null};
-  kv.gasto_cats=['combustible','comida','peaje','mecanico','hospedaje','otros'];
-  kv.precio_tipo={};["bodega","minimarket","puesto","cafetería","mayorista","otro"].forEach(t=>kv.precio_tipo[t]=num(b.precio_tipo&&b.precio_tipo[t],-50,100));
-  kv.tipos_tienda=(Array.isArray(b.tipos_tienda)?b.tipos_tienda.slice(0,12):[]).map(t=>limpia(t,20)).filter(Boolean);
-  // precios de categoría por tipo de tienda: {tipo:{categoria:precio}}
-  kv.precios_cat={};
-  Object.keys((b.precios_cat)||{}).slice(0,12).forEach(t=>{
-    const tt=limpia(t,20);if(!tt)return;
-    kv.precios_cat[tt]={};
-    Object.keys(b.precios_cat[t]||{}).slice(0,40).forEach(k=>{
-      const kk=limpia(k,20),v=num(b.precios_cat[t][k],0,10000);
-      if(kk&&v)kv.precios_cat[tt][kk]=v;
-    });
-  });
-  kv.precio_conductor={};Object.keys((b.precio_conductor)||{}).slice(0,20).forEach(u=>{if(USR_RE.test(u))kv.precio_conductor[u]=num(b.precio_conductor[u],-50,100)});
-  kv.zonas=(Array.isArray(b.zonas)?b.zonas.slice(0,12):[]).map(z=>({
-    id:num(z.id,0),nombre:limpia(z.nombre,40)||"Zona",ajuste:num(z.ajuste,-50,100),
-    color:/^#[0-9A-Fa-f]{3,8}$/.test(z.color||"")?z.color:"#B97A1F",
-    conductor:(z.conductor&&USR_RE.test(z.conductor))?z.conductor:null,
-    poligono:(Array.isArray(z.poligono)?z.poligono.slice(0,200):[]).map(p=>[num(p&&p[0],-90,90),num(p&&p[1],-180,180)])
-  })).filter(z=>z.poligono.length>=3);
-  await db.from("params").upsert({id:1,kv});res.json({ok:true});
-});
-
-// ════════ GPS DE CAMIONES ════════
-// Fuente externa opcional (GPS_PLATFORM) + respaldo por celular del conductor.
-const GPS_PLAT=(process.env.GPS_PLATFORM||"").toLowerCase();
-const GPS_MIN=num(process.env.GPS_TIMEOUT_MIN,1,120)||15;   // sin señal tras X min = inactivo
-let GPS_ULTIMO_ERROR="";
-const GPS_SEG=num(process.env.GPS_INTERVALO_SEG,20,600)||60; // cada cuánto consulta la plataforma
-
-async function obtenerGPS(){
-  try{
-    let base=String(process.env.GPS_API_URL||"").trim().replace(/\/+$/,"");
-    if(!base)throw new Error("Falta GPS_API_URL");
-    if(!/^https?:\/\//.test(base))base="https://"+base;
-    if(/\/api$/.test(base))base=base.replace(/\/api$/,"");
-    const ctrl=new AbortController();
-    const tmr=setTimeout(()=>ctrl.abort(),12000);
-    const auth="Basic "+Buffer.from(`${process.env.GPS_USER||""}:${process.env.GPS_PASSWORD||""}`).toString("base64");
-    let r;
-    try{
-      r=await fetch(base+"/api/positions",{headers:{Authorization:auth,Accept:"application/json"},signal:ctrl.signal});
-    }finally{clearTimeout(tmr);}
-    if(!r.ok){
-      const cuerpo=await r.text().catch(()=>"");
-      throw new Error("Traccar respondió "+r.status+" "+(r.statusText||"")+(cuerpo?" · "+cuerpo.slice(0,120):""));
-    }
-    const d=await r.json();
-    if(!Array.isArray(d))throw new Error("Respuesta inesperada de Traccar");
-    return d.map(p=>({gps_id:String(p.deviceId),lat:p.latitude,lon:p.longitude,vel:p.speed?Math.round(p.speed*1.852):0,ts:p.fixTime||p.deviceTime}));
-  }catch(e){
-    GPS_ULTIMO_ERROR=e.name==="AbortError"?"La plataforma GPS no respondió en 12 segundos":e.message;
-    console.error("GPS("+GPS_PLAT+"): "+GPS_ULTIMO_ERROR);
-    return [];
-  }
-}
-
-async function refrescarGPS(){
-  const pos=await obtenerGPS(); if(!pos.length)return;
-  const{data:cs}=await db.from("conductores").select("usuario,gps_id").not("gps_id","is",null);
-  for(const c of (cs||[])){
-    const p=pos.find(x=>x.gps_id===String(c.gps_id)); if(!p)continue;
-    await db.from("conductores").update({lat:p.lat,lon:p.lon,gps_fuente:GPS_PLAT,gps_hora:new Date(p.ts||Date.now()).toISOString()}).eq("usuario",c.usuario);
-    await db.from("posiciones").insert({conductor:c.usuario,lat:p.lat,lon:p.lon,vel:num(p.vel,0,300),fuente:GPS_PLAT});
-  }
-}
-if(GPS_PLAT){
-  refrescarGPS();
-  if(GPS_SEG<60)cron.schedule(`*/${GPS_SEG} * * * * *`,refrescarGPS);          // cada X segundos
-  else setInterval(refrescarGPS,GPS_SEG*1000);                                  // 60 s o más
-}
-
-// Respaldo: la app del conductor envía su posición (solo si no hay plataforma para ese camión)
-app.post("/conductor/posicion",authC,async(req,res)=>{
-  const lat=num(req.body.lat,-90,90),lon=num(req.body.lon,-180,180);
-  if(!lat||!lon)return res.status(400).json({ok:false});
-  const{data:c}=await db.from("conductores").select("gps_id,gps_fuente,gps_hora").eq("usuario",req.cond.u).maybeSingle();
-  try{await db.from("posiciones").insert({conductor:req.cond.u,lat,lon,vel:num(req.body.vel,0,300),fuente:"celular"});}catch(e){}
-  // el tracker del camión manda solo si reportó hace menos de 10 min; si no, vale el celular
-  const fresca=c&&c.gps_fuente&&c.gps_fuente!=="celular"&&c.gps_hora&&(Date.now()-new Date(c.gps_hora).getTime())<10*60000;
-  if(fresca)return res.json({ok:true,nota:"tracker del camión activo"});
-  await db.from("conductores").update({lat,lon,gps_fuente:"celular",gps_hora:new Date().toISOString()}).eq("usuario",req.cond.u);
-  res.json({ok:true});
-});
-// Panel: posiciones actuales + recorrido del día
 app.get("/admin/gps",authA,async(req,res)=>{
   const{data:cs}=await db.from("conductores").select("usuario,nombre,tipo,camion,lat,lon,gps_fuente,gps_hora,gps_id").eq("activo",true);
   const lim=Date.now()-GPS_MIN*60000;
