@@ -1586,7 +1586,7 @@ function cpPrecioMayorista(catId){
   const desc=CP_DESCUENTO_MAYORISTA[catId]||0; // % de descuento de esa categoría (0 si no cargado)
   return Math.round(c.precio*(1-desc/100)*10)/10;
 }
-function cpGetPrecio(catId,prodId){
+function cpPrecioCatalogo(catId,prodId){
   // 1) precio escrito a mano para esta venta
   if(cpCustomSel&&cpCustomSel[catId]==='libre'&&cpPreciosCat[catId]!==undefined)return cpPreciosCat[catId];
   var tipo=(cpCustomSel&&cpCustomSel[catId]&&cpCustomSel[catId]!=='libre')?cpCustomSel[catId]:cpTipoSesion;
@@ -1599,6 +1599,8 @@ function cpGetPrecio(catId,prodId){
   if(cpPreciosCat[catId]!==undefined)return cpPreciosCat[catId];
   var cat=catById(catId);return cat?Number(cat.precio||0):0;
 }
+
+var cpGetPrecio=cpPrecioCatalogo;
 function abrirEntrega(){
   const t=T[tiendaActualIdx];
   cpTienda={nombre:t.n,zona:t.z,tipoPrecio:t.mayorista?'mayorista':'normal',deuda:t.sa||0,tieneCredito:t.cr,limite:t.li||0,tel:t.tel,ultimo:(t.h&&t.h.length)?t.h[0]:null};
@@ -1764,7 +1766,7 @@ function cpSelTipo(k){
 }
 function cpAplicarTipo(){ cpTipoTocado=true;
   if(cpTipoTemp==='custom'){cpCerrar('cpov-tipo');cpAbrirCustom();return;}
-  cpTipoSesion=cpTipoTemp;cpPreciosCat={};
+  cpTipoSesion=cpTipoTemp;cpPreciosCat={};cpCustomSel={};
   cpActualizarBadge();cpRender();cpCerrar('cpov-tipo');
   toast('Precio '+((CP_TIPOS[cpTipoSesion]||{nombre:cpTipoSesion}).nombre).toLowerCase(),'g');
 }
@@ -2900,7 +2902,18 @@ window.precioProd=function(pid,catId){
  var aC=(window.SES&&P.cond&&P.cond[SES.usuario]!=null)?P.cond[SES.usuario]:0;
  return Math.round(base*(1+aT/100)*(1+aC/100)*10)/10;
 };
-window.cpGetPrecio=function(cid){return precioProd(null,cid);};}
+window.cpGetPrecio=function(cid,pid){
+   /* el precio del catálogo por producto y tipo manda; los ajustes de zona
+      y conductor se aplican encima */
+   var base=(typeof cpPrecioCatalogo==='function')?cpPrecioCatalogo(cid,pid):0;
+   if(!base)base=precioProd(pid||null,cid);
+   var P=(window.PARAMS&&PARAMS.precio_tipo)?PARAMS:{};
+   var t=(typeof cpTipoSesion!=='undefined')?cpTipoSesion:null;
+   var aT=(t&&P.precio_tipo&&P.precio_tipo[t]!=null)?Number(P.precio_tipo[t]):0;
+   var aC=(window.SES&&P.precio_conductor&&P.precio_conductor[SES.usuario]!=null)?Number(P.precio_conductor[SES.usuario]):0;
+   if(!aT&&!aC)return base;
+   return Math.round(base*(1+aT/100)*(1+aC/100)*10)/10;
+ };}
 /* venta fuera de zona → evento al dueño */
 if(typeof cpConfirmarCobro==='function'){var _cc6=cpConfirmarCobro;window.cpConfirmarCobro=function(){
  actualizarPos();
@@ -4023,7 +4036,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-11-T21';
+window.BUILD='2026-09-12-A';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
