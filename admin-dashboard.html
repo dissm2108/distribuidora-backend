@@ -2188,26 +2188,36 @@ if(CFGA.API&&CFGA.TOKEN)setTimeout(credCargar,1200);
 </script>
 <script id="v5pagos">
 (function(){
-/* Resumen de formas de pago del día en el Kardex */
+/* ═══ Formas de pago: respeta el conductor elegido en el Kardex ═══ */
 if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
- var base='';try{base=_rk()}catch(e){}
- var rows=(window.KXS||[]).filter(function(k){return k.tipo==='venta'});
- if(!rows.length)return base;
- var tot={efectivo:0,credito:0,mixto:0,otros:0},fiado=0,cobrado=0;
+ var base='';try{base=_rk.apply(this,arguments)}catch(e){}
+ var rows=(window.KXS||[]).filter(function(k){
+  if(!/venta/i.test(k.tipo||''))return false;
+  return (window.FKX==='todos')||k.conductor===FKX;
+ });
+ var quien=(window.FKX==='todos')?'todos los conductores':FKX;
+ if(!rows.length){
+  return '<div class="card"><div class="ct">Formas de pago registradas</div>'
+   +'<div style="font-size:12px;opacity:.65">Sin ventas registradas para '+quien+' en este período.</div></div>'+base;
+ }
+ var tot={efectivo:0,credito:0,mixto:0,yape:0},fiado=0,cobrado=0,n=0;
  rows.forEach(function(k){
   var d=String(k.detalle||'');
   var m=d.match(/S\/([\d.]+)/);var v=m?parseFloat(m[1]):0;
   if(/efectivo/i.test(d))tot.efectivo+=v;
-  else if(/crédito|credito/i.test(d))tot.credito+=v;
+  else if(/yape/i.test(d))tot.yape+=v;
   else if(/mixto/i.test(d))tot.mixto+=v;
-  else tot.otros+=v;
+  else if(/crédito|credito/i.test(d))tot.credito+=v;
   var f=d.match(/fiado S\/([\d.]+)/);if(f)fiado+=parseFloat(f[1]);
-  var c=d.match(/cobró S\/([\d.]+)/);if(c)cobrado+=parseFloat(c[1]);
+  var co=d.match(/cobró S\/([\d.]+)/);if(co)cobrado+=parseFloat(co[1]);
+  n++;
  });
- var box=function(l,v,col){return '<div style="text-align:center;padding:10px 6px;border:1px solid var(--linea);border-radius:11px"><div style="font-size:16px;font-weight:800;color:'+col+'">S/'+v.toFixed(2)+'</div><div style="font-size:10.5px;color:var(--tenue);margin-top:2px">'+l+'</div></div>'};
+ var box=function(l,v,col){return '<div style="text-align:center;padding:10px 6px;border:1px solid var(--linea);border-radius:11px"><div style="font-size:15px;font-weight:800;color:'+col+'">S/'+v.toFixed(2)+'</div><div style="font-size:10.5px;color:var(--tenue);margin-top:2px">'+l+'</div></div>'};
  return '<div class="card"><div class="ct">Formas de pago registradas</div>'
- +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'
- +box('💵 Efectivo',tot.efectivo,'#2F6B4F')+box('📋 Crédito',tot.credito,'#5B3FA0')+box('🔀 Mixto',tot.mixto,'#1D4ED8')
+ +'<div style="font-size:11px;opacity:.7;margin-bottom:8px">'+n+' ventas · '+quien+'</div>'
+ +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+ +box('💵 Efectivo',tot.efectivo,'#2F6B4F')+box('📱 Yape',tot.yape,'#5B3FA0')
+ +box('📋 Crédito',tot.credito,'#B23B2E')+box('🔀 Mixto',tot.mixto,'#1D4ED8')
  +'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">'
  +box('Fiado en total',fiado,'#B23B2E')+box('Cobrado de deudas',cobrado,'#2F6B4F')
  +'</div></div>'+base;
@@ -2852,6 +2862,250 @@ if(typeof catCargar==='function'){var _cc=catCargar;window.catCargar=async funct
  await cargarCategorias();
  return await _cc.apply(this,arguments);};}
 cargarCategorias();
+})();
+</script>
+<script id="v5catvacia">
+(function(){
+/* Avisar en el panel: una categoría sin productos no le aparece al conductor */
+if(typeof rCatalogo==='function'){var _rc=rCatalogo;window.rCatalogo=function(){
+ var h='';try{h=_rc()}catch(e){return ''}
+ var vacias=(CATA||[]).filter(function(c){return !c.prods||!c.prods.length});
+ if(vacias.length){
+  var av='<div class="card" style="border:1px solid #EFDCA8;background:#FDF6E4">'
+   +'<div style="font-size:12px;color:#8A6410;line-height:1.6">'
+   +'<b>'+vacias.map(function(c){return c.nom}).join(', ')+'</b> '
+   +(vacias.length>1?'no tienen':'no tiene')+' productos todavía, así que '
+   +(vacias.length>1?'no aparecen':'no aparece')+' cuando el conductor va a vender. '
+   +'Agrégales al menos un producto aquí abajo.</div></div>';
+  h=av+h;
+ }
+ return h;};}
+})();
+</script>
+<script id="v5costos">
+(function(){
+/* ═══ Costos: las categorías reales del catálogo, y la utilidad calculada ═══ */
+if(typeof rConfig==='function'){var _rc=rConfig;window.rConfig=function(){
+ var h='';try{h=_rc()}catch(e){return ''}
+ /* sustituir las 8 categorías fijas por las del catálogo */
+ try{
+  var filas=(CATA||[]).map(function(cat){
+   var v=(PARAMS_A.costos||{})[cat.id]||0;
+   var prop=(cat.prods||[]).filter(function(p){return ((CATE||{})[p.id]||{}).costo>0}).length;
+   return '<div style="display:flex;align-items:center;gap:8px">'
+    +'<div style="flex:1;font-size:12px">'+(cat.emoji||'')+' '+cat.nom
+    +(prop?('<span style="font-size:10px;opacity:.6"> · '+prop+' con costo propio</span>'):'')+'</div>'
+    +'<input type="number" step="0.01" id="co-'+cat.id+'" value="'+v+'" style="width:90px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center"></div>';
+  }).join('');
+  if(filas){
+   var ini=h.indexOf('grid-template-columns:1fr 1fr;gap:8px 14px">');
+   var fin=h.indexOf('<button onclick="paGuardar()"');
+   if(ini>0&&fin>ini){
+    ini=h.indexOf('>',ini)+1;
+    var cierre=h.lastIndexOf('</div>',fin);
+    h=h.slice(0,ini)+filas+h.slice(cierre);
+   }
+  }
+ }catch(e){}
+ return h;};}
+/* guardar los costos de todas las categorías reales */
+if(typeof paGuardar==='function'){var _pg=paGuardar;window.paGuardar=async function(){
+ try{
+  PARAMS_A.costos=PARAMS_A.costos||{};
+  (CATA||[]).forEach(function(cat){
+   var el=document.getElementById('co-'+cat.id);
+   if(el)PARAMS_A.costos[cat.id]=Number(el.value)||0;
+  });
+ }catch(e){}
+ return await _pg.apply(this,arguments);};}
+/* tarjeta de utilidad en el Kardex */
+window.rUtilidad=async function(){
+ var box=document.getElementById('util-box');if(!box)return;
+ box.textContent='Calculando…';
+ var r=await apiA('/admin/utilidad');
+ if(!(r&&r.ok))return box.textContent='No se pudo calcular.';
+ var cel=function(l,v,col){return '<div style="text-align:center;padding:10px 6px;border:1px solid var(--linea);border-radius:11px"><div style="font-size:16px;font-weight:800;color:'+col+'">'+v+'</div><div style="font-size:10.5px;color:var(--tenue);margin-top:2px">'+l+'</div></div>'};
+ box.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'
+  +cel('Vendido','S/'+r.venta.toFixed(2),'#1D4ED8')
+  +cel('Costo','S/'+r.costo.toFixed(2),'#B23B2E')
+  +cel('Utilidad','S/'+r.utilidad.toFixed(2),'#2F6B4F')+'</div>'
+  +'<div style="text-align:center;font-size:11.5px;margin-top:6px;opacity:.75">Margen '+r.margen+'%</div>'
+  +(r.unidades_sin_costo?('<div style="font-size:11px;color:#8A6410;background:#FDF6E4;border:1px solid #EFDCA8;border-radius:9px;padding:8px 10px;margin-top:8px">'
+    +r.unidades_sin_costo+' unidades vendidas <b>sin costo cargado</b>: cuentan como costo cero y la utilidad sale más alta de lo real. Pon su costo en el producto o en su categoría.</div>'):'')
+  +(r.por_categoria&&r.por_categoria.length?('<div style="margin-top:10px">'+r.por_categoria.map(function(x){
+     return '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:5px 0;border-bottom:1px solid var(--linea)"><span>'+x.cat+'</span><span>S/'+x.utilidad.toFixed(2)+'</span></div>';
+   }).join('')+'</div>'):'');
+};
+if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
+ var h=_rk.apply(this,arguments);
+ setTimeout(function(){try{rUtilidad()}catch(e){}},250);
+ return '<div class="card"><div class="ct">Utilidad de hoy</div><div id="util-box" style="font-size:12px;opacity:.7">…</div></div>'+h;
+};}
+})();
+</script>
+<script id="v5periodo">
+(function(){
+/* ═══ Período del Kardex: hoy, ayer, semana, mes ═══ */
+window.PKX='hoy';
+function ymd(d){return d.toISOString().slice(0,10)}
+window.rangoPKX=function(){
+ var hoy=new Date(),d=new Date(hoy),h=new Date(hoy);
+ if(PKX==='ayer'){d.setDate(d.getDate()-1);h.setDate(h.getDate()-1);}
+ else if(PKX==='semana'){d.setDate(d.getDate()-6);}
+ else if(PKX==='mes'){d.setDate(d.getDate()-29);}
+ return {desde:ymd(d),hasta:ymd(h)};
+};
+window.etiquetaPKX=function(){
+ return {hoy:'hoy',ayer:'ayer',semana:'los últimos 7 días',mes:'los últimos 30 días'}[PKX]||'hoy';
+};
+window.cambiarPKX=async function(p){
+ PKX=p;
+ try{localStorage.setItem('v5a_pkx',p)}catch(e){}
+ await cargarKardex();
+ render();
+};
+window.cargarKardex=async function(){
+ try{
+  if(!CFGA.API)return;
+  var r0=rangoPKX();
+  var r=await apiA('/admin/kardex?desde='+r0.desde+'&hasta='+r0.hasta);
+  if(r&&r.ok)window.KXS=r.rows||[];
+ }catch(e){}
+};
+try{var g=localStorage.getItem('v5a_pkx');if(g)PKX=g}catch(e){}
+/* al cargar el panel, traer el período elegido en vez de las últimas 150 */
+if(typeof cargarAdm==='function'){var _ca=cargarAdm;window.cargarAdm=async function(){
+ var r=await _ca.apply(this,arguments);
+ await cargarKardex();
+ return r;};}
+
+/* botones encima de la tarjeta de formas de pago */
+if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
+ var base='';try{base=_rk.apply(this,arguments)}catch(e){}
+ var ops=[['hoy','Hoy'],['ayer','Ayer'],['semana','7 días'],['mes','30 días']];
+ var btns=ops.map(function(o){var on=PKX===o[0];
+  return '<button onclick="cambiarPKX(\''+o[0]+'\')" style="padding:7px 12px;border-radius:15px;border:1.5px solid '+(on?'#1D4ED8':'rgba(128,128,128,.35)')+';background:'+(on?'rgba(29,78,216,.12)':'none')+';color:'+(on?'#1D4ED8':'inherit')+';font-size:11.5px;font-weight:800;cursor:pointer">'+o[1]+'</button>';
+ }).join('');
+ var r0=rangoPKX();
+ return '<div class="card"><div class="ct">Período</div>'
+  +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'</div>'
+  +'<div style="font-size:11px;opacity:.65;margin-top:7px">Mostrando '+etiquetaPKX()
+  +(PKX==='hoy'?'':' · del '+r0.desde+' al '+r0.hasta)
+  +'. Nada se borra: las ventas quedan guardadas siempre y solo cambia lo que se suma aquí.</div></div>'
+  +base;
+};}
+/* la utilidad usa el mismo período y conductor */
+if(typeof rUtilidad==='function'){window.rUtilidad=async function(){
+ var box=document.getElementById('util-box');if(!box)return;
+ box.textContent='Calculando…';
+ var r0=rangoPKX();
+ var q='/admin/utilidad?desde='+r0.desde+'&hasta='+r0.hasta+(window.FKX&&FKX!=='todos'?('&conductor='+encodeURIComponent(FKX)):'');
+ var r=await apiA(q);
+ if(!(r&&r.ok))return box.textContent='No se pudo calcular.';
+ var cel=function(l,v,col){return '<div style="text-align:center;padding:10px 6px;border:1px solid var(--linea);border-radius:11px"><div style="font-size:16px;font-weight:800;color:'+col+'">'+v+'</div><div style="font-size:10.5px;color:var(--tenue);margin-top:2px">'+l+'</div></div>'};
+ box.innerHTML='<div style="font-size:11px;opacity:.7;margin-bottom:7px">'+etiquetaPKX()+' · '+((window.FKX&&FKX!=='todos')?FKX:'todos los conductores')+'</div>'
+  +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'
+  +cel('Vendido','S/'+r.venta.toFixed(2),'#1D4ED8')
+  +cel('Costo','S/'+r.costo.toFixed(2),'#B23B2E')
+  +cel('Utilidad','S/'+r.utilidad.toFixed(2),'#2F6B4F')+'</div>'
+  +'<div style="text-align:center;font-size:11.5px;margin-top:6px;opacity:.75">Margen '+r.margen+'%</div>'
+  +(r.unidades_sin_costo?('<div style="font-size:11px;color:#8A6410;background:#FDF6E4;border:1px solid #EFDCA8;border-radius:9px;padding:8px 10px;margin-top:8px">'
+    +r.unidades_sin_costo+' unidades vendidas <b>sin costo cargado</b>: cuentan como costo cero y la utilidad sale más alta de lo real.</div>'):'')
+  +(r.por_categoria&&r.por_categoria.length?('<div style="margin-top:10px">'+r.por_categoria.map(function(x){
+     return '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:5px 0;border-bottom:1px solid var(--linea)"><span>'+x.cat+'</span><span>S/'+x.utilidad.toFixed(2)+'</span></div>';
+   }).join('')+'</div>'):'');
+};}
+/* el título de formas de pago dice el período */
+if(typeof rKardex==='function'){var _rk2=rKardex;window.rKardex=function(){
+ var h=_rk2.apply(this,arguments);
+ return h.replace('Formas de pago registradas','Formas de pago · '+etiquetaPKX());
+};}
+})();
+</script>
+<script id="v5stockvivo">
+(function(){
+/* ═══ Stock en ruta, en vivo, dentro de Almacén ═══ */
+window.rStockVivo=async function(){
+ var box=document.getElementById('stockvivo-box');if(!box)return;
+ var r=await apiA('/admin/stock');
+ if(!(r&&r.ok))return box.textContent='No se pudo consultar.';
+ var cs=(r.conductores||[]);
+ if(!cs.length)return box.textContent='Sin conductores activos.';
+ box.innerHTML=cs.map(function(c){
+  var cats=Object.keys(c.cats||{}).map(function(k){return k+' '+c.cats[k]}).join(' · ')||'sin stock';
+  var hace='';
+  if(c.actualizado){
+   var min=Math.round((Date.now()-new Date(c.actualizado).getTime())/60000);
+   hace=min<1?'hace un momento':(min<60?('hace '+min+' min'):('hace '+Math.round(min/60)+' h'));
+  }
+  return '<div style="border:1px solid var(--linea);border-radius:12px;padding:11px 12px;margin-bottom:8px">'
+   +'<div style="display:flex;justify-content:space-between;align-items:center">'
+   +'<b style="font-size:13px">'+(c.en_turno?'🟢 ':'⚪ ')+c.nombre+'</b>'
+   +'<b style="font-size:15px;color:#1D4ED8">'+c.total+' unid</b></div>'
+   +'<div style="font-size:11px;opacity:.7;margin-top:3px">'+cats+'</div>'
+   +(hace?'<div style="font-size:10.5px;opacity:.55;margin-top:3px">Actualizado '+hace+'</div>':'')
+   +(c.prods&&c.prods.length?('<details style="margin-top:7px"><summary style="cursor:pointer;font-size:11.5px;font-weight:700">Ver producto por producto</summary>'
+     +c.prods.sort(function(a,b){return b.cant-a.cant}).map(function(p){
+       return '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:4px 0;border-bottom:1px solid var(--linea)"><span>'+p.n+'</span><span><b>'+p.cant+'</b>'+(p.base?(' <span style="opacity:.5">de '+p.base+'</span>'):'')+'</span></div>';
+     }).join('')+'</details>'):'')
+   +'</div>';
+ }).join('')+'<div style="font-size:10.5px;opacity:.6;margin-top:4px">Se descuenta con cada venta registrada. Si el conductor vende sin señal, aparece al reconectar.</div>';
+};
+if(typeof rAlmacen==='function'){var _ra=rAlmacen;window.rAlmacen=function(){
+ var h=_ra.apply(this,arguments);
+ setTimeout(function(){try{rStockVivo()}catch(e){}},250);
+ return '<div class="card"><div class="ct">🚚 Stock en ruta ahora</div><div id="stockvivo-box" style="font-size:12px;opacity:.7">Consultando…</div></div>'+h;
+};}
+})();
+</script>
+<script id="v5almprod">
+(function(){
+/* ═══ Almacén: enviar y pedir producto por producto ═══ */
+function itemsPicker(p){
+ try{return (typeof pkItems==='function')?pkItems(p):[]}catch(e){return[]}
+}
+window.almEnviarProd=async function(){
+ var s=document.getElementById('al-cond');
+ if(!s||!s.value)return alert('Elige el conductor que recibe.');
+ var it=itemsPicker('al'),prods={},total=0;
+ it.forEach(function(x){var q=Number(x.c)||0;if(q>0){prods[x.id]=q;total+=q}});
+ if(!total)return alert('Marca las cantidades con + antes de enviar.');
+ if(!confirm('Enviar '+total+' unidades a '+s.value+'.\n\nSe descuentan del almacén y se suman a su camión cuando él confirme la recepción.'))return;
+ var r=await apiA('/admin/almacen/enviar',{conductor:s.value,prods:prods});
+ if(r&&r.ok){if(typeof pkReset==='function')pkReset('al');
+  alert('✓ Enviado. El conductor debe confirmarlo en su app; ahí se mueve el stock.');
+  if(typeof rStockVivo==='function')rStockVivo();
+  renderForzado();
+ }else alert('No se pudo enviar: '+((r&&r.error)||'sin respuesta'));
+};
+window.almPedirProd=async function(){
+ var s=document.getElementById('al-cond2')||document.getElementById('al-cond');
+ if(!s||!s.value)return alert('Elige el conductor.');
+ var it=itemsPicker('al'),prods={},total=0;
+ it.forEach(function(x){var q=Number(x.c)||0;if(q>0){prods[x.id]=q;total+=q}});
+ if(!total)return alert('Marca las cantidades con + antes de pedir el retorno.');
+ var r=await apiA('/admin/almacen/pedir',{conductor:s.value,prods:prods});
+ if(r&&r.ok){if(typeof pkReset==='function')pkReset('al');
+  alert('✓ Solicitado. Cuando el conductor confirme la entrega, sale de su camión y entra al almacén.');
+  if(typeof rStockVivo==='function')rStockVivo();
+ }else alert('No se pudo pedir: '+((r&&r.error)||'sin respuesta'));
+};
+/* el almacén también se ve en la tarjeta de stock en vivo */
+if(typeof rStockVivo==='function'){var _rs=rStockVivo;window.rStockVivo=async function(){
+ await _rs.apply(this,arguments);
+ try{
+  var box=document.getElementById('stockvivo-box');if(!box)return;
+  var r=await apiA('/admin/stock');
+  if(!(r&&r.ok)||!r.almacen)return;
+  var a=r.almacen,cats=Object.keys(a.cats||{}).map(function(k){return k+' '+a.cats[k]}).join(' · ')||'sin stock';
+  var d=document.createElement('div');
+  d.style.cssText='border:1px solid var(--linea);border-radius:12px;padding:11px 12px;margin-bottom:8px;background:rgba(128,128,128,.05)';
+  d.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:13px">🏬 Almacén</b>'
+   +'<b style="font-size:15px;color:#2F6B4F">'+(a.total||0)+' unid</b></div>'
+   +'<div style="font-size:11px;opacity:.7;margin-top:3px">'+cats+'</div>';
+  box.insertBefore(d,box.firstChild);
+ }catch(e){}
+};}
 })();
 </script>
 </body>

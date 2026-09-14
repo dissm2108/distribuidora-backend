@@ -1637,9 +1637,10 @@ function cpRenderTabs(){
  if(!_av){var d=document.createElement('div');d.id='cp-sin-carga';d.style.cssText='margin:8px 10px;padding:9px 12px;border-radius:10px;background:#FDF6E4;border:1px solid #EFDCA8;color:#8A6410;font-size:11.5px;line-height:1.5;font-weight:700';d.textContent='📦 Aún no confirmas tu carga del viaje: el stock figura en 0. Puedes vender igual, pero confírmala desde Inicio para que el inventario cuadre.';var host=document.getElementById('cp-tabs');if(host&&host.parentElement)host.parentElement.insertBefore(d,host);}
  var av=document.getElementById('cp-sin-carga');if(av)av.style.display=_hay?'none':'block';
 
-  const cats=CATS.filter(c=>c.prods&&c.prods.length);
+  const cats=CATS.slice();
   let html=`<button class="cp-tab ${cpTab==='todos'?'on':''}" onclick="cpSetTab('todos',this)">Todos</button>`;
-  html+=cats.map(c=>`<button class="cp-tab ${cpTab===c.id?'on':''}" onclick="cpSetTab('${c.id}',this)">${c.emoji} ${c.nom.split(' ')[0]}</button>`).join('');
+  html+=cats.map(c=>{const vac=!c.prods||!c.prods.length;
+    return `<button class="cp-tab ${cpTab===c.id?'on':''}" onclick="cpSetTab('${c.id}',this)" style="${vac?'opacity:.5':''}">${c.emoji} ${c.nom.split(' ')[0]}${vac?' ∅':''}</button>`}).join('');
   document.getElementById('cp-tabs').innerHTML=html;
 }
 function cpSetTab(id,el){cpTab=id;cpBusq='';document.getElementById('cp-buscador').value='';document.getElementById('cp-clear').style.display='none';cpRenderTabs();cpRender();}
@@ -2604,11 +2605,16 @@ window.cargarDatos=async function(){
  if(r.categorias&&r.categorias.length){
   r.categorias.forEach(function(sc){
    var loc=CATS.find(function(x){return x.id===sc.id});
-   if(loc){if(sc.nom)loc.nom=sc.nom;if(sc.emoji)loc.emoji=sc.emoji;if(sc.precio)loc.precio=Number(sc.precio);}
+   if(loc){if(sc.nom)loc.nom=String(sc.nom).replace(/^[^\w\sáéíóúñÁÉÍÓÚÑ]+\s*/,'');if(sc.emoji)loc.emoji=sc.emoji;if(sc.precio)loc.precio=Number(sc.precio);}
    else{CATS.push({id:sc.id,nom:sc.nom,emoji:sc.emoji||'📦',precio:Number(sc.precio)||0,prods:[]});if(CARGA[sc.id]==null)CARGA[sc.id]=0;}
   });
   var vivas={};r.categorias.forEach(function(sc){vivas[sc.id]=1});
-  for(var i=CATS.length-1;i>=0;i--)if(!vivas[CATS[i].id]&&!(CARGA[CATS[i].id]>0))CATS.splice(i,1);
+  for(var i=CATS.length-1;i>=0;i--){
+   if(vivas[CATS[i].id])continue;
+   /* el panel la quitó: se va de la app y su stock deja de contar */
+   if(CARGA[CATS[i].id])delete CARGA[CATS[i].id];
+   CATS.splice(i,1);
+  }
  }
  if(r.catalogo&&r.catalogo.length){window.PRECIOP={};window.PRECIOT={};window.PRECIOCAT=(r.params&&r.params.precios_cat)||window.PRECIOCAT||{};
   var _vivos={},_cats={};
@@ -2825,7 +2831,7 @@ if(typeof trEnviar==='function'){var _tr5=trEnviar;window.trEnviar=function(){
  var items={};Object.keys(trQty).forEach(function(k){if(trQty[k]>0)items[k]=trQty[k]});
  _tr5();
  var id='tr'+Date.now();
- sync('/traspasos',{id:id,de:trFuente,de_nombre:trFuenteNom,para:SES&&SES.usuario,items:items},'Solicitud de traspaso a '+trFuenteNom);
+ sync('/traspasos',{id:id,de:trFuente,de_nombre:trFuenteNom,para:SES&&SES.usuario,prods:items,items:items},'Solicitud de traspaso a '+trFuenteNom);
  bpush('tr','↔ Solicitud de traspaso',''+(SES?SES.nombre:'Conductor')+' pidió mercadería a '+trFuenteNom+'. Se moverá solo cuando él acepte desde su app.',[{l:'Visto',fn:'nada'}],'');
  setTimeout(function(){var s3=document.querySelector('#tr3 .scroll');if(s3){var w=document.createElement('div');w.style.cssText='background:#FDF6E4;border:1px solid #EFDCA8;color:#8A6410;border-radius:10px;padding:10px 12px;font-size:12px;margin-top:12px;line-height:1.5';w.textContent='⏳ Pendiente: la mercadería se sumará a tu carga solo cuando '+trFuenteNom+' acepte la solicitud en su app.';s3.appendChild(w);}},120);
 };}
@@ -3626,11 +3632,11 @@ if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async
   if(d&&d.categorias&&d.categorias.length){
    d.categorias.forEach(function(sc){
     if(!CATS.find(function(x){return x.id===sc.id})){
-     CATS.push({id:sc.id,nom:(sc.nombre||sc.nom||sc.id),emoji:sc.emoji||'📦',precio:Number(sc.precio||0),prods:[]});
+     CATS.push({id:sc.id,nom:String(sc.nombre||sc.nom||sc.id).replace(/^[^\w\sáéíóúñÁÉÍÓÚÑ]+\s*/,''),emoji:sc.emoji||'📦',precio:Number(sc.precio||0),prods:[]});
      if(CARGA[sc.id]==null)CARGA[sc.id]=0;
     }else{
      var ex=CATS.find(function(x){return x.id===sc.id});
-     ex.nom=(sc.nombre||sc.nom||ex.nom);if(sc.emoji)ex.emoji=sc.emoji;
+     ex.nom=String(sc.nombre||sc.nom||ex.nom).replace(/^[^\w\sáéíóúñÁÉÍÓÚÑ]+\s*/,'');if(sc.emoji)ex.emoji=sc.emoji;
      if(sc.precio!=null)ex.precio=Number(sc.precio);
     }
    });
@@ -4033,7 +4039,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-12-C';
+window.BUILD='2026-09-14-B';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4150,6 +4156,110 @@ window.aov=function(id){
  if(id==='ov-devol'){DEVQ={};setTimeout(pintaDevol,60);}
  return _aov.apply(this,arguments);
 };
+})();
+</script>
+<script id="v5catvacias">
+(function(){
+/* Una categoría sin productos no puede venderse: se muestra atenuada para que
+   el conductor sepa que existe, y se explica en vez de desaparecer sin más. */
+if(typeof cpRenderTabs==='function'){var _rt=cpRenderTabs;window.cpRenderTabs=function(){
+ var r=_rt.apply(this,arguments);
+ try{
+  var vacias=(CATS||[]).filter(function(c){return !c.prods||!c.prods.length});
+  var host=document.getElementById('cp-tabs');
+  var av=document.getElementById('cp-vacias');
+  if(!av&&host&&host.parentElement){
+   av=document.createElement('div');av.id='cp-vacias';
+   av.style.cssText='margin:4px 10px 0;font-size:11px;color:var(--mu);line-height:1.5';
+   host.parentElement.insertBefore(av,host.nextSibling);
+  }
+  if(av)av.textContent=vacias.length
+   ? ('Sin productos todavía: '+vacias.map(function(c){return c.nom}).join(', ')+'. El dueño debe agregarles productos en Catálogo y precios.')
+   : '';
+ }catch(e){}
+ return r;};}
+})();
+</script>
+<script id="v5catvacia2">
+(function(){
+/* al entrar a una categoría sin productos, explicarlo en lugar de dejarla en blanco */
+if(typeof cpRender==='function'){var _cr=cpRender;window.cpRender=function(){
+ var r=_cr.apply(this,arguments);
+ try{
+  var cat=(CATS||[]).find(function(c){return c.id===cpTab});
+  var cont=document.getElementById('cp-catalogo');
+  if(cont&&cat&&(!cat.prods||!cat.prods.length)){
+   cont.innerHTML='<div style="padding:22px 16px;text-align:center;color:var(--mu);font-size:12.5px;line-height:1.7">'
+    +'<div style="font-size:30px;margin-bottom:6px;opacity:.5">'+(cat.emoji||'📦')+'</div>'
+    +'<b style="color:var(--tx)">'+cat.nom+'</b><br>'
+    +'Esta categoría todavía no tiene productos.<br>El dueño debe agregarlos desde <b>Catálogo y precios</b> en el panel.</div>';
+  }
+ }catch(e){}
+ return r;};}
+})();
+</script>
+<script id="v5stocksrv">
+(function(){
+/* ═══ Stock: la base manda, el teléfono trabaja sin señal ═══
+   Sin conexión, la venta se guarda en la cola y el stock baja en pantalla.
+   Al reconectar se envía la cola —el servidor descuenta al registrar cada
+   venta— y después se relee el stock real. No se envía ninguna diferencia
+   aparte, porque descontaría dos veces lo mismo. */
+window.traerStock=async function(silencioso){
+ try{
+  if(!CFG.API||!navigator.onLine)return false;
+  var r=await api('/conductor/stock');
+  if(!r||!r.ok||r.offline)return false;
+  window.SP=r.prods||{};
+  window.SP_BASE={};
+  (CATS||[]).forEach(function(c){
+   var b=0;(c.prods||[]).forEach(function(p){b+=Number((r.base||{})[p.id]||0)});
+   if(b)SP_BASE[c.id]=b;
+  });
+  try{localStorage.setItem('v5_stockp',JSON.stringify(SP));localStorage.setItem('v5_stockp_base',JSON.stringify(SP_BASE));}catch(e){}
+  if(window.CARGA&&typeof stockCat==='function')
+   (CATS||[]).forEach(function(c){CARGA[c.id]=stockCat(c.id)});
+  if(typeof pintaStockRuta==='function')pintaStockRuta();
+  if(!silencioso)toast('📦 Stock actualizado desde el servidor','g');
+  return true;
+ }catch(e){return false}
+};
+/* al volver la señal: primero la cola, después releer */
+window.reconciliarStock=async function(){
+ try{
+  if(!CFG.API||!navigator.onLine)return;
+  if(typeof flushCola==='function')await flushCola();
+  await traerStock(true);
+ }catch(e){}
+};
+window.addEventListener('online',function(){setTimeout(reconciliarStock,1500)});
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{if(!COLA.length)await traerStock(true)}catch(e){}
+ return r;};}
+['cargaOK','cargaDif'].forEach(function(fn){
+ if(typeof window[fn]==='function'){var _o=window[fn];window[fn]=function(){
+  var r=_o.apply(this,arguments);
+  setTimeout(function(){traerStock(false)},1500);
+  return r;};}
+});
+/* aviso claro mientras haya ventas sin enviar */
+setInterval(function(){
+ try{
+  var el=document.getElementById('stock-pend');
+  if(!el){
+   var host=document.querySelector('#sc-perfil');if(!host)return;
+   el=document.createElement('div');el.id='stock-pend';
+   el.style.cssText='margin:8px 0;padding:9px 11px;border-radius:10px;font-size:11.5px;line-height:1.5;display:none';
+   host.insertBefore(el,host.firstChild);
+  }
+  if(COLA.length){
+   el.style.display='block';el.style.background='#FDF6E4';el.style.border='1px solid #EFDCA8';el.style.color='#8A6410';
+   el.innerHTML='⏳ '+COLA.length+' movimiento(s) sin enviar. El stock que ves es el de tu teléfono; se confirmará con el servidor cuando vuelva la señal.';
+  }else el.style.display='none';
+ }catch(e){}
+},4000);
+setTimeout(function(){traerStock(true)},2500);
 })();
 </script>
 </body>
