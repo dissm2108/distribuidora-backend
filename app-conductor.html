@@ -1711,7 +1711,7 @@ function cpActBtn(id){
     }
   }
 }
-function cpTotal(){let t=0;Object.keys(cpQty).forEach(id=>{const q=cpQty[id]||0;if(q<=0)return;const c=prodCat(id);if(c)t+=q*cpGetPrecio(c.id);});return t;}
+function cpTotal(){let t=0;Object.keys(cpQty).forEach(id=>{const q=cpQty[id]||0;if(q<=0)return;const c=prodCat(id);if(c)t+=q*cpGetPrecio(c.id,id);});return t;}
 function cpItems(){return Object.values(cpQty).reduce((s,v)=>s+v,0);}
 function cpActualizarTotal(){
   const total=cpTotal(),items=cpItems();
@@ -2201,7 +2201,7 @@ if(typeof cpConfirmarCobro==='function'){var _cc=cpConfirmarCobro;window.cpConfi
 /* ── Venta rápida: contado, descuenta camión, NO toca la tienda ── */
 if(typeof vrConfirmar==='function'){var _vr=vrConfirmar;window.vrConfirmar=function(){
  var tot=0;
- try{Object.keys(vrQty||{}).forEach(function(id){var q=vrQty[id]||0;if(!q)return;var c=prodCat(id);var pu=0;try{pu=cpGetPrecio(c.id)||0}catch(e){}
+ try{Object.keys(vrQty||{}).forEach(function(id){var q=vrQty[id]||0;if(!q)return;var c=prodCat(id);var pu=0;try{pu=(vrPrecios&&vrPrecios[id]!==undefined)?vrPrecios[id]:(cpGetPrecio(c.id,id)||0)}catch(e){}
   tot+=q*pu;if(c&&CARGA[c.id]!=null)CARGA[c.id]=Math.max(0,CARGA[c.id]-q);});}catch(e){}
  try{_vr()}catch(e){console.warn(e)}
  if(tot>0){var kx={h:hora(),tipo:'Venta rápida',det:'transeúnte (contado)',val:tot};
@@ -4036,7 +4036,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-12-A';
+window.BUILD='2026-09-12-B';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;

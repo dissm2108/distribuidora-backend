@@ -2810,5 +2810,21 @@ if(typeof pkPinta==='function'){var _pp=pkPinta;window.pkPinta=function(p){
  return r;};}
 })();
 </script>
+<script id="v5catsexcl">
+(function(){
+/* el panel es la fuente: al guardar categorías, las que ya no estén se desactivan */
+if(typeof catsGuardar==='function'){var _cg=catsGuardar;window.catsGuardar=async function(){
+ var cats=CATA.map(function(c){return {id:c.id,nom:c.nom,emoji:c.emoji,precio:Number(c.precio)||0,activa:true}});
+ var r=await apiA('/admin/categorias',{categorias:cats,exclusivo:true});
+ var m=document.getElementById('cats-msg');
+ if(m)m.textContent=(r&&r.ok)?'✓ Categorías guardadas — las quitadas dejan de aparecerle al conductor':'No se pudo guardar';
+ return r;};}
+/* al desactivar una, sincronizar de inmediato */
+if(typeof catBorrar==='function'){var _cb=catBorrar;window.catBorrar=async function(id){
+ var r=await _cb.apply(this,arguments);
+ try{await catsGuardar();if(typeof sincronizarCatalogo==='function')await sincronizarCatalogo();}catch(e){}
+ return r;};}
+})();
+</script>
 </body>
 </html>
