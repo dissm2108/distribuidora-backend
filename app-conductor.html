@@ -3901,6 +3901,9 @@ if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async
 /* un 401 suelto (servidor reiniciando, red mala) ya no borra la sesión:
    hacen falta dos seguidos para pedir la contraseña otra vez */
 if(typeof cerrarSesion==='function'){var _cs=cerrarSesion;window.cerrarSesion=function(forzar){
+ /* si no hay sesión, no hay nada que cerrar: recargar aquí provocaba un
+    bucle que impedía escribir usuario y contraseña */
+ if(!window.SES||!SES.token)return;
  if(forzar===true){localStorage.removeItem('v5_ses_uso');return _cs.apply(this,arguments)}
  var n=Number(sessionStorage.getItem('v5_401')||0)+1;
  sessionStorage.setItem('v5_401',String(n));
@@ -4029,7 +4032,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-15-D';
+window.BUILD='2026-09-15-E';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4046,7 +4049,7 @@ window.comprobarVersion=async function(){
   }
  }catch(e){}
 };
-setTimeout(comprobarVersion,4000);
+setTimeout(function(){if(window.SES&&SES.token)comprobarVersion()},4000);
 /* el sello también visible en Mi perfil */
 setTimeout(function(){
  try{
@@ -4197,6 +4200,7 @@ if(typeof cpRender==='function'){var _cr=cpRender;window.cpRender=function(){
    aparte, porque descontaría dos veces lo mismo. */
 window.traerStock=async function(silencioso){
  try{
+  if(!SES||!SES.token)return false;
   if(!CFG.API||!navigator.onLine)return false;
   var r=await api('/conductor/stock');
   if(!r||!r.ok||r.offline)return false;
@@ -4217,6 +4221,7 @@ window.traerStock=async function(silencioso){
 /* al volver la señal: primero la cola, después releer */
 window.reconciliarStock=async function(){
  try{
+  if(!SES||!SES.token)return;
   if(!CFG.API||!navigator.onLine)return;
   if(typeof flushCola==='function')await flushCola();
   await traerStock(true);
@@ -4249,7 +4254,7 @@ setInterval(function(){
   }else el.style.display='none';
  }catch(e){}
 },4000);
-setTimeout(function(){traerStock(true)},2500);
+setTimeout(function(){if(window.SES&&SES.token)traerStock(true)},2500);
 })();
 </script>
 <script id="v5eficiencia">
@@ -4506,6 +4511,35 @@ if(typeof cpRender==='function'){var _cr=cpRender;window.cpRender=function(){
  var r=_cr.apply(this,arguments);
  try{pintaBtnHabituales()}catch(e){}
  return r;};}
+})();
+</script>
+<script id="v5antibucle">
+(function(){
+/* ═══ Red de seguridad contra recargas en cadena ═══
+   Si algo pide una recarga más de dos veces en 20 segundos, se corta y se
+   avisa, en vez de dejar la pantalla parpadeando sin poder escribir. */
+var K='v5_recargas';
+try{
+ var h=JSON.parse(sessionStorage.getItem(K)||'[]').filter(function(t){return Date.now()-t<20000});
+ h.push(Date.now());
+ sessionStorage.setItem(K,JSON.stringify(h));
+ if(h.length>=3){
+  window.__bloquearRecarga=true;
+  window.addEventListener('load',function(){
+   var d=document.createElement('div');
+   d.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;background:#7A1F1F;color:#fff;padding:11px 13px;font-size:12px;line-height:1.5';
+   d.innerHTML='Se detectaron recargas seguidas y se detuvieron para que puedas entrar. Si no logras iniciar sesión, borra los datos del sitio y vuelve a abrir el enlace.';
+   document.body.appendChild(d);
+  });
+ }
+}catch(e){}
+var _rl=location.reload.bind(location);
+try{
+ location.reload=function(){
+  if(window.__bloquearRecarga){console.warn('recarga bloqueada');return;}
+  return _rl.apply(this,arguments);
+ };
+}catch(e){}
 })();
 </script>
 </body>
