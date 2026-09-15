@@ -635,8 +635,9 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
     <div class="c"><div class="ct">Acciones del turno</div>
       <div class="ir" style="cursor:pointer" onclick="irA('traspaso')"><span class="irl">↔ Solicitar traspaso</span><span class="irv">›</span></div>
       <div class="ir" style="cursor:pointer" onclick="irA('almacen')"><span class="irl">🏪 Depositar al almacén</span><span class="irv">›</span></div>
-      <div class="ir" style="cursor:pointer" onclick="irA('gastos')"><span class="irl">🧾 Registrar gastos</span><span class="irv" id="gastos-badge">›</span></div>
-      <div class="ir" style="cursor:pointer" onclick="irA('liquidacion')"><span class="irl">💰 Liquidación del turno</span><span class="irv">›</span></div>
+      <div class="ir" style="cursor:pointer" onclick="aov('ov-merma')"><span class="irl">📉 Registrar merma</span><span class="irv">›</span></div>
+  <div class="ir" style="cursor:pointer" onclick="irA('gastos')"><span class="irl">🧾 Registrar gastos</span><span class="irv" id="gastos-badge">›</span></div>
+      <div class="ir" style="cursor:pointer" onclick="irA('liquidacion')"><span class="irl">💰 Liquidar viaje y rendir cuentas</span><span class="irv">›</span></div>
       <div class="ir" style="cursor:pointer" onclick="aov('ov-ef')"><span class="irl">📊 Eficiencia de carga</span><span class="irv">›</span></div>
     </div>
     <div class="c" style="border-color:var(--bl)"><div class="ct">Modalidad en Espinar</div>
@@ -648,7 +649,7 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
       <div class="ir"><span class="irl">🛰️ GPS</span><span class="irv"><span class="bx bg">Activo</span></span></div>
       <div class="ir"><span class="irl">📡 Conexión</span><span class="irv" id="con-est"><span class="bx bg">En línea</span></span></div>
     </div>
-    <button class="btn btn-g" style="margin-bottom:8px" onclick="irA('liquidacion')">💰 Cerrar turno y liquidar</button>
+    <button class="btn btn-g" style="margin-bottom:8px" onclick="irA('liquidacion')">💰 Liquidar viaje y rendir cuentas</button>
     <button class="btn btn-r" onclick="toast('Cerrando sesión...','w')">Cerrar sesión</button>
   </div></div>
 </div>
@@ -692,14 +693,7 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
     <div class="c"><div class="ct">Conductores cercanos</div>
       <div id="tr-fuentes"><div style="font-size:12px;color:var(--mu);padding:8px 0">Conéctate al servidor para ver a tus otros conductores.</div></div>
     </div>
-    <div class="c"><div class="ct">🏪 Almacén Espinar — stock actual</div>
-      <div class="co" onclick="selFuente('almacen','Almacén Espinar',{sm:0,bianka:12,panes:0,tortas:0,molde:0,especiales:0,chifones:0,queques:0})">
-        <div class="coav" style="background:var(--or-l);color:var(--or)">🏪</div>
-        <div style="flex:1"><div style="font-size:13px;font-weight:700;color:var(--tx)">Almacén</div><div style="font-size:11px;color:var(--mu);margin-top:2px">Solo verás productos con stock</div>
-          <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap"><span class="bx bb" style="font-size:9px">🧁 Bianka: 12</span><span class="bx bm" style="font-size:9px">🍞 sin stock</span></div>
-        </div><span style="color:var(--bd);font-size:18px">›</span>
-      </div>
-    </div>
+    <div class="c"><div class="ct">🏪 Almacén — stock actual</div><div id="tr-almacen"><div style="font-size:12px;color:var(--mu);padding:8px 0">Consultando el almacén…</div></div></div>
   </div></div>
   <!-- PASO 2 -->
   <div class="step" id="tr2">
@@ -1034,7 +1028,7 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
       </div>
       <input type="file" id="foto-inp" accept="image/*" capture="environment" onchange="procesarFoto(this)" style="display:none">
     </div>
-    <button class="btn btn-g" onclick="cerrarTurno()">✓ Confirmar liquidación y cerrar turno</button>
+    <button class="btn btn-g" onclick="liquidarViaje()">✓ Liquidar viaje y rendir cuentas</button>
   </div></div>
 </div>
 
@@ -2878,7 +2872,9 @@ window.pintarZonasEn=function(m){
 };
 /* pintar zonas al abrir Tiendas y Mi Ruta */
 var _ir6=irA;window.irA=function(sc){_ir6(sc);
- if(sc==='tiendas')setTimeout(function(){if(window._mt)pintarZonasEn(window._mt)},500);
+ var _b=document.getElementById('btn-sync-t');
+  if(_b&&sc!=='tiendas'){_b.remove();}
+  if(sc==='tiendas')setTimeout(function(){if(window._mt)pintarZonasEn(window._mt)},500);
  if(sc==='ruta')setTimeout(function(){if(window._rm)pintarZonasEn(window._rm)},450);
 };
 /* precio por zona: ajuste % sobre el precio base */
@@ -3201,8 +3197,9 @@ var _ir=irA;window.irA=function(sc){
  if(sc==='tiendas')setTimeout(function(){
   if(document.getElementById('btn-sync-t'))return;
   var host=document.getElementById('lista-t');if(!host||!host.parentElement)return;
-  var b=document.createElement('button');b.id='btn-sync-t';b.textContent='🔄 Actualizar mis tiendas';
-  b.style.cssText='position:absolute;left:10px;right:10px;bottom:74px;z-index:30;padding:11px;border-radius:12px;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:12.5px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.18)';
+  var b=document.createElement('button');b.id='btn-sync-t';
+  b.textContent='🔄';b.title='Actualizar mis tiendas';
+     b.style.cssText='position:fixed;left:14px;bottom:78px;z-index:30;width:46px;height:46px;border-radius:50%;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:18px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center';
   b.onclick=function(){if(!(window.CFG&&CFG.API))return toast('Sin servidor configurado','w');toast('Actualizando…');cargarDatos();};
   host.parentElement.appendChild(b);
  },160);
@@ -4032,7 +4029,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-15-F';
+window.BUILD='2026-09-15-G';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4384,15 +4381,7 @@ if(typeof abrirEntrega==='function'){var _ae=abrirEntrega;window.abrirEntrega=fu
  setTimeout(function(){try{pintaHabituales()}catch(e){}},400);
  return r;};}
 /* aviso al cerrar el cobro si quedó algo habitual sin ofrecer */
-if(typeof cpVerDetalle==='function'){var _vd=cpVerDetalle;window.cpVerDetalle=function(){
- try{
-  var f=habituales();
-  if(f.length){
-   var nom=f.slice(0,3).map(function(a){return a.n}).join(', ');
-   if(!confirm('Esta tienda suele llevar también: '+nom+'.\n\nPuedes agregarlos con el botón \"Suele llevar\".\n\n¿Seguimos igual con el pedido actual?'))return;
-  }
- }catch(e){}
- return _vd.apply(this,arguments);};}
+/* sin aviso al pasar al detalle: la sugerencia vive en el botón 'Suele llevar' */
 })();
 </script>
 <script id="v5liq2">
@@ -4400,6 +4389,7 @@ if(typeof cpVerDetalle==='function'){var _vd=cpVerDetalle;window.cpVerDetalle=fu
 /* ═══ Liquidación: solo con el camión vacío, y con informe del viaje ═══ */
 window.liquidarViaje=async function(){
  if(!CFG.API)return toast('Necesitas conexión para liquidar','w');
+ if(!confirm('¿Seguro que quieres liquidar el viaje?\n\nEsto significa que:\n· El camión está vacío\n· Entregas todo el dinero recaudado\n· Se cierra tu viaje y el dueño lo revisará\n\nDespués de liquidar no deberías registrar más ventas de este viaje.'))return;
  var quedan=0;
  try{Object.keys(window.SP||{}).forEach(function(k){quedan+=Number(SP[k]||0)})}catch(e){}
  if(quedan>0){
@@ -4570,6 +4560,90 @@ if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async
  try{pintaTurnoInfo()}catch(e){}
  return r;};}
 setTimeout(function(){if(window.SES&&SES.token)pintaTurnoInfo()},3000);
+})();
+</script>
+<script id="v5trasp2">
+(function(){
+/* ═══ Almacén real en la pantalla de traspaso ═══ */
+window.cargarAlmacenTr=async function(){
+ var box=document.getElementById('tr-almacen');if(!box)return;
+ if(!SES||!SES.token)return;
+ var r=await api('/conductor/almacen');
+ if(!r||!r.ok){box.innerHTML='<div style="font-size:12px;color:var(--mu);padding:8px 0">No se pudo consultar el almacén. Inténtalo con señal.</div>';return;}
+ if(!r.total){box.innerHTML='<div style="font-size:12px;color:var(--mu);padding:8px 0;line-height:1.6">El almacén no tiene stock registrado ahora mismo. Si el dueño acaba de recibir mercadería, pídele que la registre en el panel.</div>';return;}
+ var cats=r.por_categoria||{};
+ var resumen=Object.keys(cats).map(function(k){
+  var c=(CATS||[]).find(function(x){return x.id===k});
+  return (c?(c.emoji+' '+c.nom.split(' ')[0]):k)+' '+cats[k];
+ }).join(' · ');
+ var prods={};(r.prods||[]).forEach(function(p){prods[p.id]=p.cant});
+ box.innerHTML='<div class="co" onclick="selFuente(\'almacen\',\'Almacén\','+JSON.stringify(cats).replace(/"/g,'&quot;')+')" style="cursor:pointer">'
+  +'<div style="display:flex;justify-content:space-between;align-items:center">'
+  +'<div><b style="font-size:13px">🏪 Almacén</b><div style="font-size:11px;color:var(--mu);margin-top:2px">'+resumen+'</div></div>'
+  +'<b style="font-size:15px;color:var(--gr)">'+r.total+'</b></div></div>'
+  +'<div style="font-size:10.5px;color:var(--mu);margin-top:6px">Stock real del almacén, actualizado al momento.</div>';
+ window.ALM_PRODS=prods;
+};
+var _ir2=window.irA;
+window.irA=function(sc){
+ var r=_ir2.apply(this,arguments);
+ if(sc==='traspaso')setTimeout(cargarAlmacenTr,150);
+ return r;
+};
+})();
+</script>
+<script id="v5mapacam">
+(function(){
+/* ═══ El mapa se centra en el camión (Traccar); si no, en el celular ═══ */
+window.centrarMapa=function(avisar){
+ try{
+  if(!window.mapaObj)return;
+  var g=window.GPSCAM;   /* posición del camión que envía el servidor */
+  if(g&&g.lat&&g.lon){
+   mapaObj.setView([g.lat,g.lon],15);
+   if(window._camMk){try{mapaObj.removeLayer(_camMk)}catch(e){}}
+   if(typeof L!=='undefined'){
+    window._camMk=L.marker([g.lat,g.lon],{icon:L.divIcon({html:'🛰️',className:'',iconSize:[26,26]})}).addTo(mapaObj);
+    var min=g.hora?Math.round((Date.now()-new Date(g.hora).getTime())/60000):null;
+    _camMk.bindTooltip('Camión'+(min!=null?(' · hace '+min+' min'):''));
+   }
+   if(avisar)toast('📍 Centrado en el camión','g');
+   return 'camion';
+  }
+  var p=(typeof posFresca==='function')?posFresca():null;
+  if(p&&p.lat){
+   mapaObj.setView([p.lat,p.lon],15);
+   if(avisar)toast('📍 GPS del camión sin señal — centrado en tu celular','w');
+   return 'celular';
+  }
+  if(avisar)alert('No hay ninguna ubicación disponible.\n\nEl GPS del camión no está reportando y tu celular tampoco entregó posición.\n\nRevisa que el permiso de ubicación esté activo, y avisa al dueño si el equipo del camión sigue sin señal.');
+  return null;
+ }catch(e){return null}
+};
+/* al abrir el mapa y al llegar datos nuevos */
+var _ir3=window.irA;
+window.irA=function(sc){
+ var r=_ir3.apply(this,arguments);
+ if(sc==='ruta'||sc==='tiendas')setTimeout(function(){centrarMapa(false)},600);
+ return r;
+};
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{if(window.mapaObj&&!window._yaCentrado){window._yaCentrado=true;centrarMapa(false)}}catch(e){}
+ return r;};}
+/* botón para volver a centrar */
+setTimeout(function(){
+ try{
+  var host=document.getElementById('mapa')||document.querySelector('.mapa');
+  if(!host||document.getElementById('btn-centrar'))return;
+  var b=document.createElement('button');b.id='btn-centrar';b.textContent='🛰️';
+  b.title='Centrar en el camión';
+  b.style.cssText='position:absolute;right:12px;bottom:12px;z-index:400;width:42px;height:42px;border-radius:50%;border:1.5px solid var(--bd);background:var(--wh);font-size:17px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+  b.onclick=function(){centrarMapa(true)};
+  host.style.position=host.style.position||'relative';
+  host.appendChild(b);
+ }catch(e){}
+},2500);
 })();
 </script>
 </body>
