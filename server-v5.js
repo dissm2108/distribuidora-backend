@@ -340,6 +340,21 @@ app.post("/ventas",authC,async(req,res)=>{
   if(!t)return res.status(400).json({ok:false,error:"No identifiqué la tienda: "+tienda});
   const resumen=(items||[]).map(x=>`${x.n} x${x.c}`).join(", ");
   const{data:v}=await db.from("ventas").insert({efectivo:num(req.body.efectivo,0,999999),credito:num(req.body.credito,0,999999),abono:num(req.body.abono,0,999999),tienda_id:t?t.id:null,tienda:tienda,conductor:req.cond.u,items:items||[],total:num(total,0,999999),metodo:(["efectivo","yape","credito","mixto"].includes(metodo)?metodo:"efectivo"),resumen}).select().single();
+  // ¿venta después de haber liquidado? (cola que llegó tarde, o venta real fuera de viaje)
+  let fueraDeTurno=false;
+  try{
+    const{data:yoT}=await db.from("conductores").select("en_turno,turno_ini").eq("usuario",req.cond.u).maybeSingle();
+    fueraDeTurno=!(yoT&&yoT.en_turno);
+    if(fueraDeTurno&&v){
+      const{data:ult}=await db.from("liquidaciones").select("id,resumen").eq("conductor",req.cond.u).order("id",{ascending:false}).limit(1).maybeSingle();
+      await db.from("ventas").update({post_liq:true,liq_id:ult?ult.id:null}).eq("id",v.id);
+      await avisarAdmin("⚠️ Venta registrada FUERA DE VIAJE — "+req.cond.u
+        +"\nTienda: "+(t&&t.nombre||"—")+" · S/"+Number(total||0).toFixed(2)+" ("+(metodo||"")+")"
+        +"\nSe anota como ajuste de la liquidación #"+(ult?ult.id:"—")+", que no se modifica."
+        +"\nRevisa si corresponde cobrar aparte.");
+      await db.from("logs").insert({tipo:"venta_post_liq",detalle:req.cond.u+" vendió S/"+Number(total||0).toFixed(2)+" fuera de turno"});
+    }
+  }catch(e){console.error("post_liq:",e.message);}
   // descontar del stock lo que salió del camión
   try{
     const salida={};
@@ -506,9 +521,91 @@ app.post("/gastos",authC,async(req,res)=>{
   res.json({ok:true,acumulado_no_combustible:sum,tope});
 });
 app.post("/liquidaciones",authC,async(req,res)=>{
-  const{data:l}=await db.from("liquidaciones").insert({conductor:req.cond.u,dia:req.body.dia||{},kx:req.body.kx||[]}).select().single();
-  await evento("liquidacion","💰 Liquidación de viaje — "+req.cond.u,"Efectivo S/"+Number(req.body.dia?.vEf||0).toFixed(2)+" · Yape S/"+Number(req.body.dia?.vYape||0).toFixed(2),l.id);
-  avisarAdmin("💰 Liquidación de "+req.cond.u+": Ef S/"+Number(req.body.dia?.vEf||0).toFixed(2)+" · Yape S/"+Number(req.body.dia?.vYape||0).toFixed(2));
+  const u=req.cond.u;
+  // ── 1) el camión debe estar vacío ──
+  const st=await leerStock(u);
+  const quedan=Object.keys(st.prods).reduce((s,k)=>s+Number(st.prods[k]||0),0);
+  if(quedan>0&&req.body.forzar!==true){
+    const cats=await porCategoria(st.prods);
+    return res.status(409).json({ok:false,motivo:"camion_con_stock",quedan,
+      por_categoria:cats,
+      error:"Todavía quedan "+quedan+" unidades en el camión. Déjalas en el almacén antes de liquidar."});
+  }
+  // ── 2) período: desde que se abrió el turno ──
+  const{data:yo}=await db.from("conductores").select("turno_ini,nombre").eq("usuario",u).maybeSingle();
+  const inicio=(yo&&yo.turno_ini)||new Date(Date.now()-7*86400000).toISOString();
+  const fin=new Date().toISOString();
+  // ── 3) todo lo que pasó en el viaje ──
+  const [vts,mov,trs,gas,perd,crd]=await Promise.all([
+    db.from("ventas").select("*").eq("conductor",u).gte("creado",inicio).lte("creado",fin),
+    db.from("stock_mov").select("motivo,delta,prod_id").eq("conductor",u).gte("creado",inicio),
+    db.from("traspasos").select("*").or("de.eq."+u+",para.eq."+u).gte("creado",inicio),
+    db.from("gastos").select("categoria,monto,detalle").eq("conductor",u).gte("creado",inicio),
+    db.from("perdidas").select("motivo,valor,detalle,tienda").eq("conductor",u).gte("creado",inicio),
+    db.from("creditos_mov").select("tipo,monto,tienda_id,detalle").eq("por",u).gte("creado",inicio)
+  ]).then(r=>r.map(x=>x.data||[]));
+
+  const sum=(a,f)=>a.reduce((s,x)=>s+Number(f(x)||0),0);
+  const efectivo=sum(vts,v=>v.metodo==="yape"?0:v.efectivo);
+  const yape=sum(vts.filter(v=>v.metodo==="yape"),v=>v.total);
+  const fiado=sum(vts,v=>v.credito);
+  const abonos=sum(vts,v=>v.abono);
+  const gastos=sum(gas,g=>g.monto);
+  const perdidas=sum(perd,p=>p.valor);
+  const devueltoAlmacen=mov.filter(m=>m.motivo==="traspaso_envia").reduce((s,m)=>s+Math.abs(Number(m.delta||0)),0);
+  const recibido=mov.filter(m=>m.motivo==="traspaso_recibe").reduce((s,m)=>s+Number(m.delta||0),0);
+  const cargado=mov.filter(m=>m.motivo==="carga").reduce((s,m)=>s+Number(m.delta||0),0);
+  const vendidoUnid=mov.filter(m=>m.motivo==="venta").reduce((s,m)=>s+Math.abs(Number(m.delta||0)),0);
+
+  const resumen={
+    conductor:u,nombre:(yo&&yo.nombre)||u,inicio,fin,
+    dias:Math.max(1,Math.round((new Date(fin)-new Date(inicio))/86400000)),
+    ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
+    efectivo_esperado:Math.round((efectivo+abonos-gastos)*100)/100,
+    gastos:{total:gastos,detalle:gas},
+    perdidas:{total:perdidas,n:perd.length,detalle:perd},
+    mercaderia:{cargado,recibido_en_ruta:recibido,vendido:vendidoUnid,devuelto:devueltoAlmacen,queda:quedan},
+    traspasos:trs.map(t=>({id:t.id,de:t.de,para:t.para,estado:t.estado,items:t.items})),
+    deuda_generada:fiado,
+    deuda_cobrada:abonos,
+    creditos:crd
+  };
+  const decl=num(req.body.efectivo_declarado,0,999999);
+  const dif=Math.round((decl-resumen.efectivo_esperado)*100)/100;
+
+  const{data:l}=await db.from("liquidaciones").insert({
+    conductor:u,dia:req.body.dia||{},kx:req.body.kx||[],
+    inicio,fin,estado:"pendiente",efectivo_declarado:decl,diferencia:dif,
+    resumen,nota:limpia(req.body.nota,300)||null
+  }).select().single();
+
+  // ── 4) marcar las ventas del viaje y cerrar el turno ──
+  if(l){
+    await db.from("ventas").update({liq_id:l.id}).eq("conductor",u).gte("creado",inicio).lte("creado",fin).is("liq_id",null);
+    await db.from("conductores").update({en_turno:false,turno_hora:fin,turno_ini:null}).eq("usuario",u);
+    await db.from("logs").insert({tipo:"turno",detalle:u+" termina (liquidación #"+l.id+")"});
+  }
+  await evento("liquidacion","💰 Liquidación de viaje — "+u,
+    "Efectivo esperado S/"+resumen.efectivo_esperado.toFixed(2)+" · declarado S/"+decl.toFixed(2)+(dif?(" · diferencia S/"+dif.toFixed(2)):" · cuadra"),l&&l.id);
+  avisarAdmin("💰 Liquidación de "+u+"\nEsperado S/"+resumen.efectivo_esperado.toFixed(2)
+    +"\nDeclarado S/"+decl.toFixed(2)+(dif?("\n⚠️ Diferencia S/"+dif.toFixed(2)):"\n✓ Cuadra")
+    +"\nFiado en el viaje S/"+fiado.toFixed(2)+" · Cobrado S/"+abonos.toFixed(2)
+    +"\nConfírmala en el panel.");
+  res.json({ok:true,id:l&&l.id,resumen,diferencia:dif});
+});
+app.get("/admin/cierres/:id/ajustes",authA,async(req,res)=>{
+  const{data}=await db.from("ventas").select("id,tienda,total,metodo,efectivo,credito,creado").eq("liq_id",req.params.id).eq("post_liq",true).order("id");
+  const total=(data||[]).reduce((s,v)=>s+Number(v.total||0),0);
+  res.json({ok:true,ventas:data||[],total});
+});
+app.post("/admin/cierres/:id/confirmar",authA,async(req,res)=>{
+  const{error}=await db.from("liquidaciones").update({
+    estado:req.body.estado==="observada"?"observada":"confirmada",
+    nota:limpia(req.body.nota,300)||null,
+    confirmada_en:new Date().toISOString()
+  }).eq("id",req.params.id);
+  if(error)return res.status(500).json({ok:false,error:error.message});
+  await db.from("logs").insert({tipo:"admin",detalle:"Liquidación #"+req.params.id+" "+(req.body.estado==="observada"?"observada":"confirmada")});
   res.json({ok:true});
 });
 app.post("/avisos/leido",authC,async(req,res)=>{await db.from("avisos_leidos").upsert({aviso_id:req.body.id,usuario:req.cond.u});res.json({ok:true});});
@@ -610,6 +707,9 @@ app.post("/cargas",authA,async(req,res)=>{
     aviso="Falta ejecutar el SQL en Supabase (columna prods en cargas). La carga se guardó SIN el detalle por producto, así que el conductor no verá el stock producto por producto.";
   }
   if(eIns||!nc)return res.status(500).json({ok:false,error:"No se pudo guardar la carga: "+((eIns&&eIns.message)||"sin respuesta de la base")});
+  // el viaje empieza aquí: se abre turno al conductor
+  await db.from("conductores").update({en_turno:true,turno_hora:new Date().toISOString(),turno_ini:new Date().toISOString()}).eq("usuario",cond);
+  await db.from("logs").insert({tipo:"turno",detalle:cond+" inicia (carga asignada)"});
   await avisoA(cond,"📦 Tienes una carga asignada: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confírmala antes de salir.");
   res.json({ok:true,id:nc.id,aviso:aviso||undefined,con_detalle:!!prods&&!aviso});
 });
