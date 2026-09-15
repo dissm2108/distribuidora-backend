@@ -54,7 +54,7 @@ const {timingSafeEqual}=require("crypto");
 const safeEq=(x,y)=>{x=Buffer.from(String(x));y=Buffer.from(String(y));return x.length===y.length&&timingSafeEqual(x,y);};
 const USR_RE=/^[a-z0-9_]{3,20}$/;
 const limpia=(s,max)=>String(s??"").replace(/[<>`]/g,"").replace(/[\u0000-\u001f\u007f]/g," ").trim().slice(0,max||300);
-const num=(v,min,max)=>{v=Number(v);if(!isFinite(v))v=0;if(min!=null&&v<min)v=min;if(max!=null&&v>max)v=max;return v;};
+const num=(v,min,max,def)=>{if((v===undefined||v===null||v==="")&&def!==undefined)return def;v=Number(v);if(!isFinite(v))v=(def!==undefined?def:0);if(min!=null&&v<min)v=min;if(max!=null&&v>max)v=max;return v;};
 const fotoOK=f=>typeof f==="string"&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(f)&&f.length<160000;
 const CATS_OK=["sm","bianka","panes","molde","especiales","chifones","tortas","queques"];
 const catsOK=o=>{if(!o||typeof o!=="object")return null;const r={};CATS_OK.forEach(k=>{if(o[k]!=null)r[k]=num(o[k],0,99999)});return Object.keys(r).length?r:null;};
@@ -253,7 +253,7 @@ app.post("/admin/cerrar-viaje",authA,async(req,res)=>{
     db.from("stock_mov").select("motivo,delta").eq("conductor",u).gte("creado",inicio),
     db.from("traspasos").select("*").or("de.eq."+u+",para.eq."+u).gte("creado",inicio),
     db.from("gastos").select("categoria,monto,detalle").eq("conductor",u).gte("creado",inicio),
-    db.from("perdidas").select("motivo,valor,detalle,tienda").eq("conductor",u).gte("creado",inicio)
+    db.from("perdidas").select("motivo,valor,costo,detalle,tienda,tipo,creado").eq("conductor",u).gte("creado",inicio)
   ]).then(r=>r.map(x=>x.data||[]));
   const sum=(a,f)=>a.reduce((s,x)=>s+Number(f(x)||0),0);
   const efectivo=sum(vts,v=>v.metodo==="yape"?0:v.efectivo);
@@ -277,7 +277,14 @@ app.post("/admin/cerrar-viaje",authA,async(req,res)=>{
     ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
     efectivo_esperado:Math.round((efectivo+abonos-gastos)*100)/100,
     gastos:{total:gastos,detalle:gas},
-    perdidas:{total:perdidas,n:perd.length,detalle:perd},
+    perdidas:(function(){
+      const m=perd.filter(p=>p.tipo!=="ajuste"),a=perd.filter(p=>p.tipo==="ajuste");
+      return{total:m.reduce((s,p)=>s+Number(p.valor||0),0),
+        costo:m.reduce((s,p)=>s+Number(p.costo||0),0),
+        n:m.length,detalle:m,
+        ajustes:{n:a.length,detalle:a},
+        por_motivo:m.reduce((r,p)=>{r[p.motivo]=(r[p.motivo]||0)+Number(p.valor||0);return r},{})};
+    })(),
     mercaderia:{cargado:mSum("carga"),recibido_en_ruta:mSum("traspaso_recibe"),
       vendido:mSum("venta"),devuelto:mSum("traspaso_envia"),queda:quedan,
       destino_restante:quedan?destino:null},
@@ -578,18 +585,39 @@ app.post("/conductor/turno",authC,async(req,res)=>{
 });
 app.post("/rutas/armada",authC,async(req,res)=>{await db.from("rutas").insert({conductor:req.cond.u,tienda:req.body.tienda,en_ruta:!!req.body.enRuta,fecha:hoy()});res.json({ok:true});});
 app.post("/perdidas",authC,async(req,res)=>{
-  try{
-    const p=req.body.prods;
-    if(p&&typeof p==="object"){
-      const menos={};Object.keys(p).forEach(id=>{menos[id]=-num(p[id],0,9999)});
-      await moverStock(req.cond.u,menos,limpia(req.body.motivo,20)||"perdida",null);
-    }
-  }catch(e){}
+  const tipo=(req.body.tipo==="ajuste")?"ajuste":"merma";
   const motivo=limpia(req.body.motivo,40)||"otro";
-  const val=num(req.body.valor,0,99999);
-  await db.from("kardex").insert({conductor:req.cond.u,tipo:"perdida",
-    detalle:motivo+" · S/"+val.toFixed(2)+(req.body.detalle?" · "+limpia(req.body.detalle,120):"")+(req.body.tienda?" · "+limpia(req.body.tienda,60):"")});
-  res.json({ok:true});
+  const prods=limpiaProds(req.body.prods);
+  const unid=Object.keys(prods).reduce((s,k)=>s+prods[k],0);
+  if(!unid)return res.status(400).json({ok:false,error:"Elige al menos un producto"});
+  // valorización: precio del catálogo y costo real, calculados en el servidor
+  const ids=Object.keys(prods);
+  const{data:cat}=await db.from("catalogo").select("id,nombre,cat,precio,precios,costo").in("id",ids);
+  const params=await getParams();
+  const costosCat=params.costos||{};
+  let valor=0,costo=0;const detalle=[];
+  (cat||[]).forEach(p=>{
+    const q=prods[p.id]||0;if(!q)return;
+    const pv=Number(p.precio||0)||Number((p.precios&&Object.values(p.precios)[0])||0);
+    const cu=Number(p.costo||0)||num(costosCat[p.cat],0,10000);
+    valor+=pv*q;costo+=cu*q;
+    detalle.push(p.nombre+" ×"+q);
+  });
+  await moverStock(req.cond.u,Object.fromEntries(ids.map(id=>[id,-prods[id]])),tipo,null);
+  const fila={conductor:req.cond.u,motivo,tipo,
+    valor:Math.round(valor*100)/100,costo:Math.round(costo*100)/100,
+    detalle:detalle.join(", ")+(req.body.nota?(" · "+limpia(req.body.nota,120)):""),
+    tienda:limpia(req.body.tienda,60)||null,prods};
+  const{error}=await db.from("perdidas").insert(fila);
+  if(error)console.error("perdidas:",error.message);
+  await db.from("kardex").insert({conductor:req.cond.u,tipo:tipo==="ajuste"?"ajuste":"perdida",
+    detalle:motivo+" · "+unid+" unid · S/"+fila.valor.toFixed(2)+(fila.detalle?(" · "+fila.detalle):"")});
+  // avisar al dueño solo cuando vale la pena
+  if(tipo==="merma"&&fila.costo>=num(params.aviso_merma,0,100000,30))
+    await avisarAdmin("📉 Merma de "+req.cond.u+"\n"+motivo+" · "+unid+" unidades\nValor S/"+fila.valor.toFixed(2)+" (costo S/"+fila.costo.toFixed(2)+")\n"+fila.detalle);
+  if(tipo==="ajuste")
+    await avisarAdmin("⚖️ Ajuste de inventario de "+req.cond.u+"\n"+unid+" unidades · "+fila.detalle+"\nMotivo: "+motivo);
+  res.json({ok:true,valor:fila.valor,costo:fila.costo,unidades:unid});
 });
 app.get("/admin/cierres",authA,async(req,res)=>{
   const{data}=await db.from("liquidaciones").select("*").order("id",{ascending:false}).limit(60);
@@ -629,7 +657,7 @@ app.post("/liquidaciones",authC,async(req,res)=>{
     db.from("stock_mov").select("motivo,delta,prod_id").eq("conductor",u).gte("creado",inicio),
     db.from("traspasos").select("*").or("de.eq."+u+",para.eq."+u).gte("creado",inicio),
     db.from("gastos").select("categoria,monto,detalle").eq("conductor",u).gte("creado",inicio),
-    db.from("perdidas").select("motivo,valor,detalle,tienda").eq("conductor",u).gte("creado",inicio),
+    db.from("perdidas").select("motivo,valor,costo,detalle,tienda,tipo,creado").eq("conductor",u).gte("creado",inicio),
     db.from("creditos_mov").select("tipo,monto,tienda_id,detalle").eq("por",u).gte("creado",inicio)
   ]).then(r=>r.map(x=>x.data||[]));
 
@@ -651,7 +679,14 @@ app.post("/liquidaciones",authC,async(req,res)=>{
     ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
     efectivo_esperado:Math.round((efectivo+abonos-gastos)*100)/100,
     gastos:{total:gastos,detalle:gas},
-    perdidas:{total:perdidas,n:perd.length,detalle:perd},
+    perdidas:(function(){
+      const m=perd.filter(p=>p.tipo!=="ajuste"),a=perd.filter(p=>p.tipo==="ajuste");
+      return{total:m.reduce((s,p)=>s+Number(p.valor||0),0),
+        costo:m.reduce((s,p)=>s+Number(p.costo||0),0),
+        n:m.length,detalle:m,
+        ajustes:{n:a.length,detalle:a},
+        por_motivo:m.reduce((r,p)=>{r[p.motivo]=(r[p.motivo]||0)+Number(p.valor||0);return r},{})};
+    })(),
     mercaderia:{cargado,recibido_en_ruta:recibido,vendido:vendidoUnid,devuelto:devueltoAlmacen,queda:quedan},
     traspasos:trs.map(t=>({id:t.id,de:t.de,para:t.para,estado:t.estado,items:t.items})),
     deuda_generada:fiado,
