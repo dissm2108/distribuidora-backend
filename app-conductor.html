@@ -4032,7 +4032,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-15-E';
+window.BUILD='2026-09-15-F';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4540,6 +4540,36 @@ try{
   return _rl.apply(this,arguments);
  };
 }catch(e){}
+})();
+</script>
+<script id="v5turnoinfo">
+(function(){
+/* El turno lo abre la carga: mostrar desde cuándo está en viaje */
+window.pintaTurnoInfo=function(){
+ try{
+  var d=(window._ultDatos)||{};
+  var yo=(d.colegas||[]).find(function(x){return SES&&x.usuario===SES.usuario});
+  var ini=d.turno_ini||(yo&&yo.turno_ini)||null;
+  var host=document.getElementById('sc-perfil');if(!host)return;
+  var e=document.getElementById('turno-info');
+  if(!e){e=document.createElement('div');e.id='turno-info';
+   e.style.cssText='margin:8px 0;padding:10px 12px;border-radius:10px;font-size:11.5px;line-height:1.5;border:1px solid var(--linea)';
+   host.insertBefore(e,host.firstChild);}
+  if(ini){
+   var dias=Math.max(0,Math.round((Date.now()-new Date(ini).getTime())/86400000));
+   e.innerHTML='🚚 <b>En viaje</b> desde el '+new Date(ini).toLocaleDateString('es-PE',{day:'2-digit',month:'short'})
+    +(dias?(' · '+dias+' día(s)'):' · hoy')
+    +'<br><span style="opacity:.7">El turno se abrió con tu carga y se cierra cuando liquides, con el camión vacío.</span>';
+  }else{
+   e.innerHTML='⚪ <b>Sin viaje activo</b><br><span style="opacity:.7">Tu turno se abre solo cuando el dueño te asigna una carga.</span>';
+  }
+ }catch(e){}
+};
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{pintaTurnoInfo()}catch(e){}
+ return r;};}
+setTimeout(function(){if(window.SES&&SES.token)pintaTurnoInfo()},3000);
 })();
 </script>
 </body>
