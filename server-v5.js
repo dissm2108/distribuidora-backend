@@ -13,6 +13,9 @@ const OBLIG=["SUPABASE_URL","SUPABASE_SERVICE_KEY","JWT_SECRET","ADMIN_PASS"];
 OBLIG.forEach(v=>{if(!process.env[v]){console.error("FALTA variable: "+v);process.exit(1);}});
 
 const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_KEY);
+// ── GPS ──
+const GPS_PLAT=String(process.env.GPS_PLATFORM||"").toLowerCase().trim();
+const GPS_MIN=Number(process.env.GPS_TIMEOUT_MIN)||15;   // minutos sin señal para dar por inactivo un camión
 const SECRET=process.env.JWT_SECRET;
 const ADMIN_TEL=process.env.ADMIN_TELEFONO||"";
 // Opcionales: el sistema funciona sin ellos
@@ -216,6 +219,73 @@ app.get("/admin/stock",authA,async(req,res)=>{
     usuario:u.usuario,nombre:u.nombre,en_turno:!!u.en_turno,
     ...(porCond[u.usuario]||{total:0,cats:{},prods:[],actualizado:null})
   }))});
+});
+app.post("/admin/cerrar-viaje",authA,async(req,res)=>{
+  const u=limpia(req.body.conductor,20);
+  const nota=limpia(req.body.nota,300);
+  if(!u)return res.status(400).json({ok:false,error:"Falta el conductor"});
+  if(!nota||nota.length<5)return res.status(400).json({ok:false,error:"Escribe por qué cierras el viaje tú"});
+  const{data:yo}=await db.from("conductores").select("turno_ini,nombre,en_turno").eq("usuario",u).maybeSingle();
+  if(!yo||!yo.en_turno)return res.status(409).json({ok:false,error:"Ese conductor no tiene un viaje abierto"});
+
+  const st=await leerStock(u);
+  const quedan=Object.keys(st.prods).reduce((s,k)=>s+Number(st.prods[k]||0),0);
+  const destino=String(req.body.stock_restante||"");   // "almacen" | "pendiente"
+  if(quedan>0&&destino!=="almacen"&&destino!=="pendiente")
+    return res.status(409).json({ok:false,motivo:"decidir_stock",quedan,
+      por_categoria:await porCategoria(st.prods),
+      error:"Quedan "+quedan+" unidades en el camión: decide si vuelven al almacén o quedan pendientes a cargo del conductor"});
+
+  const inicio=yo.turno_ini||new Date(Date.now()-7*86400000).toISOString();
+  const fin=new Date().toISOString();
+  const [vts,mov,trs,gas,perd]=await Promise.all([
+    db.from("ventas").select("*").eq("conductor",u).gte("creado",inicio).lte("creado",fin),
+    db.from("stock_mov").select("motivo,delta").eq("conductor",u).gte("creado",inicio),
+    db.from("traspasos").select("*").or("de.eq."+u+",para.eq."+u).gte("creado",inicio),
+    db.from("gastos").select("categoria,monto,detalle").eq("conductor",u).gte("creado",inicio),
+    db.from("perdidas").select("motivo,valor,detalle,tienda").eq("conductor",u).gte("creado",inicio)
+  ]).then(r=>r.map(x=>x.data||[]));
+  const sum=(a,f)=>a.reduce((s,x)=>s+Number(f(x)||0),0);
+  const efectivo=sum(vts,v=>v.metodo==="yape"?0:v.efectivo);
+  const yape=sum(vts.filter(v=>v.metodo==="yape"),v=>v.total);
+  const fiado=sum(vts,v=>v.credito), abonos=sum(vts,v=>v.abono);
+  const gastos=sum(gas,g=>g.monto), perdidas=sum(perd,p=>p.valor);
+  const mSum=(m)=>mov.filter(x=>x.motivo===m).reduce((s,x)=>s+Math.abs(Number(x.delta||0)),0);
+
+  // el stock que quedaba: al almacén o pendiente a cargo del conductor
+  if(quedan>0){
+    const menos={};Object.keys(st.prods).forEach(id=>{menos[id]=-Number(st.prods[id]||0)});
+    await moverStock(u,menos,destino==="almacen"?"cierre_devuelve":"cierre_pendiente",null);
+    if(destino==="almacen"){
+      const mas={};Object.keys(st.prods).forEach(id=>{mas[id]=Number(st.prods[id]||0)});
+      await moverStock("almacen",mas,"cierre_recibe",null);
+    }
+  }
+  const resumen={
+    conductor:u,nombre:yo.nombre||u,inicio,fin,
+    dias:Math.max(1,Math.round((new Date(fin)-new Date(inicio))/86400000)),
+    ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
+    efectivo_esperado:Math.round((efectivo+abonos-gastos)*100)/100,
+    gastos:{total:gastos,detalle:gas},
+    perdidas:{total:perdidas,n:perd.length,detalle:perd},
+    mercaderia:{cargado:mSum("carga"),recibido_en_ruta:mSum("traspaso_recibe"),
+      vendido:mSum("venta"),devuelto:mSum("traspaso_envia"),queda:quedan,
+      destino_restante:quedan?destino:null},
+    traspasos:trs.map(t=>({id:t.id,de:t.de,para:t.para,estado:t.estado,items:t.items})),
+    cerrado_por_dueno:true
+  };
+  const decl=num(req.body.efectivo_declarado,0,999999);
+  const dif=Math.round((decl-resumen.efectivo_esperado)*100)/100;
+  const{data:l}=await db.from("liquidaciones").insert({
+    conductor:u,dia:{},kx:[],inicio,fin,estado:"cerrada_por_dueno",
+    efectivo_declarado:decl,diferencia:dif,resumen,
+    nota:"Cerrado por el dueño: "+nota,confirmada_en:fin
+  }).select().single();
+  if(l)await db.from("ventas").update({liq_id:l.id}).eq("conductor",u).gte("creado",inicio).lte("creado",fin).is("liq_id",null);
+  await db.from("conductores").update({en_turno:false,turno_hora:fin,turno_ini:null}).eq("usuario",u);
+  await db.from("logs").insert({tipo:"turno",detalle:u+" termina (cerrado por el dueño: "+nota+")"});
+  await avisoA(u,"El dueño cerró tu viaje. Motivo: "+nota+(quedan?("\nMercadería restante: "+quedan+" unidades "+(destino==="almacen"?"devueltas al almacén":"pendientes a tu cargo")):""));
+  res.json({ok:true,id:l&&l.id,resumen,diferencia:dif});
 });
 app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString()}));
 
