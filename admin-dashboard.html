@@ -3129,7 +3129,9 @@ window.verCierre=async function(id){
   +'<span>Fiado en el viaje</span><b style="text-align:right;color:#B23B2E">'+f(v.fiado)+'</b>'
   +'<span>Cobrado de deudas</span><b style="text-align:right;color:#2F6B4F">'+f(v.abonos)+'</b>'
   +'<span>Gastos</span><b style="text-align:right">'+f((s.gastos||{}).total)+'</b>'
-  +'<span>Pérdidas y devoluciones</span><b style="text-align:right">'+f((s.perdidas||{}).total)+'</b>'
+  +'<span>Mermas (valor de venta)</span><b style="text-align:right">'+f((s.perdidas||{}).total)+'</b>'
+  +'<span>Mermas (costo real)</span><b style="text-align:right;color:#B23B2E">'+f((s.perdidas||{}).costo)+'</b>'
+  +(((s.perdidas||{}).ajustes||{}).n?('<span>Ajustes de conteo</span><b style="text-align:right">'+s.perdidas.ajustes.n+' registro(s)</b>'):'')
   +'</div><hr style="border:0;border-top:1px solid var(--linea);margin:9px 0">'
   +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px">'
   +'<span>Efectivo esperado</span><b style="text-align:right">'+f(s.efectivo_esperado)+'</b>'
@@ -3140,6 +3142,9 @@ window.verCierre=async function(id){
   +'<div style="font-size:12px">Mercadería: cargó <b>'+(m.cargado||0)+'</b> · recibió en ruta <b>'+(m.recibido_en_ruta||0)
   +'</b> · vendió <b>'+(m.vendido||0)+'</b> · dejó en almacén <b>'+(m.devuelto||0)+'</b>'
   +(m.queda?(' · <span style="color:#B23B2E">quedaron '+m.queda+'</span>'):'')+'</div>'
+  +((s.perdidas&&s.perdidas.por_motivo&&Object.keys(s.perdidas.por_motivo).length)?
+   ('<div style="font-size:11.5px;margin-top:7px;opacity:.85">Mermas por motivo: '
+    +Object.keys(s.perdidas.por_motivo).map(function(k){return k+' '+f(s.perdidas.por_motivo[k])}).join(' · ')+'</div>'):'')
   +((s.traspasos&&s.traspasos.length)?('<div style="font-size:11.5px;margin-top:7px;opacity:.8">Traspasos: '
     +s.traspasos.map(function(t){return t.de+'→'+t.para+' ('+t.estado+')'}).join(' · ')+'</div>'):'')
   +(c.nota?('<div style="font-size:11.5px;margin-top:7px;font-style:italic">Nota: '+c.nota+'</div>'):'')

@@ -383,6 +383,42 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
 .cp-cr-input.show{display:block}
 
 </style>
+<style id="v5temas">
+/* ═══ Los recuadros añadidos se adaptan al modo oscuro y al modo sol ═══
+   Las reglas llevan !important porque el color va en el atributo style. */
+#app-root.dk #turno-info,#app-root.sol #turno-info,
+#app-root.dk #cp-origen,#app-root.sol #cp-origen,
+#app-root.dk #cp-vacias,#app-root.sol #cp-vacias,
+#app-root.dk #tr-almacen,#app-root.sol #tr-almacen{
+  background:var(--wh)!important;color:var(--tx)!important;border-color:var(--bd)!important;
+}
+#app-root.dk #stock-pend,#app-root.sol #stock-pend{
+  background:#4a3a12!important;border-color:#8a6a20!important;color:#FDE68A!important;
+}
+#app-root.sol #stock-pend{background:#111!important;border-color:#666!important;color:#FFD64D!important}
+/* avisos ámbar y rojos: fondo oscuro con texto claro */
+#app-root.dk [style*="#FDF6E4"],#app-root.dk [style*="#FBF3E4"]{
+  background:#3a2f12!important;border-color:#7a6320!important;color:#FDE68A!important;
+}
+#app-root.sol [style*="#FDF6E4"],#app-root.sol [style*="#FBF3E4"]{
+  background:#0a0a0a!important;border-color:#555!important;color:#FFD64D!important;
+}
+#app-root.dk [style*="#FDEBE9"]{background:#3d1a17!important;border-color:#8a3a30!important;color:#FCA5A5!important}
+#app-root.sol [style*="#FDEBE9"]{background:#0a0a0a!important;border-color:#666!important;color:#FF8A80!important}
+#app-root.dk [style*="#EBF1FE"]{background:#152449!important;border-color:#2a4a9a!important;color:#BFD4FF!important}
+#app-root.sol [style*="#EBF1FE"]{background:#0a0a0a!important;border-color:#556!important;color:#9DC1FF!important}
+#app-root.dk [style*="#EEF6EE"]{background:#14301f!important;border-color:#2f6b4f!important;color:#A7F3D0!important}
+#app-root.sol [style*="#EEF6EE"]{background:#0a0a0a!important;border-color:#4a6!important;color:#8FE3B0!important}
+/* botones flotantes que añadí */
+#app-root.dk #btn-sync-t,#app-root.dk #btn-centrar,
+#app-root.sol #btn-sync-t,#app-root.sol #btn-centrar{
+  background:var(--wh)!important;color:var(--tx)!important;border-color:var(--bd)!important;
+}
+/* que nada quede tapado por la barra inferior */
+#app-root .scroll{padding-bottom:86px!important}
+#btn-sync-t{bottom:84px!important}
+.ov .sh-b{max-height:70vh;overflow-y:auto}
+</style>
 </head>
 <body>
 <div class="toast" id="toast"></div>
@@ -2111,15 +2147,10 @@ window.onload=()=>{
  <div style="padding:0 16px 16px" id="devol-body"></div>
 </div></div>
 <div class="ov" id="ov-merma"><div class="sh">
-  <div class="sh-top"><div class="sh-tit">📉 Registrar merma</div><button class="sh-x" onclick="cov('ov-merma')">✕</button></div>
-  <div class="sh-sub">Marca el motivo. Resta de tu stock y va al reporte de pérdidas del dueño.</div>
-  <div style="padding:0 16px 16px">
-    <button class="bt2" style="width:100%;margin-bottom:8px" onclick="mermar('Dañado')">📦 Dañado — Panes ×3</button>
-    <button class="bt2" style="width:100%;margin-bottom:8px" onclick="mermar('Perdido')">❓ Perdido — Panes ×3</button>
-    <button class="bt2" style="width:100%" onclick="mermar('Consumido')">🍽️ Consumido — Panes ×3</button>
-  </div>
+ <div class="sh-top"><div class="sh-tit">📉 Registrar merma</div><button class="sh-x" onclick="cov('ov-merma')">✕</button></div>
+ <div class="sh-sub">Mercadería que ya no se puede vender. Sale de tu stock y el dueño la ve valorizada.</div>
+ <div class="sh-b"><div id="merma-body"></div></div>
 </div></div>
-
 <div class="ov" id="ov-robo"><div class="sh">
   <div class="sh-top"><div class="sh-tit">🚨 Reportar robo / incidente</div><button class="sh-x" onclick="cov('ov-robo')">✕</button></div>
   <div class="sh-sub">Va como TEXTO al dueño. Evidencia opcional. Nada se descuenta automático: él habla contigo y decide.</div>
@@ -2210,12 +2241,7 @@ window.devolHongo=function(cat,nom){var pu=0;try{pu=cpGetPrecio(cat)||0}catch(e)
  KX.unshift({h:hora(),tipo:'Reemplazo (devolución)',det:tn,val:pu*2});
  toast('Reemplazo entregado. Lo hongueado quedó como pérdida: '+money(pu*2),'e');cov('ov-devol');
  if(typeof renderDash==='function')renderDash();};
-window.mermar=function(motivo){var pu=0;try{pu=cpGetPrecio('panes')||5.5}catch(e){pu=5.5}
- if(CARGA.panes!=null)CARGA.panes=Math.max(0,CARGA.panes-3);
- PERDIDAS.push({motivo:motivo,tienda:null,val:pu*3,det:'Panes ×3'});
- KX.unshift({h:hora(),tipo:'Merma · '+motivo,det:'—',val:pu*3});
- toast('Merma registrada: Panes ×3 — '+motivo,'e');cov('ov-merma');
- if(typeof renderDash==='function')renderDash();};
+/* merma real: ver bloque v5merma */
 window.enviarRobo=function(){var tx=($('robo-txt')||{}).value||'';var ev=($('robo-ev')||{}).checked;
  bpush('robo','🚨 Robo reportado — '+((window.SES&&SES.nombre)||'conductor'),'"'+tx+'" '+(ev?'· 📎 con evidencia':'· sin evidencia')+'. El faltante sigue existiendo hasta que TÚ decidas.',[{l:'✓ Aceptar (descontar del faltante)',fn:'roboAceptar',cl:'v'},{l:'✗ No aceptar (queda a su nombre)',fn:'roboRechazar',cl:'r'}],'ro');
  toast('Enviado al dueño como texto');cov('ov-robo');};
@@ -4029,7 +4055,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-15-G';
+window.BUILD='2026-09-15-I';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4417,7 +4443,9 @@ window.liquidarViaje=async function(){
   +'Fiado S/'+Number(v.fiado||0).toFixed(2)+'\n'
   +'Cobrado de deudas S/'+Number(v.abonos||0).toFixed(2)+'\n'
   +'Gastos S/'+Number((s.gastos||{}).total||0).toFixed(2)+'\n'
-  +'Pérdidas S/'+Number((s.perdidas||{}).total||0).toFixed(2)+'\n'
+  +'Mermas S/'+Number((s.perdidas||{}).total||0).toFixed(2)
+   +((s.perdidas&&s.perdidas.n)?(' ('+s.perdidas.n+' registros)'):'')+'\n'
+  +(((s.perdidas||{}).ajustes||{}).n?('Ajustes de conteo: '+s.perdidas.ajustes.n+'\n'):'')
   +'──────────────\n'
   +'Efectivo esperado S/'+Number(s.efectivo_esperado||0).toFixed(2)+'\n'
   +'Entregado S/'+monto.toFixed(2)+'\n'
@@ -4543,7 +4571,7 @@ window.pintaTurnoInfo=function(){
   var host=document.getElementById('sc-perfil');if(!host)return;
   var e=document.getElementById('turno-info');
   if(!e){e=document.createElement('div');e.id='turno-info';
-   e.style.cssText='margin:8px 0;padding:10px 12px;border-radius:10px;font-size:11.5px;line-height:1.5;border:1px solid var(--linea)';
+   e.style.cssText='margin:8px 0;padding:10px 12px;border-radius:10px;font-size:11.5px;line-height:1.5;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx)';
    host.insertBefore(e,host.firstChild);}
   if(ini){
    var dias=Math.max(0,Math.round((Date.now()-new Date(ini).getTime())/86400000));
@@ -4644,6 +4672,92 @@ setTimeout(function(){
   host.appendChild(b);
  }catch(e){}
 },2500);
+})();
+</script>
+<script id="v5merma">
+(function(){
+/* ═══ Merma real: sobre el stock que el conductor tiene de verdad ═══ */
+var MQ={},MOT='',TIPO='merma';
+var MOTIVOS=[
+ {k:'hongueado',t:'🍞 Hongueado o vencido',d:'Producto que ya no se puede vender'},
+ {k:'dañado',t:'📦 Dañado en el camión',d:'Se aplastó, se mojó, se cayó'},
+ {k:'regalo',t:'🎁 Muestra o cortesía',d:'Se entregó sin cobrar'},
+ {k:'consumo',t:'🍽️ Consumo propio',d:'Lo consumió el personal'},
+ {k:'robo',t:'🚨 Robo o extravío',d:'Desapareció del camión'}
+];
+window.abrirMerma=function(){MQ={};MOT='';TIPO='merma';pintaMerma();if(typeof aov==='function')aov('ov-merma');};
+window.mermaSetMotivo=function(k){MOT=k;TIPO=(k==='conteo')?'ajuste':'merma';pintaMerma()};
+window.mermaSet=function(id,d){
+ var max=Number((window.SP||{})[id]||0);
+ var q=Math.max(0,Math.min(max,(Number(MQ[id])||0)+d));
+ if(q)MQ[id]=q;else delete MQ[id];
+ pintaMerma();
+};
+function conStock(){
+ var r=[];
+ (CATS||[]).forEach(function(c){(c.prods||[]).forEach(function(p){
+  var q=Number((window.SP||{})[p.id]||0);
+  if(q>0)r.push({id:p.id,n:p.n,cat:c,q:q});
+ })});
+ return r;
+}
+window.pintaMerma=function(){
+ var box=document.getElementById('merma-body');if(!box)return;
+ var lista=conStock();
+ if(!lista.length){
+  box.innerHTML='<div style="font-size:12.5px;color:var(--mu);line-height:1.7;padding:6px 2px">No tienes stock registrado en el camión, así que no hay nada que dar de baja.</div>';
+  return;
+ }
+ var h='<div style="font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mu);margin-bottom:6px">1. ¿Qué pasó?</div>';
+ h+=MOTIVOS.concat([{k:'conteo',t:'⚖️ Ajuste de conteo',d:'Faltaba o sobraba al contar — no es pérdida'}]).map(function(m){
+  var on=MOT===m.k;
+  return '<div onclick="mermaSetMotivo(\''+m.k+'\')" style="border:1.5px solid '+(on?'#B23B2E':'var(--linea)')+';background:'+(on?'#FDEBE9':'transparent')+';border-radius:11px;padding:9px 11px;margin-bottom:6px;cursor:pointer">'
+   +'<div style="font-size:12.5px;font-weight:700">'+m.t+'</div>'
+   +'<div style="font-size:10.5px;color:var(--mu)">'+m.d+'</div></div>';
+ }).join('');
+ if(!MOT){box.innerHTML=h;return;}
+ h+='<div style="font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mu);margin:12px 0 6px">2. ¿Cuánto?</div>';
+ var tot=0,uni=0;
+ h+=lista.map(function(p){
+  var q=Number(MQ[p.id])||0;
+  var pu=(typeof cpGetPrecio==='function')?cpGetPrecio(p.cat.id,p.id):0;
+  if(q){tot+=pu*q;uni+=q;}
+  return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--linea)">'
+   +'<div style="flex:1;font-size:12.5px">'+p.n+' <span style="opacity:.55;font-size:10.5px">tienes '+p.q+'</span></div>'
+   +'<button onclick="mermaSet(\''+p.id+'\',-1)" style="width:28px;height:28px;border-radius:8px;border:1.5px solid var(--linea);background:none;color:inherit;font-weight:800">-</button>'
+   +'<b style="min-width:22px;text-align:center;color:'+(q?'#B23B2E':'inherit')+'">'+q+'</b>'
+   +'<button onclick="mermaSet(\''+p.id+'\',1)" style="width:28px;height:28px;border-radius:8px;border:1.5px solid #B23B2E;background:#FDEBE9;color:#B23B2E;font-weight:800">+</button></div>';
+ }).join('');
+ h+='<div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;margin-top:4px;border-top:1.5px solid var(--linea)">'
+  +'<b style="font-size:12.5px">'+uni+' unidades</b>'
+  +'<b style="font-size:15px;color:#B23B2E">'+(typeof money==='function'?money(tot):('S/'+tot.toFixed(2)))+'</b></div>'
+  +'<div style="font-size:10.5px;color:var(--mu);margin:5px 0 10px">'
+  +(TIPO==='ajuste'?'Un ajuste corrige el inventario; no se cuenta como pérdida de dinero.':'Sale de tu stock y va al reporte de pérdidas del dueño, valorizado.')+'</div>'
+  +'<button class="bt2 r" style="width:100%" onclick="mermaConfirmar()">Registrar</button>';
+ box.innerHTML=h;
+};
+window.mermaConfirmar=async function(){
+ var uni=Object.keys(MQ).reduce(function(s,k){return s+MQ[k]},0);
+ if(!uni)return toast('Marca las cantidades','w');
+ if(!MOT)return toast('Elige el motivo','w');
+ var nombre=(MOTIVOS.find(function(m){return m.k===MOT})||{t:'Ajuste de conteo'}).t;
+ var nota='';
+ if(MOT==='robo'||MOT==='conteo'){
+  nota=prompt('Explica brevemente qué pasó (lo verá el dueño):','')||'';
+  if(!nota)return;
+ }
+ if(!confirm('¿Registrar '+uni+' unidades como "'+nombre+'"?\n\nSaldrán de tu stock y el dueño lo verá.'))return;
+ await sync('/perdidas',{prods:MQ,motivo:MOT,tipo:TIPO,nota:nota},'Merma: '+nombre);
+ try{Object.keys(MQ).forEach(function(id){if(typeof mueveStock==='function')mueveStock(id,-MQ[id])})}catch(e){}
+ toast((TIPO==='ajuste'?'Ajuste registrado':'Merma registrada')+': '+uni+' unidades','e');
+ MQ={};MOT='';
+ cov('ov-merma');
+ if(typeof renderDash==='function')renderDash();
+ if(typeof pintaStockRuta==='function')pintaStockRuta();
+};
+setTimeout(function(){
+ try{document.querySelectorAll('[onclick*="ov-merma"]').forEach(function(el){el.setAttribute('onclick','abrirMerma()')})}catch(e){}
+},1500);
 })();
 </script>
 </body>
