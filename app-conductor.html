@@ -500,23 +500,12 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
 
 <!-- OV EFICIENCIA -->
 <div class="ov" id="ov-ef"><div class="sh">
-  <div class="sh-top"><div class="sh-tit">📊 Eficiencia de carga</div><button class="sh-x" onclick="cov('ov-ef')">✕</button></div>
-  <div class="sh-sub">Resumen del turno de hoy</div>
-  <div class="sh-b">
-    <div class="tsg" style="margin-bottom:12px">
-      <div class="tsi"><div class="tsv" style="color:var(--gr)"><span id="k-ent">0</span></div><div class="tsl">Entregas</div></div>
-      <div class="tsi"><div class="tsv" style="color:var(--bl)">S/<span id="k-vend">0</span></div><div class="tsl">Vendido</div></div>
-      <div class="tsi"><div class="tsv" style="color:var(--pu)">+30</div><div class="tsl">Traspaso</div></div>
-      <div class="tsi"><div class="tsv" style="color:var(--or)">12</div><div class="tsl">Almacén</div></div>
-    </div>
-    <div id="ef-rows"></div>
-    <div style="background:var(--bl-l);border-radius:9px;padding:10px;font-size:12px;margin-top:4px">
-      <div style="font-weight:700;color:var(--bl);margin-bottom:4px">📌 Recomendación para mañana</div>
-      <div style="color:var(--mu)">Llevar <strong>10% menos de Panes</strong> y <strong>15% más de Tortas</strong> según la demanda de hoy.</div>
-    </div>
-  </div>
-  <div class="sh-f"><button class="btn btn-g" onclick="cov('ov-ef');irA('liquidacion')">Ir a liquidación →</button></div>
+ <div class="sh-top"><div class="sh-tit">📊 Eficiencia de carga</div><button class="sh-x" onclick="cov('ov-ef')">✕</button></div>
+ <div class="sh-sub">Qué se llevó, qué se vendió y qué conviene cargar la próxima vez</div>
+ <div class="sh-b"><div id="ef-cuerpo"></div></div>
+ <div class="sh-f"><button class="btn btn-g" onclick="cov('ov-ef');irA('liquidacion')">Ir a liquidación</button></div>
 </div></div>
+
 
 <!-- APP -->
 <div class="app" id="app-root">
@@ -4039,7 +4028,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-14-B';
+window.BUILD='2026-09-15-B';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4260,6 +4249,139 @@ setInterval(function(){
  }catch(e){}
 },4000);
 setTimeout(function(){traerStock(true)},2500);
+})();
+</script>
+<script id="v5eficiencia">
+(function(){
+/* ═══ Eficiencia de carga, con los números del turno ═══
+   Compara lo cargado (base del stock) con lo que queda ahora, y propone
+   la carga siguiente según lo que realmente rotó. */
+window.pintaEficiencia=function(){
+ var box=document.getElementById('ef-cuerpo');if(!box)return;
+ var cats=(CATS||[]).filter(function(c){return (window.SP_BASE||{})[c.id]>0||(typeof stockCat==='function'&&stockCat(c.id)>0)});
+ if(!cats.length){
+  box.innerHTML='<div style="font-size:12.5px;color:var(--mu);line-height:1.7;padding:6px 2px">Todavía no hay carga confirmada en este turno. Cuando confirmes la carga del viaje, aquí verás cuánto se vendió de cada categoría y qué conviene llevar mañana.</div>';
+  return;
+ }
+ var filas=[],totCar=0,totQueda=0;
+ cats.forEach(function(c){
+  var car=Number((window.SP_BASE||{})[c.id]||0);
+  var q=(typeof stockCat==='function')?stockCat(c.id):0;
+  var sal=Math.max(0,car-q);
+  var pc=car?Math.round(sal*100/car):0;
+  totCar+=car;totQueda+=q;
+  filas.push({c:c,car:car,q:q,sal:sal,pc:pc});
+ });
+ var totSal=Math.max(0,totCar-totQueda);
+ var pcT=totCar?Math.round(totSal*100/totCar):0;
+ var cel=function(l,v,col){return '<div class="tsi"><div class="tsv" style="color:'+col+'">'+v+'</div><div class="tsl">'+l+'</div></div>'};
+ var h='<div class="tsg" style="margin-bottom:12px">'
+  +cel('Cargado',totCar,'var(--mu)')+cel('Salió',totSal,'var(--gr)')
+  +cel('Queda',totQueda,'var(--bl)')+cel('Rotación',pcT+'%','var(--pu)')+'</div>';
+ h+=filas.sort(function(a,b){return b.pc-a.pc}).map(function(f){
+  var col=f.pc>=85?'#2F6B4F':(f.pc>=45?'#B97A1F':'#B23B2E');
+  return '<div style="padding:8px 0;border-bottom:1px solid var(--linea)">'
+   +'<div style="display:flex;justify-content:space-between;font-size:12.5px"><span>'+(f.c.emoji||'')+' '+f.c.nom+'</span>'
+   +'<span><b>'+f.sal+'</b> de '+f.car+' · <b style="color:'+col+'">'+f.pc+'%</b></span></div>'
+   +'<div style="height:5px;background:var(--linea);border-radius:3px;margin-top:5px;overflow:hidden">'
+   +'<div style="height:100%;width:'+Math.min(100,f.pc)+'%;background:'+col+'"></div></div></div>';
+ }).join('');
+ /* recomendación con los números de hoy, no inventada */
+ var sug=[];
+ filas.forEach(function(f){
+  if(!f.car)return;
+  if(f.q===0)sug.push({t:'subir',txt:(f.c.nom+': se agotó. Lleva más, no sabemos cuánto más se habría vendido.')});
+  else if(f.pc<=40)sug.push({t:'bajar',txt:(f.c.nom+': sobró '+f.q+' de '+f.car+'. Con '+Math.max(1,Math.round(f.sal*1.2))+' habría alcanzado.')});
+ });
+ h+='<div style="background:var(--bl-l);border-radius:9px;padding:11px;font-size:12px;margin-top:10px;line-height:1.6">'
+  +'<div style="font-weight:700;color:var(--bl);margin-bottom:5px">📌 Para la próxima carga</div>'
+  +(sug.length?sug.map(function(s){return '<div style="margin-bottom:3px">'+(s.t==='subir'?'⬆️ ':'⬇️ ')+s.txt+'</div>'}).join('')
+    :'<div style="color:var(--mu)">La carga estuvo bien ajustada: nada se agotó y no sobró de más en ninguna categoría.</div>')
+  +'<div style="font-size:10.5px;color:var(--mu);margin-top:7px">Calculado con lo que salió del camión hoy, incluidos traspasos y devoluciones.</div></div>';
+ box.innerHTML=h;
+};
+var _aov=window.aov;
+window.aov=function(id){
+ if(id==='ov-ef')setTimeout(pintaEficiencia,60);
+ return _aov.apply(this,arguments);
+};
+})();
+</script>
+<script id="v5habituales">
+(function(){
+/* ═══ Lo que suele llevar y hoy no pidió ═══
+   Se arma con las compras reales de ESA tienda. Si es su primera visita no
+   muestra nada: es preferible el silencio a sugerir productos al azar. */
+function tiendaAct(){return (typeof tiendaActualIdx!=='undefined')?T[tiendaActualIdx]:null}
+
+window.habituales=function(){
+ var t=tiendaAct();if(!t)return [];
+ var compras=Array.isArray(t.compras)&&t.compras.length?t.compras
+   :(Array.isArray(t.ultima_compra)&&t.ultima_compra.length?[{items:t.ultima_compra}]:[]);
+ if(!compras.length)return [];
+ var acum={};
+ compras.forEach(function(v){
+  (v.items||[]).forEach(function(it){
+   if(!it||!it.id)return;
+   var a=acum[it.id]||(acum[it.id]={id:it.id,n:it.n,veces:0,total:0});
+   a.veces++;a.total+=Number(it.c||0);
+  });
+ });
+ return Object.keys(acum).map(function(id){
+  var a=acum[id];
+  /* cantidad habitual: el promedio de lo que llevó, redondeado hacia arriba */
+  a.sug=Math.max(1,Math.round(a.total/a.veces));
+  return a;
+ }).filter(function(a){
+  if(Number(cpQty[a.id])>0)return false;              /* ya lo pidió hoy */
+  if(typeof prodVisible==='function'&&!prodVisible(a.id))return false;  /* no se vende a este tipo */
+  var q=(typeof stockCat==='function'&&typeof prodCat==='function')?Number((window.SP||{})[a.id]||0):1;
+  return q>0||!Object.keys(window.SP||{}).length;      /* hay en el camión */
+ }).sort(function(x,y){return y.veces-x.veces||y.total-x.total}).slice(0,6);
+};
+
+window.ponerHabitual=function(id,q){
+ if(typeof cpQty==='undefined')return;
+ cpQty[id]=(Number(cpQty[id])||0)+Number(q||1);
+ try{cpRender();cpActualizarTotal&&cpActualizarTotal();}catch(e){}
+ pintaHabituales();
+};
+window.pintaHabituales=function(){
+ var host=document.getElementById('cp-catalogo');if(!host||!host.parentElement)return;
+ var d=document.getElementById('cp-habitual');
+ if(!d){d=document.createElement('div');d.id='cp-habitual';
+  d.style.cssText='margin:6px 10px 2px';
+  host.parentElement.insertBefore(d,host);}
+ var lista=habituales();
+ if(!lista.length){d.innerHTML='';return;}
+ d.innerHTML='<div style="font-size:11px;color:var(--mu);margin-bottom:5px">Suele llevar y hoy no está en el pedido:</div>'
+  +'<div style="display:flex;gap:6px;flex-wrap:wrap">'
+  +lista.map(function(a){
+   var q=Number((window.SP||{})[a.id]||0);
+   return '<button onclick="ponerHabitual(\''+a.id+'\','+a.sug+')" '
+    +'style="padding:7px 11px;border-radius:15px;border:1.5px dashed var(--bd);background:none;color:inherit;font-size:11.5px;font-weight:700;cursor:pointer">'
+    +'+ '+a.n+' <span style="opacity:.6">×'+a.sug+(q?'':' · sin stock')+'</span></button>';
+  }).join('')+'</div>';
+};
+/* se repinta al abrir el cobro y cada vez que cambia lo marcado */
+if(typeof cpRender==='function'){var _cr=cpRender;window.cpRender=function(){
+ var r=_cr.apply(this,arguments);
+ try{pintaHabituales()}catch(e){}
+ return r;};}
+if(typeof abrirEntrega==='function'){var _ae=abrirEntrega;window.abrirEntrega=function(){
+ var r=_ae.apply(this,arguments);
+ setTimeout(function(){try{pintaHabituales()}catch(e){}},400);
+ return r;};}
+/* aviso al cerrar el cobro si quedó algo habitual sin ofrecer */
+if(typeof cpVerDetalle==='function'){var _vd=cpVerDetalle;window.cpVerDetalle=function(){
+ try{
+  var f=habituales();
+  if(f.length){
+   var nom=f.slice(0,3).map(function(a){return a.n}).join(', ');
+   if(!confirm('Esta tienda suele llevar también: '+nom+'.\n\n¿Seguimos igual con el pedido actual?'))return;
+  }
+ }catch(e){}
+ return _vd.apply(this,arguments);};}
 })();
 </script>
 </body>
