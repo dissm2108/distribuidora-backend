@@ -185,6 +185,16 @@ async function porCategoria(prods){
   const r={};ids.forEach(id=>{const k=cat[id]||"—";r[k]=(r[k]||0)+Number(prods[id]||0)});
   return r;
 }
+app.get("/conductor/almacen",authC,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  const s=await leerStock("almacen");
+  const cats=await porCategoria(s.prods);
+  const{data:cat}=await db.from("catalogo").select("id,nombre");
+  const nom={};(cat||[]).forEach(p=>nom[p.id]=p.nombre);
+  res.json({ok:true,por_categoria:cats,
+    total:Object.keys(s.prods).reduce((a,k)=>a+Number(s.prods[k]||0),0),
+    prods:Object.keys(s.prods).map(id=>({id,n:nom[id]||id,cant:Number(s.prods[id]||0)})).filter(x=>x.cant>0)});
+});
 app.get("/conductor/stock",authC,async(req,res)=>{
   res.set("Cache-Control","no-store");
   const s=await leerStock(req.cond.u);
