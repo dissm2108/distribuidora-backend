@@ -768,6 +768,7 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
       <button class="cp-qa" style="background:#FDEBE9;color:#B23B2E" onclick="aov('ov-devol')">🍞 Devolución</button>
       <button class="cp-qa blue" onclick="cpAbrirN()">⚡ N de cada uno</button>
       <button class="cp-qa purple" onclick="cpAbrirCustom()">✏️ Personalizar</button>
+      <button class="cp-qa" id="cp-qa-hab" style="background:#EEF6EE;color:#2F6B4F" onclick="abrirHabituales()">🔁 Suele llevar</button>
       <button class="cp-qa yellow" onclick="cpLimpiarTodo()">✕ Limpiar</button>
     </div>
     <div class="cp-tabs-wrap"><div class="cp-tabs" id="cp-tabs"></div></div>
@@ -4028,7 +4029,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-15-B';
+window.BUILD='2026-09-15-D';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4347,6 +4348,11 @@ window.ponerHabitual=function(id,q){
  pintaHabituales();
 };
 window.pintaHabituales=function(){
+ /* la sugerencia vive en el botón "Suele llevar"; aquí solo se limpia
+    la tira antigua para no repetir lo mismo dos veces en pantalla */
+ var viejo=document.getElementById('cp-habitual');
+ if(viejo&&viejo.parentElement)viejo.parentElement.removeChild(viejo);
+ return;
  var host=document.getElementById('cp-catalogo');if(!host||!host.parentElement)return;
  var d=document.getElementById('cp-habitual');
  if(!d){d=document.createElement('div');d.id='cp-habitual';
@@ -4378,10 +4384,128 @@ if(typeof cpVerDetalle==='function'){var _vd=cpVerDetalle;window.cpVerDetalle=fu
   var f=habituales();
   if(f.length){
    var nom=f.slice(0,3).map(function(a){return a.n}).join(', ');
-   if(!confirm('Esta tienda suele llevar también: '+nom+'.\n\n¿Seguimos igual con el pedido actual?'))return;
+   if(!confirm('Esta tienda suele llevar también: '+nom+'.\n\nPuedes agregarlos con el botón \"Suele llevar\".\n\n¿Seguimos igual con el pedido actual?'))return;
   }
  }catch(e){}
  return _vd.apply(this,arguments);};}
+})();
+</script>
+<script id="v5liq2">
+(function(){
+/* ═══ Liquidación: solo con el camión vacío, y con informe del viaje ═══ */
+window.liquidarViaje=async function(){
+ if(!CFG.API)return toast('Necesitas conexión para liquidar','w');
+ var quedan=0;
+ try{Object.keys(window.SP||{}).forEach(function(k){quedan+=Number(SP[k]||0)})}catch(e){}
+ if(quedan>0){
+  var det=[];
+  (CATS||[]).forEach(function(c){var q=(typeof stockCat==='function')?stockCat(c.id):0;if(q)det.push(c.nom+': '+q)});
+  return alert('Todavía tienes '+quedan+' unidades en el camión.\n\n'+det.join('\n')
+   +'\n\nDéjalas en el almacén antes de liquidar. La liquidación cierra el viaje con el camión vacío.');
+ }
+ var decl=prompt('¿Cuánto efectivo estás entregando?\n\nEscribe el monto exacto que llevas en mano (sin Yape ni fiado).','');
+ if(decl===null)return;
+ var monto=parseFloat(String(decl).replace(',','.'));
+ if(isNaN(monto)||monto<0)return alert('Escribe un número válido.');
+ var nota=prompt('¿Alguna observación del viaje? (opcional)','')||'';
+ var r=await api('/liquidaciones',{efectivo_declarado:monto,nota:nota,dia:(typeof DIA!=='undefined')?DIA:{},kx:(typeof KX!=='undefined')?KX.slice(0,120):[]});
+ if(r&&r.motivo==='camion_con_stock')return alert(r.error);
+ if(!(r&&r.ok))return alert('No se pudo liquidar: '+((r&&r.error)||'sin respuesta del servidor'));
+ var s=r.resumen||{};
+ var v=s.ventas||{},m=s.mercaderia||{};
+ var txt='LIQUIDACIÓN DEL VIAJE\n'
+  +(s.dias?(s.dias+' día(s)'):'')+'\n'
+  +'──────────────\n'
+  +'Ventas: '+(v.n||0)+' · S/'+Number(v.total||0).toFixed(2)+'\n'
+  +'Efectivo S/'+Number(v.efectivo||0).toFixed(2)+'\n'
+  +'Yape S/'+Number(v.yape||0).toFixed(2)+'\n'
+  +'Fiado S/'+Number(v.fiado||0).toFixed(2)+'\n'
+  +'Cobrado de deudas S/'+Number(v.abonos||0).toFixed(2)+'\n'
+  +'Gastos S/'+Number((s.gastos||{}).total||0).toFixed(2)+'\n'
+  +'Pérdidas S/'+Number((s.perdidas||{}).total||0).toFixed(2)+'\n'
+  +'──────────────\n'
+  +'Efectivo esperado S/'+Number(s.efectivo_esperado||0).toFixed(2)+'\n'
+  +'Entregado S/'+monto.toFixed(2)+'\n'
+  +(r.diferencia?('DIFERENCIA S/'+Number(r.diferencia).toFixed(2)):'Cuadra ✓')+'\n'
+  +'──────────────\n'
+  +'Mercadería: cargó '+(m.cargado||0)+' · recibió '+(m.recibido_en_ruta||0)
+  +' · vendió '+(m.vendido||0)+' · dejó en almacén '+(m.devuelto||0)+'\n\n'
+  +'Queda pendiente de que el dueño la confirme.';
+ alert(txt);
+ try{if(typeof cargarDatos==='function')await cargarDatos();}catch(e){}
+ toast('Liquidación enviada','g');
+};
+/* el interruptor de turno ya no lo maneja el conductor */
+setTimeout(function(){
+ try{
+  var s=document.getElementById('sw-turno')||document.querySelector('[onclick*="turnoSi"]');
+  if(s&&s.parentElement){
+   var d=document.createElement('div');
+   d.style.cssText='font-size:11px;color:var(--mu);line-height:1.5;margin-top:6px';
+   d.textContent='El turno se abre solo cuando el dueño te asigna la carga, y se cierra al liquidar.';
+   s.parentElement.appendChild(d);
+  }
+ }catch(e){}
+},2000);
+})();
+</script>
+<script id="v5habbtn">
+(function(){
+/* ═══ "Suele llevar" como botón, junto a los demás del cobro ═══ */
+window.abrirHabituales=function(){
+ var lista=(typeof habituales==='function')?habituales():[];
+ var ov=document.getElementById('ov-hab');
+ if(!ov){
+  ov=document.createElement('div');ov.className='ov';ov.id='ov-hab';
+  ov.innerHTML='<div class="sh"><div class="sh-top"><div class="sh-tit">🔁 Suele llevar</div>'
+   +'<button class="sh-x" onclick="cov(\'ov-hab\')">✕</button></div>'
+   +'<div class="sh-sub" id="hab-sub"></div><div class="sh-b" id="hab-body"></div>'
+   +'<div class="sh-f"><button class="btn btn-g" onclick="agregarTodosHabituales()">Agregar todos</button></div></div>';
+  document.body.appendChild(ov);
+ }
+ var sub=document.getElementById('hab-sub'),body=document.getElementById('hab-body');
+ var t=(typeof tiendaActualIdx!=='undefined')?T[tiendaActualIdx]:null;
+ if(!lista.length){
+  sub.textContent='';
+  body.innerHTML='<div style="font-size:12.5px;color:var(--mu);line-height:1.7;padding:6px 2px">'
+   +(t&&(t.compras&&t.compras.length||t.ultima_compra&&t.ultima_compra.length)
+     ? 'Ya tienes en el pedido todo lo que esta tienda suele llevar.'
+     : 'Es la primera compra registrada de esta tienda, así que todavía no hay historial. Desde la próxima visita aquí verás lo que suele llevar.')
+   +'</div>';
+ }else{
+  sub.textContent='De sus últimas compras · un toque lo agrega con su cantidad habitual';
+  body.innerHTML=lista.map(function(a){
+   var q=Number((window.SP||{})[a.id]||0);
+   var yaHay=Number((window.cpQty||{})[a.id])>0;
+   return '<div style="display:flex;align-items:center;gap:9px;padding:10px 0;border-bottom:1px solid var(--linea)">'
+    +'<div style="flex:1"><div style="font-size:13px;font-weight:700">'+a.n+'</div>'
+    +'<div style="font-size:10.5px;color:var(--mu)">Llevó en '+a.veces+' de sus últimas visitas'
+    +(q?(' · quedan '+q+' en el camión'):' · sin stock')+'</div></div>'
+    +'<button onclick="ponerHabitual(\''+a.id+'\','+a.sug+');abrirHabituales()" '
+    +'style="padding:8px 13px;border-radius:10px;border:1.5px solid #2F6B4F;background:#EEF6EE;color:#2F6B4F;font-size:12px;font-weight:800;cursor:pointer">'
+    +(yaHay?'+ otra vez':'+ '+a.sug)+'</button></div>';
+  }).join('');
+ }
+ if(typeof aov==='function')aov('ov-hab');else ov.classList.add('on');
+};
+window.agregarTodosHabituales=function(){
+ var lista=(typeof habituales==='function')?habituales():[];
+ if(!lista.length)return cov('ov-hab');
+ lista.forEach(function(a){ponerHabitual(a.id,a.sug)});
+ cov('ov-hab');
+ toast('Agregados '+lista.length+' productos habituales','g');
+};
+/* el botón avisa cuántos hay pendientes */
+window.pintaBtnHabituales=function(){
+ var b=document.getElementById('cp-qa-hab');if(!b)return;
+ var n=(typeof habituales==='function')?habituales().length:0;
+ b.textContent=n?('🔁 Suele llevar ('+n+')'):'🔁 Suele llevar';
+ b.style.opacity=n?'1':'.5';
+};
+if(typeof cpRender==='function'){var _cr=cpRender;window.cpRender=function(){
+ var r=_cr.apply(this,arguments);
+ try{pintaBtnHabituales()}catch(e){}
+ return r;};}
 })();
 </script>
 </body>

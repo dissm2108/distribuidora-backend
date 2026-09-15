@@ -3108,5 +3108,90 @@ if(typeof rStockVivo==='function'){var _rs=rStockVivo;window.rStockVivo=async fu
 };}
 })();
 </script>
+<script id="v5cierres2">
+(function(){
+/* ═══ Cierres: informe del viaje, confirmación y ajustes posteriores ═══ */
+window.verCierre=async function(id){
+ var c=(window.CIERRES||[]).find(function(x){return String(x.id)===String(id)});
+ if(!c)return;
+ var s=c.resumen||{},v=s.ventas||{},m=s.mercaderia||{};
+ var aj=await apiA('/admin/cierres/'+id+'/ajustes');
+ var f=function(n){return 'S/'+Number(n||0).toFixed(2)};
+ var html='<div style="font-size:12.5px;line-height:1.7">'
+  +'<b>'+(s.nombre||c.conductor)+'</b> · '+(s.dias||1)+' día(s)<br>'
+  +'<span style="opacity:.7">'+(c.inicio?new Date(c.inicio).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'')
+  +' → '+(c.fin?new Date(c.fin).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'')+'</span>'
+  +'<hr style="border:0;border-top:1px solid var(--linea);margin:9px 0">'
+  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px">'
+  +'<span>Ventas</span><b style="text-align:right">'+(v.n||0)+' · '+f(v.total)+'</b>'
+  +'<span>Efectivo</span><b style="text-align:right">'+f(v.efectivo)+'</b>'
+  +'<span>Yape</span><b style="text-align:right">'+f(v.yape)+'</b>'
+  +'<span>Fiado en el viaje</span><b style="text-align:right;color:#B23B2E">'+f(v.fiado)+'</b>'
+  +'<span>Cobrado de deudas</span><b style="text-align:right;color:#2F6B4F">'+f(v.abonos)+'</b>'
+  +'<span>Gastos</span><b style="text-align:right">'+f((s.gastos||{}).total)+'</b>'
+  +'<span>Pérdidas y devoluciones</span><b style="text-align:right">'+f((s.perdidas||{}).total)+'</b>'
+  +'</div><hr style="border:0;border-top:1px solid var(--linea);margin:9px 0">'
+  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px">'
+  +'<span>Efectivo esperado</span><b style="text-align:right">'+f(s.efectivo_esperado)+'</b>'
+  +'<span>Entregado</span><b style="text-align:right">'+f(c.efectivo_declarado)+'</b>'
+  +'<span>Diferencia</span><b style="text-align:right;color:'+(Number(c.diferencia)?'#B23B2E':'#2F6B4F')+'">'
+   +(Number(c.diferencia)?f(c.diferencia):'cuadra ✓')+'</b>'
+  +'</div><hr style="border:0;border-top:1px solid var(--linea);margin:9px 0">'
+  +'<div style="font-size:12px">Mercadería: cargó <b>'+(m.cargado||0)+'</b> · recibió en ruta <b>'+(m.recibido_en_ruta||0)
+  +'</b> · vendió <b>'+(m.vendido||0)+'</b> · dejó en almacén <b>'+(m.devuelto||0)+'</b>'
+  +(m.queda?(' · <span style="color:#B23B2E">quedaron '+m.queda+'</span>'):'')+'</div>'
+  +((s.traspasos&&s.traspasos.length)?('<div style="font-size:11.5px;margin-top:7px;opacity:.8">Traspasos: '
+    +s.traspasos.map(function(t){return t.de+'→'+t.para+' ('+t.estado+')'}).join(' · ')+'</div>'):'')
+  +(c.nota?('<div style="font-size:11.5px;margin-top:7px;font-style:italic">Nota: '+c.nota+'</div>'):'')
+  +((aj&&aj.ok&&aj.ventas.length)?('<div style="margin-top:10px;background:#FDF6E4;border:1px solid #EFDCA8;border-radius:9px;padding:9px 11px;font-size:11.5px;color:#8A6410">'
+    +'<b>Ajustes posteriores:</b> '+aj.ventas.length+' venta(s) registradas después de liquidar, por '+f(aj.total)+'.<br>'
+    +aj.ventas.map(function(x){return '· '+x.tienda+' '+f(x.total)+' ('+x.metodo+')'}).join('<br>')
+    +'<br><span style="opacity:.8">No se sumaron a los totales de arriba: cóbralas aparte.</span></div>'):'')
+  +'</div>';
+ var ov=document.getElementById('ov-cierre');
+ if(!ov){ov=document.createElement('div');ov.className='ov';ov.id='ov-cierre';
+  ov.innerHTML='<div class="sh"><div class="sh-top"><div class="sh-tit">Liquidación</div>'
+   +'<button class="sh-x" onclick="document.getElementById(\'ov-cierre\').classList.remove(\'on\')">✕</button></div>'
+   +'<div class="sh-b" id="cierre-body"></div>'
+   +'<div class="sh-f" style="gap:7px"><button class="btn btn-g" id="cierre-ok">✓ Confirmar</button>'
+   +'<button class="btn btn-s" id="cierre-obs">Observar</button></div></div>';
+  document.body.appendChild(ov);}
+ document.getElementById('cierre-body').innerHTML=html;
+ document.getElementById('cierre-ok').onclick=function(){confirmarCierre(id,'confirmada')};
+ document.getElementById('cierre-obs').onclick=function(){confirmarCierre(id,'observada')};
+ ov.classList.add('on');
+};
+window.confirmarCierre=async function(id,estado){
+ var nota='';
+ if(estado==='observada'){nota=prompt('¿Qué observas de esta liquidación?','')||'';if(!nota)return;}
+ var r=await apiA('/admin/cierres/'+id+'/confirmar',{estado:estado,nota:nota});
+ if(r&&r.ok){document.getElementById('ov-cierre').classList.remove('on');
+  if(typeof cargarAdm==='function')await cargarAdm();
+  renderForzado();
+  alert(estado==='observada'?'Liquidación marcada con observación.':'✓ Liquidación confirmada.');
+ }else alert('No se pudo guardar.');
+};
+/* lista de cierres con estado y acceso al informe */
+if(typeof rReportes==='function'){var _rr=rReportes;window.rReportes=function(){
+ var h=_rr.apply(this,arguments);
+ try{
+  var cs=(window.CIERRES||[]);
+  if(cs.length){
+   var lista='<div class="card"><div class="ct">Liquidaciones</div>'
+    +cs.slice(0,15).map(function(c){
+      var est=c.estado||'pendiente';
+      var col=est==='confirmada'?'#2F6B4F':(est==='observada'?'#B23B2E':'#B97A1F');
+      return '<div onclick="verCierre('+c.id+')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--linea)">'
+       +'<div><b style="font-size:12.5px">'+(c.conductor||'—')+'</b>'
+       +'<div style="font-size:10.5px;opacity:.65">'+(c.fin?new Date(c.fin).toLocaleDateString('es-PE',{day:'2-digit',month:'short'}):'')
+       +(Number(c.diferencia)?(' · diferencia S/'+Number(c.diferencia).toFixed(2)):' · cuadra')+'</div></div>'
+       +'<span style="font-size:10.5px;font-weight:800;color:'+col+'">'+est+'</span></div>';
+    }).join('')+'</div>';
+   h=lista+h;
+  }
+ }catch(e){}
+ return h;};}
+})();
+</script>
 </body>
 </html>
