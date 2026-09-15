@@ -278,7 +278,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     db.from("avisos").select("*").or(`para.eq.${u},para.eq.todos`).order("id",{ascending:false}).limit(20),
     db.from("avisos_leidos").select("aviso_id").eq("usuario",u),
     db.from("creditos_mov").select("tipo,monto,por,creado").eq("por",u).gte("creado",hoy()+"T00:00:00"),
-    db.from("conductores").select("lat,lon,gps_fuente,gps_hora").eq("usuario",u).maybeSingle(),
+    db.from("conductores").select("lat,lon,gps_fuente,gps_hora,en_turno,turno_ini").eq("usuario",u).maybeSingle(),
     db.from("cargas").select("*").eq("conductor",u).eq("estado","pendiente").order("id",{ascending:false}).limit(1).maybeSingle(),
     db.from("traspasos").select("*").eq("para",u).in("estado",["pendiente","parcial"]),
     db.from("traspasos").select("*").eq("de",u).in("estado",["pendiente","parcial"]),
@@ -322,7 +322,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     const fiadoHoy=(movHoy||[]).filter(m=>m.tipo==="cargo").reduce((s,m)=>s+Number(m.monto||0),0);
   const cobradoHoy=(movHoy||[]).filter(m=>m.tipo==="abono").reduce((s,m)=>s+Number(m.monto||0),0);
         console.log(`datos->${u}: categorias=${(cats||[]).length} productos=${(cat||[]).length} tiendas=${tiendas.length}`);
-  res.json({ok:true,params,catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
+  res.json({ok:true,params,turno_ini:(yo&&yo.turno_ini)||null,en_turno:!!(yo&&yo.en_turno),catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
     dia:{fiado:fiadoHoy,cobrado:cobradoHoy},
     gps_camion:(yo&&yo.lat&&yo.gps_fuente&&yo.gps_fuente!=="celular")?{lat:yo.lat,lon:yo.lon,fuente:yo.gps_fuente,hora:yo.gps_hora}:null,
     carga_pendiente:cg?{id:cg.id,items:cg.items,prods:cg.prods||null,detalle:cg.detalle||null}:null,
@@ -462,6 +462,14 @@ app.post("/cargas/confirmar",authC,async(req,res)=>{
     // el detalle por producto entra al stock del camión
     const prodsCarga=(req.body.prods&&typeof req.body.prods==="object")?req.body.prods:(c.prods||null);
     if(prodsCarga)await moverStock(req.cond.u,prodsCarga,"carga",c.id);
+    // el turno queda abierto también al aceptar, por si se cerró o la
+    // asignación no llegó a abrirlo. Si ya estaba abierto no se toca el inicio.
+    const{data:yoC}=await db.from("conductores").select("en_turno,turno_ini").eq("usuario",req.cond.u).maybeSingle();
+    if(!yoC||!yoC.en_turno||!yoC.turno_ini){
+      await db.from("conductores").update({en_turno:true,turno_hora:new Date().toISOString(),
+        turno_ini:(yoC&&yoC.turno_ini)||c.creado||new Date().toISOString()}).eq("usuario",req.cond.u);
+      await db.from("logs").insert({tipo:"turno",detalle:req.cond.u+" inicia (carga aceptada)"});
+    }
     if(!req.body.conforme){
       await evento("carga","📦 Carga con diferencias — "+req.cond.u,"Motivo: "+(req.body.motivo||"—"),c.id);
       avisarAdmin("📦 Carga con diferencias ("+req.cond.u+"): "+(req.body.motivo||""));
