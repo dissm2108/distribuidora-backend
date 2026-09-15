@@ -3193,5 +3193,102 @@ if(typeof rReportes==='function'){var _rr=rReportes;window.rReportes=function(){
  return h;};}
 })();
 </script>
+<script id="v5cerrargps">
+(function(){
+/* ═══ 1. Cerrar viaje desde el panel (excepción, no costumbre) ═══ */
+window.cerrarViaje=async function(u){
+ var nota=prompt('¿Por qué cierras tú este viaje?\n\nEjemplos: se le rompió el teléfono, liquidó en efectivo conmigo, dejó de trabajar.\n\nQuedará guardado en el informe.','');
+ if(!nota||nota.trim().length<5)return alert('Escribe el motivo: sin él no se puede cerrar.');
+ var efec=prompt('¿Cuánto efectivo te entregó? (0 si no entregó nada)','0');
+ if(efec===null)return;
+ var monto=parseFloat(String(efec).replace(',','.'));if(isNaN(monto)||monto<0)monto=0;
+ var cuerpo={conductor:u,nota:nota.trim(),efectivo_declarado:monto};
+ var r=await apiA('/admin/cerrar-viaje',cuerpo);
+ if(r&&r.motivo==='decidir_stock'){
+  var cats=Object.keys(r.por_categoria||{}).map(function(k){return k+' '+r.por_categoria[k]}).join(', ');
+  var q=confirm('Quedan '+r.quedan+' unidades en su camión ('+cats+').\n\n'
+   +'Aceptar = vuelven al almacén.\nCancelar = quedan pendientes a cargo del conductor.');
+  cuerpo.stock_restante=q?'almacen':'pendiente';
+  r=await apiA('/admin/cerrar-viaje',cuerpo);
+ }
+ if(!(r&&r.ok))return alert('No se pudo cerrar: '+((r&&r.error)||'sin respuesta'));
+ var s=r.resumen||{},v=s.ventas||{};
+ alert('✓ Viaje cerrado\n\n'
+  +'Ventas: '+(v.n||0)+' · S/'+Number(v.total||0).toFixed(2)+'\n'
+  +'Efectivo esperado S/'+Number(s.efectivo_esperado||0).toFixed(2)+'\n'
+  +'Recibido S/'+Number(cuerpo.efectivo_declarado).toFixed(2)+'\n'
+  +(r.diferencia?('Diferencia S/'+Number(r.diferencia).toFixed(2)):'Cuadra ✓')+'\n\n'
+  +'Queda en Cierres como "cerrada por el dueño".');
+ if(typeof cargarAdm==='function')await cargarAdm();
+ renderForzado();
+};
+/* botón junto a cada conductor en ruta, dentro del stock en vivo */
+if(typeof rStockVivo==='function'){var _rs=rStockVivo;window.rStockVivo=async function(){
+ await _rs.apply(this,arguments);
+ try{
+  var r=await apiA('/admin/stock');if(!(r&&r.ok))return;
+  var box=document.getElementById('stockvivo-box');if(!box)return;
+  (r.conductores||[]).forEach(function(c){
+   if(!c.en_turno)return;
+   var nodos=box.querySelectorAll('div');
+   for(var i=0;i<nodos.length;i++){
+    var n=nodos[i];
+    if(n.textContent.indexOf(c.nombre)===0&&!n.querySelector('[data-cv]')){
+     var b=document.createElement('button');
+     b.setAttribute('data-cv','1');
+     b.textContent='Cerrar viaje';
+     b.style.cssText='margin-top:7px;padding:6px 10px;border-radius:9px;border:1.5px solid #B23B2E;background:none;color:#B23B2E;font-size:11px;font-weight:800;cursor:pointer';
+     b.onclick=function(){cerrarViaje(c.usuario)};
+     n.appendChild(b);break;
+    }
+   }
+  });
+ }catch(e){}
+};}
+
+/* ═══ 2. GPS: ver dispositivos de Traccar y asignarlos ═══ */
+window.rGPSdisp=async function(){
+ var box=document.getElementById('gpsdisp-box');if(!box)return;
+ box.textContent='Consultando la plataforma GPS…';
+ var r=await apiA('/admin/gps/dispositivos');
+ if(!(r&&r.ok)){
+  box.innerHTML='<div style="font-size:12px;color:#B23B2E;line-height:1.6">'+((r&&r.error)||'No se pudo consultar.')
+   +'<div style="color:var(--tenue);margin-top:6px">Revisa en Railway las variables <b>GPS_API_URL</b>, <b>GPS_USER</b> y <b>GPS_PASSWORD</b>.</div></div>';
+  return;
+ }
+ var ds=r.dispositivos||[];
+ if(!ds.length)return box.textContent='La plataforma respondió, pero no hay vehículos en esa cuenta.';
+ var conds=(typeof USRS!=='undefined'?USRS:[]).filter(function(u){return u.activo});
+ box.innerHTML='<div style="font-size:11.5px;opacity:.7;margin-bottom:8px">'+ds.length+' vehículo(s) en '+(r.plataforma||'la plataforma')+'. Asigna cada uno al conductor que lo maneja.</div>'
+ +ds.map(function(d){
+  var asignado=conds.find(function(u){return String(u.gps_id)===String(d.id)});
+  return '<div style="border:1px solid var(--linea);border-radius:11px;padding:10px 12px;margin-bottom:7px">'
+   +'<div style="display:flex;justify-content:space-between;align-items:center">'
+   +'<div><b style="font-size:12.5px">'+(d.nombre||('Unidad '+d.id))+'</b>'
+   +'<div style="font-size:10.5px;opacity:.65">ID <b>'+d.id+'</b>'+(d.placa?(' · '+d.placa):'')+(d.estado?(' · '+d.estado):'')+'</div></div>'
+   +'<span style="font-size:10.5px;color:'+(asignado?'#2F6B4F':'#B97A1F')+';font-weight:800">'+(asignado?('→ '+asignado.nombre):'sin asignar')+'</span></div>'
+   +'<select onchange="asignarGPS(this.value,\''+d.id+'\')" style="width:100%;margin-top:8px;padding:8px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'
+   +'<option value="">— asignar a —</option>'
+   +conds.map(function(u){return '<option value="'+u.usuario+'"'+(asignado&&asignado.usuario===u.usuario?' selected':'')+'>'+u.nombre+'</option>'}).join('')
+   +'</select></div>';
+ }).join('');
+};
+window.asignarGPS=async function(usuario,id){
+ if(!usuario)return;
+ var r=await apiA('/admin/conductores/'+usuario+'/gpsid',{gps_id:id});
+ if(r&&r.ok){alert('✓ Vehículo '+id+' asignado. En un minuto deberías ver su posición en el mapa.');
+  if(typeof cargarAdm==='function')await cargarAdm();
+  rGPSdisp();
+ }else alert('No se pudo asignar: '+((r&&r.error)||'sin respuesta'));
+};
+if(typeof rGPS==='function'){var _rg=rGPS;window.rGPS=function(){
+ var h=_rg.apply(this,arguments);
+ setTimeout(function(){try{rGPSdisp()}catch(e){}},250);
+ return '<div class="card"><div class="ct">🛰️ Vehículos de la plataforma GPS</div>'
+  +'<div id="gpsdisp-box" style="font-size:12px;opacity:.7">…</div>'
+  +'<button onclick="rGPSdisp()" style="width:100%;margin-top:9px;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px;font-weight:700;cursor:pointer">Volver a consultar</button></div>'+h;
+};}
+})();
+</script>
 </body>
 </html>
