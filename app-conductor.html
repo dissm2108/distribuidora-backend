@@ -671,9 +671,9 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
     <div class="c"><div class="ct">Acciones del turno</div>
       <div class="ir" style="cursor:pointer" onclick="irA('traspaso')"><span class="irl">↔ Solicitar traspaso</span><span class="irv">›</span></div>
       <div class="ir" style="cursor:pointer" onclick="irA('almacen')"><span class="irl">🏪 Depositar al almacén</span><span class="irv">›</span></div>
-      <div class="ir" style="cursor:pointer" onclick="aov('ov-merma')"><span class="irl">📉 Registrar merma</span><span class="irv">›</span></div>
+      
   <div class="ir" style="cursor:pointer" onclick="irA('gastos')"><span class="irl">🧾 Registrar gastos</span><span class="irv" id="gastos-badge">›</span></div>
-      <div class="ir" style="cursor:pointer" onclick="irA('liquidacion')"><span class="irl">💰 Liquidar viaje y rendir cuentas</span><span class="irv">›</span></div>
+      <div class="ir" style="cursor:pointer" onclick="irA('liquidacion')"><span class="irl">📋 Resumen del viaje</span><span class="irv">›</span></div>
       <div class="ir" style="cursor:pointer" onclick="aov('ov-ef')"><span class="irl">📊 Eficiencia de carga</span><span class="irv">›</span></div>
     </div>
     <div class="c" style="border-color:var(--bl)"><div class="ct">Modalidad en Espinar</div>
@@ -3782,17 +3782,17 @@ setTimeout(pintaStockRuta,600);
 function texto(id,t){var e=document.getElementById(id);if(e)e.textContent=t}
 window.pintaJornada=function(){
  var ventas=(KX||[]).filter(function(k){return /venta/i.test(k.tipo||'')}).length;
- var porVisitar=(T||[]).filter(function(t){return t.act!==false&&t.e!=='completada'}).length;
+ var visitadas=(T||[]).filter(function(t){return t.e==='completada'}).length;
  var recibido=(DIA.vEf||0)+(DIA.vYape||0)+(DIA.abonos||0);
  texto('k-ent2',ventas);
- texto('k-pend',porVisitar);
+ texto('k-pend',visitadas);
  texto('k-cob',recibido.toFixed(2));
  texto('k-cr2',(FIO||0).toFixed(2));
  /* etiquetas honestas */
  var g=document.querySelector('#sc-inicio .tsg')||document.querySelector('.tsg');
  if(g){var l=g.querySelectorAll('.tsl');
   if(l[0])l[0].textContent='Ventas';
-  if(l[1])l[1].textContent='Por visitar';
+  if(l[1])l[1].textContent='Tiendas visitadas';
   if(l[2])l[2].textContent='Recibido';
   if(l[3])l[3].textContent='Fiado hoy';}
 };
@@ -4055,7 +4055,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-15-J';
+window.BUILD='2026-09-16-A';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4797,6 +4797,63 @@ try{if(window.SES&&SES.token)velo(true,'Cargando tus datos…');}catch(e){}
 if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
  var r=await _cd.apply(this,arguments);
  try{veloFuera()}catch(e){}
+ return r;};}
+})();
+</script>
+<script id="v5ajustes3">
+(function(){
+/* ═══ 1. Botón de recargar: fijo en la app, no dentro del panel ═══ */
+if(typeof irA==='function'){var _ir=irA;window.irA=function(sc){
+ var r=_ir.apply(this,arguments);
+ try{
+  var b=document.getElementById('btn-sync-t');
+  if(sc!=='tiendas'){if(b)b.style.display='none';}
+  else if(b)b.style.display='flex';
+ }catch(e){}
+ return r;};}
+setTimeout(function(){
+ try{
+  var b=document.getElementById('btn-sync-t');
+  var app=document.querySelector('.app')||document.body;
+  if(b&&b.parentElement!==app){app.appendChild(b);}
+  if(b)b.style.cssText='position:absolute;left:14px;bottom:80px;z-index:60;width:46px;height:46px;border-radius:50%;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:18px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center';
+ }catch(e){}
+},1800);
+
+/* ═══ 2. Sin destello al refrescar: se repinta solo si algo cambió ═══ */
+['renderDash','pintaInicio','renderTiendas'].forEach(function(fn){
+ if(typeof window[fn]!=='function')return;
+ var _o=window[fn];
+ window[fn]=function(){
+  var host=document.getElementById('sc-inicio');
+  var antes=host?host.innerHTML:null;
+  var r=_o.apply(this,arguments);
+  try{
+   var d=document.getElementById('sc-inicio');
+   if(d&&antes!==null&&d.innerHTML===antes)return r;
+  }catch(e){}
+  return r;
+ };
+});
+/* el aviso "datos actualizados" ya no repinta toda la pantalla */
+if(typeof toast==='function'){var _t=toast;window.toast=function(m,t){
+ if(typeof m==='string'&&/datos actualizados/i.test(m))return;
+ return _t.apply(this,arguments);};}
+
+/* ═══ 3. El mapa de Tiendas se centra en el camión ═══ */
+if(typeof irA==='function'){var _ir2=irA;window.irA=function(sc){
+ var r=_ir2.apply(this,arguments);
+ if(sc==='tiendas')setTimeout(function(){
+  try{if(typeof centrarMapa==='function')centrarMapa(false)}catch(e){}
+ },700);
+ return r;};}
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{
+  if(window.GPSCAM&&GPSCAM.lat&&typeof centrarMapa==='function'&&!window._centradoCam){
+   window._centradoCam=true;centrarMapa(false);
+  }
+ }catch(e){}
  return r;};}
 })();
 </script>
