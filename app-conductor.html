@@ -4055,7 +4055,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-15-I';
+window.BUILD='2026-09-15-J';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4756,8 +4756,48 @@ window.mermaConfirmar=async function(){
  if(typeof pintaStockRuta==='function')pintaStockRuta();
 };
 setTimeout(function(){
- try{document.querySelectorAll('[onclick*="ov-merma"]').forEach(function(el){el.setAttribute('onclick','abrirMerma()')})}catch(e){}
+ try{
+  /* solo los accesos que ABREN el menú; nunca el botón de cerrar */
+  document.querySelectorAll('[onclick*="aov(\'ov-merma\')"]').forEach(function(el){
+   el.setAttribute('onclick','abrirMerma()');
+  });
+ }catch(e){}
 },1500);
+})();
+</script>
+<div id="v5velo" style="position:fixed;inset:0;z-index:8500;background:#20241E;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:#F4F3EE;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+ <div style="font-size:30px">🚚</div>
+ <div style="font-size:13px;opacity:.75" id="v5velo-txt">Cargando tus datos…</div>
+</div>
+<script id="v5velo-js">
+(function(){
+/* Evita el destello de la pantalla con datos de maqueta entre el login y
+   la primera carga real. Se retira en cuanto llegan los datos, o a los 6 s. */
+window.velo=function(on,txt){
+ var v=document.getElementById('v5velo');if(!v)return;
+ if(txt){var t=document.getElementById('v5velo-txt');if(t)t.textContent=txt;}
+ v.style.display=on?'flex':'none';
+};
+window.veloFuera=function(){
+ var v=document.getElementById('v5velo');if(!v)return;
+ v.style.transition='opacity .25s';v.style.opacity='0';
+ setTimeout(function(){v.style.display='none';v.style.opacity='1'},260);
+};
+/* al entrar (login o sesión guardada) */
+if(typeof entrarSesion==='function'){var _es=entrarSesion;window.entrarSesion=function(s){
+ var r=_es.apply(this,arguments);
+ velo(true,'Cargando tus datos…');
+ setTimeout(veloFuera,6000);
+ return r;};}
+document.addEventListener('DOMContentLoaded',function(){
+ try{if(window.SES&&SES.token){velo(true,'Cargando tus datos…');setTimeout(veloFuera,6000);}}catch(e){}
+});
+try{if(window.SES&&SES.token)velo(true,'Cargando tus datos…');}catch(e){}
+/* se retira cuando la primera carga real termina */
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{veloFuera()}catch(e){}
+ return r;};}
 })();
 </script>
 </body>
