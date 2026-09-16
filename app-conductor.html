@@ -4055,7 +4055,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-16-A';
+window.BUILD='2026-09-16-B';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4622,56 +4622,67 @@ window.irA=function(sc){
 </script>
 <script id="v5mapacam">
 (function(){
-/* ═══ El mapa se centra en el camión (Traccar); si no, en el celular ═══ */
-window.centrarMapa=function(avisar){
- try{
-  if(!window.mapaObj)return;
-  var g=window.GPSCAM;   /* posición del camión que envía el servidor */
-  if(g&&g.lat&&g.lon){
-   mapaObj.setView([g.lat,g.lon],15);
-   if(window._camMk){try{mapaObj.removeLayer(_camMk)}catch(e){}}
-   if(typeof L!=='undefined'){
-    window._camMk=L.marker([g.lat,g.lon],{icon:L.divIcon({html:'🛰️',className:'',iconSize:[26,26]})}).addTo(mapaObj);
-    var min=g.hora?Math.round((Date.now()-new Date(g.hora).getTime())/60000):null;
-    _camMk.bindTooltip('Camión'+(min!=null?(' · hace '+min+' min'):''));
-   }
-   if(avisar)toast('📍 Centrado en el camión','g');
-   return 'camion';
-  }
-  var p=(typeof posFresca==='function')?posFresca():null;
-  if(p&&p.lat){
-   mapaObj.setView([p.lat,p.lon],15);
-   if(avisar)toast('📍 GPS del camión sin señal — centrado en tu celular','w');
-   return 'celular';
-  }
-  if(avisar)alert('No hay ninguna ubicación disponible.\n\nEl GPS del camión no está reportando y tu celular tampoco entregó posición.\n\nRevisa que el permiso de ubicación esté activo, y avisa al dueño si el equipo del camión sigue sin señal.');
-  return null;
- }catch(e){return null}
-};
-/* al abrir el mapa y al llegar datos nuevos */
-var _ir3=window.irA;
-window.irA=function(sc){
- var r=_ir3.apply(this,arguments);
- if(sc==='ruta'||sc==='tiendas')setTimeout(function(){centrarMapa(false)},600);
+/* ═══ Centrar el mapa en el camión (GPS del vehículo) ═══
+   El mapa de Tiendas es window._mt; el de ruta, window._rm. */
+function mapas(){
+ var r=[];
+ if(window._mt)r.push(window._mt);
+ if(window._rm)r.push(window._rm);
  return r;
+}
+window.posCamion=function(){
+ var g=window.GPSCAM;
+ if(g&&isFinite(g.lat)&&isFinite(g.lon))return {lat:Number(g.lat),lon:Number(g.lon),fuente:g.fuente||'camión',hora:g.hora};
+ return null;
 };
+window.centrarMapa=function(avisar){
+ var ms=mapas();
+ if(!ms.length){if(avisar)toast('El mapa aún no está listo','w');return null;}
+ var p=posCamion(),tipo='camion';
+ if(!p){
+  var c=(typeof posFresca==='function')?posFresca():null;
+  if(c&&isFinite(c.lat)){p={lat:c.lat,lon:c.lon,fuente:'celular'};tipo='celular';}
+ }
+ if(!p){
+  if(avisar)alert('No hay ninguna ubicación disponible.\n\nEl GPS del vehículo no está reportando y tu celular tampoco entregó posición.\n\nRevisa el permiso de ubicación y avisa al dueño si el equipo del camión sigue sin señal.');
+  return null;
+ }
+ ms.forEach(function(m){try{m.setView([p.lat,p.lon],15)}catch(e){}});
+ /* marcador del camión en el mapa de tiendas */
+ try{
+  if(window._mt&&typeof L!=='undefined'){
+   if(window._camMk){try{_mt.removeLayer(_camMk)}catch(e){}}
+   window._camMk=L.marker([p.lat,p.lon],{icon:L.divIcon({html:(tipo==='camion'?'🛰️':'📱'),className:'',iconSize:[26,26]})}).addTo(_mt);
+   var min=p.hora?Math.round((Date.now()-new Date(p.hora).getTime())/60000):null;
+   _camMk.bindTooltip(tipo==='camion'?('Camión'+(min!=null?(' · hace '+min+' min'):'')):'Tu celular');
+  }
+ }catch(e){}
+ if(avisar)toast(tipo==='camion'?'📍 Centrado en el camión':'📍 Sin señal del vehículo — centrado en tu celular',tipo==='camion'?'g':'w');
+ return tipo;
+};
+/* al entrar a Tiendas o Ruta, y cuando llegan datos nuevos */
+if(typeof irA==='function'){var _ir=irA;window.irA=function(sc){
+ var r=_ir.apply(this,arguments);
+ if(sc==='tiendas'||sc==='ruta')setTimeout(function(){centrarMapa(false)},800);
+ return r;};}
 if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
  var r=await _cd.apply(this,arguments);
- try{if(window.mapaObj&&!window._yaCentrado){window._yaCentrado=true;centrarMapa(false)}}catch(e){}
+ try{if(posCamion()&&!window._centradoCam){window._centradoCam=true;setTimeout(function(){centrarMapa(false)},400);}}catch(e){}
  return r;};}
-/* botón para volver a centrar */
+/* botón para volver a centrar, sobre el mapa de tiendas */
 setTimeout(function(){
  try{
-  var host=document.getElementById('mapa')||document.querySelector('.mapa');
+  var host=document.getElementById('mapa-t');
   if(!host||document.getElementById('btn-centrar'))return;
+  var cont=host.parentElement;if(!cont)return;
+  if(getComputedStyle(cont).position==='static')cont.style.position='relative';
   var b=document.createElement('button');b.id='btn-centrar';b.textContent='🛰️';
   b.title='Centrar en el camión';
-  b.style.cssText='position:absolute;right:12px;bottom:12px;z-index:400;width:42px;height:42px;border-radius:50%;border:1.5px solid var(--bd);background:var(--wh);font-size:17px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+  b.style.cssText='position:absolute;right:12px;bottom:12px;z-index:500;width:42px;height:42px;border-radius:50%;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:17px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2)';
   b.onclick=function(){centrarMapa(true)};
-  host.style.position=host.style.position||'relative';
-  host.appendChild(b);
+  cont.appendChild(b);
  }catch(e){}
-},2500);
+},2600);
 })();
 </script>
 <script id="v5merma">
