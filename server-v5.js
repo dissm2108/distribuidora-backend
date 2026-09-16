@@ -304,6 +304,57 @@ app.post("/admin/cerrar-viaje",authA,async(req,res)=>{
   await avisoA(u,"El dueño cerró tu viaje. Motivo: "+nota+(quedan?("\nMercadería restante: "+quedan+" unidades "+(destino==="almacen"?"devueltas al almacén":"pendientes a tu cargo")):""));
   res.json({ok:true,id:l&&l.id,resumen,diferencia:dif});
 });
+// ══════════ GPS: consulta a la plataforma y refresco periódico ══════════
+let GPS_ULTIMO_ERROR=null;
+async function obtenerGPS(){
+  if(!GPS_PLAT)return [];
+  try{
+    if(GPS_PLAT==="traccar"){
+      const base=String(process.env.GPS_API_URL||"").replace(/\/+$/,"");
+      const auth=Buffer.from(`${process.env.GPS_USER}:${process.env.GPS_PASSWORD}`).toString("base64");
+      const r=await fetch(base+"/api/positions",{headers:{Authorization:`Basic ${auth}`}});
+      if(!r.ok){GPS_ULTIMO_ERROR="Traccar respondió "+r.status;return [];}
+      const d=await r.json();
+      GPS_ULTIMO_ERROR=null;
+      return (d||[]).map(p=>({gps_id:String(p.deviceId),lat:Number(p.latitude),lon:Number(p.longitude),
+        vel:Number(p.speed||0),ts:p.fixTime||p.deviceTime||null}))
+        .filter(p=>isFinite(p.lat)&&isFinite(p.lon));
+    }
+    if(GPS_PLAT==="wialon"){
+      const base=process.env.GPS_API_URL||"https://hst-api.wialon.com/wialon/ajax.html";
+      const lr=await fetch(`${base}?svc=token/login&params=${encodeURIComponent(JSON.stringify({token:process.env.GPS_API_KEY}))}`);
+      const ld=await lr.json();
+      if(!ld.eid){GPS_ULTIMO_ERROR="Wialon: login rechazado";return [];}
+      const params={spec:{itemsType:"avl_unit",propName:"sys_name",propValueMask:"*",sortType:"sys_name"},force:1,flags:1025,from:0,to:0};
+      const sr=await fetch(`${base}?svc=core/search_items&params=${encodeURIComponent(JSON.stringify(params))}&sid=${ld.eid}`);
+      const sd=await sr.json();
+      GPS_ULTIMO_ERROR=null;
+      return (sd.items||[]).filter(x=>x.pos).map(x=>({gps_id:String(x.id),lat:x.pos.y,lon:x.pos.x,vel:x.pos.s||0,ts:x.pos.t?new Date(x.pos.t*1000).toISOString():null}));
+    }
+    GPS_ULTIMO_ERROR="Plataforma no soportada: "+GPS_PLAT;
+    return [];
+  }catch(e){GPS_ULTIMO_ERROR=e.message;console.error("GPS("+GPS_PLAT+"):",e.message);return [];}
+}
+// Refresco cada minuto: guarda la posición de cada conductor y su recorrido
+async function refrescarGPS(){
+  if(!GPS_PLAT)return;
+  const pos=await obtenerGPS();
+  if(!pos.length)return;
+  const{data:cs}=await db.from("conductores").select("usuario,gps_id").not("gps_id","is",null);
+  const ahora=new Date().toISOString();
+  for(const c of (cs||[])){
+    const p=pos.find(x=>String(x.gps_id)===String(c.gps_id));
+    if(!p)continue;
+    await db.from("conductores").update({lat:p.lat,lon:p.lon,gps_fuente:GPS_PLAT,
+      gps_hora:p.ts?new Date(p.ts).toISOString():ahora}).eq("usuario",c.usuario);
+    await db.from("posiciones").insert({conductor:c.usuario,lat:p.lat,lon:p.lon,vel:p.vel||0});
+  }
+}
+if(GPS_PLAT){
+  refrescarGPS();
+  cron.schedule("* * * * *",()=>{refrescarGPS().catch(e=>console.error("refrescarGPS:",e.message))});
+  console.log("GPS activo: "+GPS_PLAT+" — refresco cada minuto");
+}else console.log("GPS sin configurar (GPS_PLATFORM vacía)");
 app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString()}));
 
 // ════════ AUTENTICACIÓN ════════
