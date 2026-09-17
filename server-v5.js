@@ -397,6 +397,50 @@ app.get("/conductor/resumen",authC,async(req,res)=>{
   try{res.json({ok:true,resumen:await resumenViaje(req.cond.u)});}
   catch(e){res.status(500).json({ok:false,error:e.message});}
 });
+app.get("/admin/comprobantes",authA,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  const d=String(req.query.desde||"").slice(0,10),h=String(req.query.hasta||"").slice(0,10);
+  const q=String(req.query.q||"").trim().slice(0,40);
+  let s=db.from("ventas").select("id,boleta,tienda,conductor,total,metodo,efectivo,credito,abono,anulada,nota_boleta,creado,items,editada_en").order("id",{ascending:false}).limit(300);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(d))s=s.gte("creado",d+"T00:00:00");
+  if(/^\d{4}-\d{2}-\d{2}$/.test(h))s=s.lte("creado",h+"T23:59:59");
+  const{data}=await s;
+  let rows=data||[];
+  if(q)rows=rows.filter(v=>[v.boleta,v.tienda,v.conductor].join(" ").toLowerCase().includes(q.toLowerCase()));
+  res.json({ok:true,comprobantes:rows,
+    total:rows.filter(v=>!v.anulada).reduce((a,v)=>a+Number(v.total||0),0),
+    anuladas:rows.filter(v=>v.anulada).length});
+});
+app.post("/admin/comprobantes/:id",authA,async(req,res)=>{
+  const upd={editada_en:new Date().toISOString()};
+  if(req.body.tienda!==undefined)upd.tienda=limpia(req.body.tienda,80);
+  if(req.body.nota!==undefined)upd.nota_boleta=limpia(req.body.nota,300);
+  const{error}=await db.from("ventas").update(upd).eq("id",req.params.id);
+  if(error)return res.status(500).json({ok:false,error:error.message});
+  await db.from("logs").insert({tipo:"admin",detalle:"Editó el comprobante de la venta #"+req.params.id});
+  res.json({ok:true});
+});
+app.post("/admin/comprobantes/:id/anular",authA,async(req,res)=>{
+  const motivo=limpia(req.body.motivo,200);
+  if(!motivo||motivo.length<5)return res.status(400).json({ok:false,error:"Escribe el motivo de la anulación"});
+  const{data:v}=await db.from("ventas").select("*").eq("id",req.params.id).maybeSingle();
+  if(!v)return res.status(404).json({ok:false,error:"Venta no encontrada"});
+  if(v.anulada)return res.status(409).json({ok:false,error:"Ya estaba anulada"});
+  await db.from("ventas").update({anulada:true,nota_boleta:"ANULADA: "+motivo,editada_en:new Date().toISOString()}).eq("id",v.id);
+  if(Number(v.credito||0)>0&&v.tienda_id){
+    const{data:t}=await db.from("tiendas").select("sa").eq("id",v.tienda_id).maybeSingle();
+    await db.from("tiendas").update({sa:Math.max(0,Number((t&&t.sa)||0)-Number(v.credito))}).eq("id",v.tienda_id);
+    await db.from("creditos_mov").insert({tienda_id:v.tienda_id,tipo:"abono",monto:Number(v.credito),
+      detalle:"Anulación de "+(v.boleta||("venta #"+v.id)),por:"admin"});
+  }
+  try{
+    const dev={};
+    (Array.isArray(v.items)?v.items:[]).forEach(it=>{if(it&&it.id)dev[it.id]=num(it.c,0,9999);});
+    if(Object.keys(dev).length)await moverStock(v.conductor,dev,"anulacion",v.id);
+  }catch(e){}
+  await db.from("logs").insert({tipo:"admin",detalle:"Anuló "+(v.boleta||("venta #"+v.id))+": "+motivo});
+  res.json({ok:true});
+});
 app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString()}));
 
 // ════════ AUTENTICACIÓN ════════
@@ -520,6 +564,17 @@ app.post("/ventas",authC,async(req,res)=>{
   if(!t)return res.status(400).json({ok:false,error:"No identifiqué la tienda: "+tienda});
   const resumen=(items||[]).map(x=>`${x.n} x${x.c}`).join(", ");
   const{data:v}=await db.from("ventas").insert({efectivo:num(req.body.efectivo,0,999999),credito:num(req.body.credito,0,999999),abono:num(req.body.abono,0,999999),tienda_id:t?t.id:null,tienda:tienda,conductor:req.cond.u,items:items||[],total:num(total,0,999999),metodo:(["efectivo","yape","credito","mixto"].includes(metodo)?metodo:"efectivo"),resumen}).select().single();
+  // número de comprobante correlativo, asignado por el servidor
+  try{
+    if(v&&!v.boleta){
+      const{data:ult}=await db.from("ventas").select("boleta").not("boleta","is",null).order("id",{ascending:false}).limit(1).maybeSingle();
+      let n=1;
+      if(ult&&ult.boleta){const m=String(ult.boleta).match(/(\d+)$/);if(m)n=parseInt(m[1],10)+1;}
+      const numB="B001-"+String(n).padStart(6,"0");
+      await db.from("ventas").update({boleta:numB}).eq("id",v.id);
+      v.boleta=numB;
+    }
+  }catch(e){console.error("boleta:",e.message);}
   // ¿venta después de haber liquidado? (cola que llegó tarde, o venta real fuera de viaje)
   let fueraDeTurno=false;
   try{

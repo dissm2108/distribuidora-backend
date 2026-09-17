@@ -3295,5 +3295,118 @@ if(typeof rGPS==='function'){var _rg=rGPS;window.rGPS=function(){
 };}
 })();
 </script>
+<script id="v5catlimpio">
+(function(){
+/* ═══ El catálogo del panel se reconstruye entero desde el servidor ═══
+   Antes solo AÑADÍA lo que llegaba: las categorías y productos de la maqueta
+   se quedaban para siempre y aparecían al asignar una carga. */
+window.catCargar=async function(){
+ try{
+  if(!CFGA.API)return;
+  var rc=await apiA('/admin/categorias');
+  var rp=await apiA('/admin/catalogo');
+  if(!(rc&&rc.ok)||!(rp&&rp.ok))return;
+  var cats=(rc.categorias||[]).filter(function(x){return x.activa!==false});
+  var prods=(rp.productos||[]).filter(function(p){return p.activo!==false});
+  window.CATE={};window.PRECIOS=window.PRECIOS||{};window.NOTIPOS=window.NOTIPOS||{};
+  var nuevo=cats.map(function(sc){
+   return {id:sc.id,nom:sc.nom||sc.id,emoji:sc.emoji||'📦',precio:Number(sc.precio)||0,
+    prods:prods.filter(function(p){return p.cat===sc.id})
+               .map(function(p){return {id:p.id,n:p.nombre}})};
+  });
+  prods.forEach(function(p){
+   CATE[p.id]={precio:Number(p.precio)||0,costo:Number(p.costo)||0};
+   if(p.precios)PRECIOS[p.id]=Object.assign({},p.precios);
+   if(Array.isArray(p.no_tipos)&&p.no_tipos.length)NOTIPOS[p.id]=p.no_tipos;
+  });
+  CATA.length=0;nuevo.forEach(function(x){CATA.push(x)});
+  if(CATCAT>=CATA.length)CATCAT=0;
+  /* el selector de carga y el de pedidos vuelven a leerlo */
+  try{if(typeof pkPinta==='function'){if(document.getElementById('cg-chips'))pkPinta('cg');if(document.getElementById('pd-chips'))pkPinta('pd');}}catch(e){}
+ }catch(e){console.error('catCargar:',e)}
+};
+/* se recarga al abrir el panel y al entrar a Kardex (donde se asigna la carga) */
+if(typeof cargarAdm==='function'){var _ca=cargarAdm;window.cargarAdm=async function(){
+ var r=await _ca.apply(this,arguments);
+ await catCargar();
+ return r;};}
+var _ir=window.irAdm;
+if(typeof _ir==='function'){window.irAdm=function(s){
+ var r=_ir.apply(this,arguments);
+ if(s==='kardex'||s==='catalogo'||s==='pedidos')catCargar().then(function(){try{renderForzado()}catch(e){}});
+ return r;};}
+setTimeout(catCargar,1200);
+})();
+</script>
+<script id="v5comprobantes">
+(function(){
+/* ═══ Comprobantes: ver, corregir y anular desde el panel ═══ */
+window.COMPS=[];
+window.rComprobantes=async function(q){
+ var box=document.getElementById('comp-box');if(!box)return;
+ box.textContent='Consultando…';
+ var r=await apiA('/admin/comprobantes'+(q?('?q='+encodeURIComponent(q)):''));
+ if(!(r&&r.ok))return box.textContent='No se pudo consultar.';
+ COMPS=r.comprobantes||[];
+ if(!COMPS.length)return box.innerHTML='<div style="font-size:12px;opacity:.7">Sin comprobantes todavía. Se generan solos con cada venta que registre un conductor.</div>';
+ var f=function(n){return 'S/'+Number(n||0).toFixed(2)};
+ box.innerHTML='<div style="font-size:11.5px;opacity:.75;margin-bottom:8px">'+COMPS.length+' comprobantes · '+f(r.total)+' vigente'
+  +(r.anuladas?(' · '+r.anuladas+' anulado(s)'):'')+'</div>'
+  +COMPS.slice(0,60).map(function(v){
+   var col=v.anulada?'#B23B2E':'inherit';
+   return '<div style="border-bottom:1px solid var(--linea);padding:9px 0">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+    +'<div style="flex:1;min-width:0"><b style="font-size:12.5px;color:'+col+'">'+(v.boleta||('#'+v.id))+(v.anulada?' · ANULADA':'')+'</b>'
+    +'<div style="font-size:10.5px;opacity:.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+v.tienda+' · '+v.conductor
+    +' · '+new Date(v.creado).toLocaleDateString("es-PE",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})+'</div>'
+    +(v.nota_boleta?('<div style="font-size:10.5px;color:#8A6410;margin-top:2px">'+v.nota_boleta+'</div>'):'')+'</div>'
+    +'<b style="font-size:13px;text-decoration:'+(v.anulada?'line-through':'none')+'">'+f(v.total)+'</b></div>'
+    +'<div style="display:flex;gap:6px;margin-top:6px">'
+    +'<button onclick="compVer('+v.id+')" style="flex:1;padding:6px;border-radius:8px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-size:11px;font-weight:700;cursor:pointer">Ver</button>'
+    +'<button onclick="compEditar('+v.id+')" style="flex:1;padding:6px;border-radius:8px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-size:11px;font-weight:700;cursor:pointer">Corregir</button>'
+    +(v.anulada?'':'<button onclick="compAnular('+v.id+')" style="flex:1;padding:6px;border-radius:8px;border:1.5px solid #B23B2E;background:none;color:#B23B2E;font-size:11px;font-weight:700;cursor:pointer">Anular</button>')
+    +'</div></div>';
+  }).join('');
+};
+window.compVer=function(id){
+ var v=COMPS.find(function(x){return x.id===id});if(!v)return;
+ var lin=(Array.isArray(v.items)?v.items:[]).map(function(x){return '· '+x.n+' ×'+x.c+'  S/'+(Number(x.c)*Number(x.pu||0)).toFixed(2)}).join('\n');
+ alert((v.boleta||('Venta #'+v.id))+(v.anulada?'  [ANULADA]':'')+'\n'
+  +v.tienda+'\n'+new Date(v.creado).toLocaleString('es-PE')+'\nConductor: '+v.conductor+'\n'
+  +'----------------\n'+(lin||'(sin detalle)')+'\n----------------\n'
+  +'Total: S/'+Number(v.total||0).toFixed(2)+'\nPago: '+(v.metodo||'—')
+  +(Number(v.credito||0)?('\nFiado: S/'+Number(v.credito).toFixed(2)):'')
+  +(Number(v.abono||0)?('\nCobró de deuda: S/'+Number(v.abono).toFixed(2)):'')
+  +(v.nota_boleta?('\n\n'+v.nota_boleta):''));
+};
+window.compEditar=async function(id){
+ var v=COMPS.find(function(x){return x.id===id});if(!v)return;
+ var t=prompt('Nombre de la tienda en el comprobante:',v.tienda||'');
+ if(t===null)return;
+ var n=prompt('Nota o corrección (queda impresa en el comprobante):',v.nota_boleta||'');
+ if(n===null)return;
+ var r=await apiA('/admin/comprobantes/'+id,{tienda:t,nota:n});
+ if(r&&r.ok){alert('✓ Comprobante corregido.');rComprobantes();}
+ else alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+};
+window.compAnular=async function(id){
+ var v=COMPS.find(function(x){return x.id===id});if(!v)return;
+ var m=prompt('¿Por qué anulas '+(v.boleta||('la venta #'+id))+'?\n\nSe devolverá la mercadería al stock del conductor y, si fue a crédito, se descontará de la deuda de la tienda.','');
+ if(!m||m.trim().length<5)return alert('Escribe el motivo.');
+ var r=await apiA('/admin/comprobantes/'+id+'/anular',{motivo:m.trim()});
+ if(r&&r.ok){alert('✓ Anulada. Stock y deuda revertidos.');rComprobantes();}
+ else alert('No se pudo anular: '+((r&&r.error)||'sin respuesta'));
+};
+/* la tarjeta vive en Kardex, junto al movimiento del día */
+if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
+ var h=_rk.apply(this,arguments);
+ setTimeout(function(){try{rComprobantes()}catch(e){}},400);
+ return '<div class="card"><div class="ct">🧾 Comprobantes</div>'
+  +'<input id="comp-q" placeholder="Buscar por número, tienda o conductor" oninput="if(this._t)clearTimeout(this._t);this._t=setTimeout(function(){rComprobantes(document.getElementById(\'comp-q\').value)},400)" '
+  +'style="width:100%;padding:9px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:9px">'
+  +'<div id="comp-box" style="font-size:12px;opacity:.7">…</div></div>'+h;
+};}
+})();
+</script>
 </body>
 </html>
