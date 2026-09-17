@@ -355,6 +355,48 @@ if(GPS_PLAT){
   cron.schedule("* * * * *",()=>{refrescarGPS().catch(e=>console.error("refrescarGPS:",e.message))});
   console.log("GPS activo: "+GPS_PLAT+" — refresco cada minuto");
 }else console.log("GPS sin configurar (GPS_PLATFORM vacía)");
+// ══ Resumen del viaje en curso: el MISMO cálculo que usa la liquidación ══
+async function resumenViaje(u){
+  const{data:yo}=await db.from("conductores").select("turno_ini,nombre,en_turno").eq("usuario",u).maybeSingle();
+  const inicio=(yo&&yo.turno_ini)||new Date(Date.now()-7*86400000).toISOString();
+  const fin=new Date().toISOString();
+  const st=await leerStock(u);
+  const quedan=Object.keys(st.prods).reduce((s,k)=>s+Number(st.prods[k]||0),0);
+  const [vts,mov,trs,gas,perd,tds]=await Promise.all([
+    db.from("ventas").select("*").eq("conductor",u).gte("creado",inicio).lte("creado",fin),
+    db.from("stock_mov").select("motivo,delta").eq("conductor",u).gte("creado",inicio),
+    db.from("traspasos").select("*").or("de.eq."+u+",para.eq."+u).gte("creado",inicio),
+    db.from("gastos").select("categoria,monto,detalle").eq("conductor",u).gte("creado",inicio),
+    db.from("perdidas").select("motivo,valor,costo,detalle,tipo").eq("conductor",u).gte("creado",inicio),
+    db.from("ventas").select("tienda").eq("conductor",u).gte("creado",inicio)
+  ]).then(r=>r.map(x=>x.data||[]));
+  const sum=(a,f)=>a.reduce((s,x)=>s+Number(f(x)||0),0);
+  const efectivo=sum(vts,v=>v.metodo==="yape"?0:v.efectivo);
+  const yape=sum(vts.filter(v=>v.metodo==="yape"),v=>v.total);
+  const fiado=sum(vts,v=>v.credito), abonos=sum(vts,v=>v.abono);
+  const gastos=sum(gas,g=>g.monto);
+  const merm=perd.filter(p=>p.tipo!=="ajuste");
+  const mSum=(m)=>mov.filter(x=>x.motivo===m).reduce((s,x)=>s+Math.abs(Number(x.delta||0)),0);
+  return{
+    conductor:u,nombre:(yo&&yo.nombre)||u,en_turno:!!(yo&&yo.en_turno),inicio,fin,
+    dias:Math.max(1,Math.round((new Date(fin)-new Date(inicio))/86400000)),
+    ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
+    efectivo_esperado:Math.round((efectivo+abonos-gastos)*100)/100,
+    gastos:{total:gastos,detalle:gas},
+    perdidas:{total:sum(merm,p=>p.valor),costo:sum(merm,p=>p.costo),n:merm.length,detalle:merm,
+      ajustes:{n:perd.length-merm.length}},
+    mercaderia:{cargado:mSum("carga"),recibido_en_ruta:mSum("traspaso_recibe"),
+      vendido:mSum("venta"),devuelto:mSum("traspaso_envia"),queda:quedan},
+    tiendas_atendidas:new Set(tds.map(v=>v.tienda)).size,
+    traspasos:trs.map(t=>({id:t.id,de:t.de,para:t.para,estado:t.estado})),
+    puede_liquidar:quedan===0
+  };
+}
+app.get("/conductor/resumen",authC,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  try{res.json({ok:true,resumen:await resumenViaje(req.cond.u)});}
+  catch(e){res.status(500).json({ok:false,error:e.message});}
+});
 app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString()}));
 
 // ════════ AUTENTICACIÓN ════════
@@ -1417,7 +1459,4 @@ cron.schedule("0 22 * * *",async()=>{
   }catch(e){console.error("Informe:",e.message);}
 },{timezone:"America/Lima"});
 // Limpieza de logs a 30 días
-cron.schedule("0 3 * * *",async()=>{const lim=new Date(Date.now()-30*86400000).toISOString();await db.from("logs").delete().lt("creado",lim).neq("tipo","admin");},{timezone:"America/Lima"});
-
-const PORT=process.env.PORT||3000;
-app.listen(PORT,()=>console.log("Servidor v5.0 en puerto "+PORT+" · IA solo informes · Twilio solo alertas al dueño"));
+cron.schedule("0 3 * * *",async()=>{const lim
