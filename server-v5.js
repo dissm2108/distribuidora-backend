@@ -1459,4 +1459,7 @@ cron.schedule("0 22 * * *",async()=>{
   }catch(e){console.error("Informe:",e.message);}
 },{timezone:"America/Lima"});
 // Limpieza de logs a 30 días
-cron.schedule("0 3 * * *",async()=>{const lim
+cron.schedule("0 3 * * *",async()=>{const lim=new Date(Date.now()-30*86400000).toISOString();await db.from("logs").delete().lt("creado",lim).neq("tipo","admin");},{timezone:"America/Lima"});
+
+const PORT=process.env.PORT||3000;
+app.listen(PORT,()=>console.log("Servidor v5.0 en puerto "+PORT+" · IA solo informes · Twilio solo alertas al dueño"));
