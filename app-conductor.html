@@ -4055,7 +4055,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-16-B';
+window.BUILD='2026-09-16-C';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4866,6 +4866,78 @@ if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async
   }
  }catch(e){}
  return r;};}
+})();
+</script>
+<script id="v5resumen">
+(function(){
+/* ═══ Resumen del viaje: consultar sin cerrar nada ═══
+   Usa el mismo cálculo del servidor que la liquidación, así el conductor
+   no se lleva sorpresas el día que liquide. */
+window.abrirResumen=async function(){
+ var ov=document.getElementById('ov-resumen');
+ if(!ov){
+  ov=document.createElement('div');ov.className='ov';ov.id='ov-resumen';
+  ov.innerHTML='<div class="sh"><div class="sh-top"><div class="sh-tit">📋 Resumen del viaje</div>'
+   +'<button class="sh-x" onclick="cov(\'ov-resumen\')">✕</button></div>'
+   +'<div class="sh-sub">Cómo vas hasta ahora. No cierra nada.</div>'
+   +'<div class="sh-b" id="res-body"></div></div>';
+  document.body.appendChild(ov);
+ }
+ var body=document.getElementById('res-body');
+ body.innerHTML='<div style="padding:14px;font-size:12.5px;color:var(--mu)">Calculando…</div>';
+ if(typeof aov==='function')aov('ov-resumen');else ov.classList.add('on');
+ var r=await api('/conductor/resumen');
+ if(!r||!r.ok){
+  body.innerHTML='<div style="padding:14px;font-size:12.5px;color:var(--mu);line-height:1.7">No se pudo calcular. Necesitas señal para ver el resumen, porque los números salen del servidor.</div>';
+  return;
+ }
+ var s=r.resumen,v=s.ventas,m=s.mercaderia,f=function(n){return (typeof money==='function')?money(n||0):('S/'+Number(n||0).toFixed(2))};
+ var fila=function(a,b,col){return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--linea)"><span style="font-size:12.5px">'+a+'</span><b style="font-size:12.5px'+(col?(';color:'+col):'')+'">'+b+'</b></div>'};
+ var h='';
+ if(!s.en_turno){
+  h+='<div style="background:var(--bl-l);border-radius:10px;padding:10px 12px;font-size:12px;margin-bottom:10px">No tienes un viaje abierto. Lo que ves es tu último viaje registrado.</div>';
+ }else{
+  h+='<div style="font-size:12px;color:var(--mu);margin-bottom:10px">Día '+s.dias+' del viaje · '+s.tiendas_atendidas+' tienda(s) atendidas</div>';
+ }
+ h+='<div style="font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mu);margin:4px 0 4px">Dinero</div>'
+  +fila('Vendido ('+v.n+' ventas)',f(v.total))
+  +fila('Efectivo cobrado',f(v.efectivo),'#2F6B4F')
+  +fila('Yape',f(v.yape))
+  +fila('Cobrado de deudas',f(v.abonos),'#2F6B4F')
+  +fila('Fiado (queda por cobrar)',f(v.fiado),'#B23B2E')
+  +fila('Gastos',f(s.gastos.total),'#B23B2E')
+  +'<div style="background:var(--gr-l);border-radius:10px;padding:11px 12px;margin:10px 0">'
+  +'<div style="display:flex;justify-content:space-between;align-items:center">'
+  +'<b style="font-size:12.5px">Efectivo que deberías tener</b>'
+  +'<b style="font-size:17px;color:#2F6B4F">'+f(s.efectivo_esperado)+'</b></div>'
+  +'<div style="font-size:10.5px;color:var(--mu);margin-top:4px">Efectivo de ventas + cobros de deuda − gastos. Cuéntalo ahora y avisa si no cuadra.</div></div>'
+  +'<div style="font-size:11px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--mu);margin:12px 0 4px">Mercadería</div>'
+  +fila('Cargaste',m.cargado+' unid')
+  +fila('Recibiste en ruta',m.recibido_en_ruta+' unid')
+  +fila('Vendiste',m.vendido+' unid')
+  +fila('Dejaste en almacén',m.devuelto+' unid')
+  +fila('Te queda en el camión',m.queda+' unid',m.queda?'#B97A1F':'#2F6B4F')
+  +(s.perdidas.n?fila('Mermas ('+s.perdidas.n+')',f(s.perdidas.total),'#B23B2E'):'')
+  +(s.perdidas.ajustes.n?fila('Ajustes de conteo',s.perdidas.ajustes.n):'');
+ h+='<div style="margin-top:14px;padding:11px 12px;border-radius:10px;border:1.5px solid var(--bd)">'
+  +(s.puede_liquidar
+    ? '<b style="font-size:12.5px;color:#2F6B4F">✓ Puedes liquidar</b><div style="font-size:11.5px;color:var(--mu);margin-top:3px">El camión está vacío. Al liquidar entregas '+f(s.efectivo_esperado)+' y se cierra el viaje.</div>'
+      +'<button class="bt2" style="width:100%;margin-top:9px" onclick="cov(\'ov-resumen\');irA(\'liquidacion\')">Ir a liquidar</button>'
+    : '<b style="font-size:12.5px;color:#B97A1F">Falta vaciar el camión</b><div style="font-size:11.5px;color:var(--mu);margin-top:3px">Te quedan '+m.queda+' unidades. Déjalas en el almacén y después podrás liquidar.</div>')
+  +'</div>';
+ body.innerHTML=h;
+};
+/* el acceso pequeño abre esto, no la pantalla de liquidar */
+setTimeout(function(){
+ try{
+  document.querySelectorAll('.irl').forEach(function(el){
+   if(el.textContent.indexOf('Resumen del viaje')>=0){
+    var fila=el.closest('.ir');
+    if(fila)fila.setAttribute('onclick','abrirResumen()');
+   }
+  });
+ }catch(e){}
+},1600);
 })();
 </script>
 </body>
