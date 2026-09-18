@@ -4041,5 +4041,132 @@ document.addEventListener('DOMContentLoaded',pintaTabs);
 setTimeout(pintaTabs,800);
 })();
 </script>
+<script id="v5picker2">
+(function(){
+/* ═══ Selector común, más claro: buscar, ver lo elegido y el total ═══
+   Lo usan los tres: pedidos WhatsApp (pd), almacén (al) y carga (cg). */
+var BUSCA={},STOCK={cond:{},alm:{},t:0};
+
+window.cargarStocks=async function(){
+ try{
+  if(Date.now()-STOCK.t<30000)return STOCK;
+  var r=await apiA('/admin/stock');
+  if(r&&r.ok){
+   STOCK.alm={};((r.almacen||{}).prods||[]).forEach(function(p){STOCK.alm[p.id]=p.cant});
+   STOCK.cond={};
+   (r.conductores||[]).forEach(function(c){
+    STOCK.cond[c.usuario]={};(c.prods||[]).forEach(function(p){STOCK.cond[c.usuario][p.id]=p.cant});
+   });
+   STOCK.t=Date.now();
+  }
+ }catch(e){}
+ return STOCK;
+};
+function conductorDe(p){
+ var id=(p==='al')?'al-cond':(p==='cg'?'cg-cond':null);
+ var s=id&&document.getElementById(id);
+ return s?s.value:'';
+}
+function limiteDe(p,pid){
+ /* almacén: no se puede enviar más de lo que hay; carga: sin límite */
+ if(p==='al'){
+  var modo=(window.ALMODO==='pedir')?'cond':'alm';
+  if(modo==='alm')return STOCK.alm[pid]!=null?STOCK.alm[pid]:null;
+  var u=conductorDe('al');return (u&&STOCK.cond[u])?(STOCK.cond[u][pid]||0):null;
+ }
+ return null;
+}
+window.pkBuscar=function(p,v){BUSCA[p]=String(v||'').toLowerCase();pkPinta(p)};
+
+window.pintaProductos=function(p){
+ var cont=document.getElementById(p+'-prods');if(!cont)return;
+ var st=(typeof pkSt==='function')?pkSt(p):{cat:0,items:{}};
+ var q=BUSCA[p]||'';
+ var lista=[];
+ if(q){
+  CATA.forEach(function(c){(c.prods||[]).forEach(function(pr){
+   if(pr.n.toLowerCase().indexOf(q)>=0)lista.push({p:pr,c:c});})});
+ }else{
+  var c0=CATA[st.cat];if(c0)(c0.prods||[]).forEach(function(pr){lista.push({p:pr,c:c0})});
+ }
+ var tipo=(p==='pd'&&typeof tipoPedido==='function')?(tipoPedido()||tipoPorDefecto()):null;
+ if(!lista.length){cont.innerHTML='<div style="font-size:12px;opacity:.65;padding:10px 2px">'+(q?'Ningún producto coincide con la búsqueda.':'Esta categoría no tiene productos.')+'</div>';return;}
+ cont.innerHTML=lista.map(function(x){
+  var cant=(st.items[x.p.id]&&st.items[x.p.id].c)||0;
+  var lim=limiteDe(p,x.p.id);
+  var pu=(p==='pd')?precioPanel(x.p.id,x.c,tipo):null;
+  var sinStock=(lim!=null&&lim<=0);
+  return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(128,128,128,.15)'+(sinStock?';opacity:.45':'')+'">'
+   +'<div style="flex:1;min-width:0">'
+   +'<div style="font-size:12.5px;font-weight:'+(cant?'800':'500')+';overflow:hidden;text-overflow:ellipsis">'+x.p.n+'</div>'
+   +'<div style="font-size:10.5px;opacity:.65">'+(q?(x.c.emoji+' '+x.c.nom+' · '):'')
+   +(pu!=null?('S/'+pu.toFixed(2)+' c/u'):'')
+   +(lim!=null?((pu!=null?' · ':'')+'hay '+lim):'')+'</div></div>'
+   +'<button onclick="pkAdd(\''+p+'\',\''+x.p.id+'\',-1)" style="width:32px;height:32px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-weight:800;font-size:16px">−</button>'
+   +'<input value="'+cant+'" inputmode="numeric" onchange="pkFijar(\''+p+'\',\''+x.p.id+'\',this.value)" '
+   +'style="width:46px;text-align:center;padding:7px 2px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:'+(cant?'#1D4ED8':'inherit')+';font-weight:800;font-size:13px">'
+   +'<button onclick="pkAdd(\''+p+'\',\''+x.p.id+'\',1)" style="width:32px;height:32px;border-radius:9px;border:1.5px solid #1D4ED8;background:rgba(29,78,216,.12);color:#1D4ED8;font-weight:800;font-size:16px">+</button></div>';
+ }).join('');
+};
+window.pkFijar=function(p,id,v){
+ var n=Math.max(0,parseInt(v,10)||0);
+ var lim=limiteDe(p,id);
+ if(lim!=null&&n>lim){alert('Solo hay '+lim+' disponibles.');n=lim;}
+ var st=pkSt(p),cur=(st.items[id]&&st.items[id].c)||0;
+ pkAdd(p,id,n-cur);
+};
+/* resumen fijo abajo de cada selector */
+window.pintaResumenFijo=function(p){
+ var res=document.getElementById(p+'-res');if(!res)return;
+ var it=(typeof pkItems==='function')?pkItems(p):[];
+ var tipo=(p==='pd'&&typeof tipoPedido==='function')?(tipoPedido()||tipoPorDefecto()):null;
+ if(!it.length){
+  res.innerHTML='<div style="border:1.5px dashed rgba(128,128,128,.3);border-radius:12px;padding:12px;text-align:center;font-size:12px;opacity:.65">Nada seleccionado todavía. Usa + o escribe la cantidad.</div>';
+  return;
+ }
+ var uni=0,tot=0;
+ var filas=it.map(function(x){
+  var cat=(CATA||[]).find(function(c){return (c.prods||[]).some(function(y){return y.id===x.id})})||{};
+  var pu=(p==='pd')?precioPanel(x.id,cat,tipo):0;
+  uni+=x.c;tot+=x.c*pu;
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(128,128,128,.12)">'
+   +'<span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis">'+x.n+'</span>'
+   +'<b style="font-size:12px">×'+x.c+'</b>'
+   +(p==='pd'?('<span style="min-width:62px;text-align:right;font-size:11.5px;font-weight:800">S/'+(x.c*pu).toFixed(2)+'</span>'):'')
+   +'<button onclick="pkAdd(\''+p+'\',\''+x.id+'\',-'+x.c+')" style="border:0;background:none;color:#B23B2E;font-size:15px;cursor:pointer;padding:0 2px">✕</button></div>';
+ }).join('');
+ res.innerHTML='<div style="border:1.5px solid #1D4ED8;border-radius:12px;padding:10px 12px;background:rgba(29,78,216,.05)">'
+  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+  +'<b style="font-size:12.5px">Seleccionado: '+it.length+' producto(s) · '+uni+' unidades</b>'
+  +'<button onclick="pkReset(\''+p+'\');pkPinta(\''+p+'\')" style="border:0;background:none;color:#B23B2E;font-size:11px;font-weight:800;cursor:pointer">Vaciar</button></div>'
+  +filas
+  +(p==='pd'?('<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:7px;border-top:1.5px solid rgba(29,78,216,.25)">'
+    +'<b style="font-size:13px">Total</b><b style="font-size:17px;color:#1D4ED8">S/'+tot.toFixed(2)+'</b></div>'
+    +'<div style="font-size:10.5px;opacity:.65;margin-top:3px">Precios de '+tipo+' · desde Catálogo y precios</div>'):'')
+  +'</div>';
+};
+/* buscador arriba de cada selector */
+window.pintaBuscador=function(p){
+ var chips=document.getElementById(p+'-chips');if(!chips||!chips.parentNode)return;
+ if(document.getElementById(p+'-busca'))return;
+ var d=document.createElement('input');
+ d.id=p+'-busca';d.placeholder='Buscar producto…';
+ d.style.cssText='width:100%;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:8px;font-size:13px';
+ d.oninput=function(){if(d._t)clearTimeout(d._t);d._t=setTimeout(function(){pkBuscar(p,d.value)},250)};
+ chips.parentNode.insertBefore(d,chips);
+};
+if(typeof pkPinta==='function'){var _pp=pkPinta;window.pkPinta=function(p){
+ var r=_pp.apply(this,arguments);
+ try{pintaBuscador(p);pintaProductos(p);pintaResumenFijo(p);}catch(e){console.error('picker:',e)}
+ return r;};}
+/* traer stocks al abrir las secciones que los necesitan */
+var _ir=window.irAdm;
+if(typeof _ir==='function'){window.irAdm=function(s){
+ var r=_ir.apply(this,arguments);
+ if(s==='almacen'||s==='kardex')cargarStocks().then(function(){try{if(document.getElementById('al-chips'))pkPinta('al');if(document.getElementById('cg-chips'))pkPinta('cg');}catch(e){}});
+ return r;};}
+cargarStocks();
+})();
+</script>
 </body>
 </html>
