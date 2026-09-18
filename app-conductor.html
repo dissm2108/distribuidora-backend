@@ -3656,7 +3656,7 @@ if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async
   }
   if(d&&d.catalogo)d.catalogo.forEach(function(p){
    var lc=CATS.find(function(x){return x.id===p.cat});
-   if(!lc){CATS.push({id:p.cat,nom:'📦 '+p.cat,emoji:'📦',precio:0,prods:[]});lc=CATS[CATS.length-1];if(CARGA[p.cat]==null)CARGA[p.cat]=0;}
+   if(!lc)return;   /* categoría desactivada en el panel: el producto no se muestra */
    var lp=lc.prods.find(function(x){return x.id===p.id});
    if(lp){lp.n=p.nombre||lp.n;}else lc.prods.push({id:p.id,n:p.nombre||p.id});
   });
@@ -4055,7 +4055,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-16-C';
+window.BUILD='2026-09-17-C';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4938,6 +4938,193 @@ setTimeout(function(){
   });
  }catch(e){}
 },1600);
+})();
+</script>
+<script id="v5catpurga">
+(function(){
+/* ═══ Una categoría que el panel desactivó desaparece de la app,
+   con sus productos y su stock ═══ */
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{
+  var d=window._ultDatos;
+  if(!d||!Array.isArray(d.categorias))return r;
+  var vivas={};d.categorias.forEach(function(sc){vivas[sc.id]=1});
+  /* si el servidor no mandó categorías, no se purga nada (puede ser un fallo) */
+  if(!Object.keys(vivas).length)return r;
+  var fuera=[];
+  for(var i=CATS.length-1;i>=0;i--){
+   if(vivas[CATS[i].id])continue;
+   fuera.push(CATS[i].nom);
+   if(window.CARGA)delete CARGA[CATS[i].id];
+   (CATS[i].prods||[]).forEach(function(p){
+    if(window.SP)delete SP[p.id];
+    if(window.cpQty)delete cpQty[p.id];
+   });
+   CATS.splice(i,1);
+  }
+  if(fuera.length){
+   try{localStorage.setItem('v5_stockp',JSON.stringify(window.SP||{}))}catch(e){}
+   if(typeof pintaStockRuta==='function')pintaStockRuta();
+   if(typeof cpRenderTabs==='function'&&document.getElementById('cp-tabs'))cpRenderTabs();
+  }
+ }catch(e){}
+ return r;};}
+})();
+</script>
+<script id="v5visual">
+(function(){
+/* ═══ 1. Color del punto según los días sin comprar ═══
+   Antes el color salía del estado de la visita (completada/pendiente), así que
+   una tienda sin comprar en semanas seguía en ámbar. */
+window.diasSinComprar=function(t){
+ try{
+  var f=null;
+  if(Array.isArray(t.compras)&&t.compras.length&&t.compras[0].fecha)f=new Date(t.compras[0].fecha);
+  else if(Array.isArray(t.h)&&t.h.length&&t.h[0].f){
+   var p=String(t.h[0].f).split('/');
+   f=(p.length===3)?new Date(p[2],p[1]-1,p[0]):new Date(t.h[0].f);
+  }
+  if(!f||isNaN(f))return null;
+  return Math.floor((Date.now()-f.getTime())/86400000);
+ }catch(e){return null}
+};
+window.colorTienda=function(t){
+ if(t.e==='completada')return '#16A34A';          /* atendida en este viaje */
+ var d=diasSinComprar(t);
+ if(d===null)return '#6B7280';                    /* nunca compró */
+ if(d<=1)return '#16A34A';
+ if(d<=3)return '#65A30D';
+ if(d<=6)return '#D97706';
+ if(d<=13)return '#DC2626';
+ return '#7F1D1D';                                /* más de dos semanas */
+};
+window.leyendaColores=function(){
+ return [['#16A34A','Compró hoy o ayer'],['#65A30D','2 a 3 días'],['#D97706','4 a 6 días'],
+         ['#DC2626','7 a 13 días'],['#7F1D1D','14 días o más'],['#6B7280','Nunca compró']];
+};
+/* repintar los puntos con el criterio nuevo */
+window.repintarPuntos=function(){
+ try{
+  if(!window._mt||typeof L==='undefined')return;
+  if(window._mkT)window._mkT.forEach(function(m){try{_mt.removeLayer(m)}catch(e){}});
+  window._mkT=[];
+  (T||[]).forEach(function(t,i){
+   if(!t.lat||!t.lon)return;
+   var col=colorTienda(t),d=diasSinComprar(t);
+   var ic=L.divIcon({className:'',html:'<div style="width:16px;height:16px;background:'+col+';border:2.5px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.35)"></div>',iconSize:[16,16],iconAnchor:[8,8]});
+   var mk=L.marker([t.lat,t.lon],{icon:ic}).addTo(_mt).on('click',function(){vtd(i)});
+   mk.bindTooltip(t.n+(d===null?' · nunca compró':(' · hace '+d+' día(s)')));
+   _mkT.push(mk);
+  });
+ }catch(e){}
+};
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ setTimeout(repintarPuntos,300);
+ return r;};}
+if(typeof irA==='function'){var _ir=irA;window.irA=function(sc){
+ var r=_ir.apply(this,arguments);
+ if(sc==='tiendas')setTimeout(repintarPuntos,700);
+ return r;};}
+
+/* ═══ 2. Botones del mapa que no se tapan entre sí ═══ */
+window.acomodarBotones=function(){
+ try{
+  /* el zoom de Leaflet sube a la esquina superior derecha */
+  var z=document.querySelector('#mapa-t .leaflet-control-zoom');
+  if(z&&z.parentElement){
+   var esq=document.querySelector('#mapa-t .leaflet-top.leaflet-right');
+   if(esq&&z.parentElement!==esq)esq.appendChild(z);
+   z.style.margin='10px 10px 0 0';
+  }
+  /* fila inferior derecha: registrar · centrar · venta rápida */
+  var fab=document.querySelector('#sc-tiendas .fab');
+  if(fab){fab.style.right='14px';fab.style.bottom='66px';}
+  var bc=document.getElementById('btn-centrar');
+  if(bc){
+   var app=document.querySelector('.app')||document.body;
+   if(bc.parentElement!==app)app.appendChild(bc);
+   bc.style.cssText='position:absolute;right:78px;bottom:70px;z-index:60;width:46px;height:46px;border-radius:50%;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:18px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center';
+  }
+  /* el de registrar tienda, a la izquierda de los otros dos */
+  var br=document.querySelector('#sc-tiendas [onclick*="abrirRegT"]');
+  if(br&&br.className.indexOf('fab')<0){
+   var app2=document.querySelector('.app')||document.body;
+   if(br.parentElement!==app2)app2.appendChild(br);
+   br.style.cssText='position:absolute;right:142px;bottom:70px;z-index:60;width:46px;height:46px;border-radius:50%;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:18px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center';
+   br.textContent='🏪';br.title='Registrar tienda';
+  }
+  /* el de actualizar, abajo a la izquierda, dentro de la app */
+  var bs=document.getElementById('btn-sync-t');
+  if(bs){
+   var app3=document.querySelector('.app')||document.body;
+   if(bs.parentElement!==app3)app3.appendChild(bs);
+   bs.style.left='14px';bs.style.bottom='70px';bs.style.right='auto';bs.style.position='absolute';
+  }
+ }catch(e){}
+};
+if(typeof irA==='function'){var _ir2=irA;window.irA=function(sc){
+ var r=_ir2.apply(this,arguments);
+ if(sc==='tiendas')setTimeout(acomodarBotones,900);
+ return r;};}
+setTimeout(acomodarBotones,3000);
+})();
+</script>
+<script id="v5leyenda">
+(function(){
+window.pintaLeyenda=function(){
+ try{
+  var host=document.getElementById('mapa-t');if(!host||!host.parentElement)return;
+  var e=document.getElementById('mapa-leyenda');
+  if(!e){e=document.createElement('div');e.id='mapa-leyenda';
+   e.style.cssText='position:absolute;left:10px;top:10px;z-index:450;background:var(--wh);border:1px solid var(--bd);border-radius:10px;padding:7px 9px;font-size:10px;line-height:1.6;color:var(--tx);box-shadow:0 2px 8px rgba(0,0,0,.15);max-width:150px';
+   if(getComputedStyle(host.parentElement).position==='static')host.parentElement.style.position='relative';
+   host.parentElement.appendChild(e);}
+  e.innerHTML='<b style="font-size:10px">Días sin comprar</b><br>'
+   +leyendaColores().map(function(x){
+     return '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+x[0]+';margin-right:5px"></span>'+x[1];
+   }).join('<br>');
+ }catch(e){}
+};
+if(typeof irA==='function'){var _ir=irA;window.irA=function(sc){
+ var r=_ir.apply(this,arguments);
+ if(sc==='tiendas')setTimeout(pintaLeyenda,1000);
+ return r;};}
+})();
+</script>
+<script id="v5gpsresp">
+(function(){
+/* ═══ El celular respalda al GPS del camión ═══
+   La app manda su posición cada 2 minutos mientras hay turno. El servidor
+   decide cuál usar: el camión si reportó hace poco, el celular si no. */
+window.mandarPosicion=function(){
+ try{
+  if(!SES||!SES.token||!navigator.geolocation||!navigator.onLine)return;
+  navigator.geolocation.getCurrentPosition(function(p){
+   api('/conductor/ubicacion',{lat:p.coords.latitude,lon:p.coords.longitude});
+  },function(){},{enableHighAccuracy:false,timeout:8000,maximumAge:60000});
+ }catch(e){}
+};
+setInterval(mandarPosicion,120000);
+setTimeout(mandarPosicion,6000);
+/* avisar cuando el mapa está usando el celular en vez del camión */
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{
+  var g=window.GPSCAM;
+  var e=document.getElementById('gps-nota');
+  if(!e){var host=document.getElementById('sc-perfil');
+   if(host){e=document.createElement('div');e.id='gps-nota';
+    e.style.cssText='margin:8px 0;padding:9px 11px;border-radius:10px;font-size:11.5px;line-height:1.5;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx)';
+    host.insertBefore(e,host.firstChild);}}
+  if(e){
+   if(g&&g.fuente==='celular')e.innerHTML='📱 <b>Usando el GPS de tu celular</b><br><span style="opacity:.75">'+(g.nota||'El equipo del camión no está reportando')+'. Mantén la app abierta y el permiso de ubicación activo.</span>';
+   else if(g)e.innerHTML='🛰️ <b>GPS del camión activo</b><br><span style="opacity:.75">Última señal: '+(g.hora?new Date(g.hora).toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}):'—')+'</span>';
+   else e.innerHTML='⚠️ <b>Sin ubicación</b><br><span style="opacity:.75">Ni el camión ni tu celular están entregando posición. Revisa el permiso de ubicación.</span>';
+  }
+ }catch(e){}
+ return r;};}
 })();
 </script>
 </body>

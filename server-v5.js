@@ -185,6 +185,12 @@ async function porCategoria(prods){
   const r={};ids.forEach(id=>{const k=cat[id]||"—";r[k]=(r[k]||0)+Number(prods[id]||0)});
   return r;
 }
+app.post("/conductor/ubicacion",authC,async(req,res)=>{
+  const lat=num(req.body.lat,-90,90),lon=num(req.body.lon,-180,180);
+  if(!lat||!lon)return res.status(400).json({ok:false,error:"Sin coordenadas"});
+  await db.from("conductores").update({lat_cel:lat,lon_cel:lon,cel_hora:new Date().toISOString()}).eq("usuario",req.cond.u);
+  res.json({ok:true});
+});
 app.get("/conductor/almacen",authC,async(req,res)=>{
   res.set("Cache-Control","no-store");
   const s=await leerStock("almacen");
@@ -406,6 +412,11 @@ app.get("/admin/comprobantes",authA,async(req,res)=>{
   if(/^\d{4}-\d{2}-\d{2}$/.test(h))s=s.lte("creado",h+"T23:59:59");
   const{data}=await s;
   let rows=data||[];
+  const cond=limpia(req.query.conductor,20),est=limpia(req.query.estado,12),met=limpia(req.query.metodo,12);
+  if(cond&&cond!=="todos")rows=rows.filter(v=>v.conductor===cond);
+  if(est==="anuladas")rows=rows.filter(v=>v.anulada);
+  else if(est==="vigentes")rows=rows.filter(v=>!v.anulada);
+  if(met&&met!=="todos")rows=rows.filter(v=>String(v.metodo||"")===met);
   if(q)rows=rows.filter(v=>[v.boleta,v.tienda,v.conductor].join(" ").toLowerCase().includes(q.toLowerCase()));
   res.json({ok:true,comprobantes:rows,
     total:rows.filter(v=>!v.anulada).reduce((a,v)=>a+Number(v.total||0),0),
@@ -440,6 +451,134 @@ app.post("/admin/comprobantes/:id/anular",authA,async(req,res)=>{
   }catch(e){}
   await db.from("logs").insert({tipo:"admin",detalle:"Anuló "+(v.boleta||("venta #"+v.id))+": "+motivo});
   res.json({ok:true});
+});
+app.post("/admin/eventos/:id/accion",authA,async(req,res)=>{
+  const accion=limpia(req.body.accion,20);
+  const{data:ev}=await db.from("eventos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!ev)return res.status(404).json({ok:false,error:"Aviso no encontrado"});
+  const ref=ev.ref||"";
+  let hecho="";
+  try{
+    if(ev.tipo==="tienda_nueva"){
+      if(accion==="aceptar"){
+        await db.from("tiendas").update({verificada:true,nueva:false}).eq("id",ref);
+        hecho="Tienda verificada: ya no aparece como nueva y entra en la ruta normal.";
+      }else if(accion==="rechazar"){
+        await db.from("tiendas").update({activa:false}).eq("id",ref);
+        hecho="Tienda desactivada: deja de aparecerle al conductor.";
+      }
+    }else if(ev.tipo==="boleta"){
+      if(accion==="aceptar"){
+        await db.from("boletas").update({estado:"enviada"}).eq("id",ref);
+        hecho="Comprobante marcado como enviado.";
+      }
+    }else if(ev.tipo==="liquidacion"){
+      if(accion==="aceptar"){
+        await db.from("liquidaciones").update({estado:"confirmada",confirmada_en:new Date().toISOString()}).eq("id",ref);
+        hecho="Liquidación confirmada.";
+      }else if(accion==="rechazar"){
+        await db.from("liquidaciones").update({estado:"observada",nota:limpia(req.body.nota,200)||"Observada desde la bandeja",confirmada_en:new Date().toISOString()}).eq("id",ref);
+        hecho="Liquidación marcada como observada.";
+      }
+    }else if(ev.tipo==="gastos"){
+      if(accion==="rechazar"){
+        await db.from("gastos").update({rechazado:true,nota:limpia(req.body.nota,200)||"Rechazado por el dueño"}).eq("id",ref);
+        hecho="Gasto rechazado: no cuenta en la liquidación.";
+      }else hecho="Gasto aprobado.";
+    }else if(ev.tipo==="credito_sin_permiso"){
+      if(accion==="aceptar"){
+        await db.from("tiendas").update({cr:true}).eq("id",ref);
+        hecho="Crédito autorizado para esa tienda.";
+      }else if(accion==="rechazar"){
+        hecho="Marcado para revisar: anula la venta desde Comprobantes si corresponde.";
+      }
+    }else if(ev.tipo==="carga"){
+      hecho=(accion==="aceptar")?"Diferencias aceptadas.":"Marcado para revisar con el conductor.";
+    }
+  }catch(e){return res.status(500).json({ok:false,error:e.message});}
+  await db.from("eventos").update({visto:true,resuelto:accion,resuelto_en:new Date().toISOString()}).eq("id",ev.id);
+  await db.from("logs").insert({tipo:"admin",detalle:"Aviso #"+ev.id+" ("+ev.tipo+") → "+accion});
+  res.json({ok:true,hecho:hecho||"Aviso archivado."});
+});
+app.post("/admin/eventos/vistos",authA,async(req,res)=>{
+  const ids=(Array.isArray(req.body.ids)?req.body.ids:[]).slice(0,200);
+  if(!ids.length)return res.json({ok:true});
+  await db.from("eventos").update({visto:true}).in("id",ids);
+  res.json({ok:true});
+});
+app.get("/admin/primera-venta",authA,async(req,res)=>{
+  const cond=limpia(req.query.conductor,20),tienda=limpia(req.query.tienda,80);
+  let q=db.from("ventas").select("creado").order("creado",{ascending:true}).limit(1);
+  if(cond&&cond!=="todos")q=q.eq("conductor",cond);
+  if(tienda)q=q.eq("tienda",tienda);
+  const{data}=await q;
+  res.json({ok:true,fecha:(data&&data[0])?data[0].creado:null});
+});
+app.get("/admin/params",authA,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  res.json({ok:true,params:await getParams()});
+});
+app.post("/admin/params",authA,async(req,res)=>{
+  const b=req.body||{},kv=await getParams();
+  const txt=(v,n)=>limpia(v,n||60);
+  // ── 1. Negocio ──
+  if(b.negocio)kv.negocio={nombre:txt(b.negocio.nombre,60),
+    tel:String(b.negocio.tel||"").replace(/\D/g,"").slice(0,15),moneda:txt(b.negocio.moneda,6)||"S/"};
+  // ── 2. Crédito y cobranza ──
+  if(b.credito_cfg)kv.credito_cfg={limite:num(b.credito_cfg.limite,0,100000,230),
+    dias_vencida:num(b.credito_cfg.dias_vencida,1,180,30),
+    fiar_sin_permiso:b.credito_cfg.fiar_sin_permiso!==false,
+    aviso_desde:num(b.credito_cfg.aviso_desde,0,100000,150)};
+  // ── 3. Operación diaria ──
+  if(b.operacion)kv.operacion={hora_informe:num(b.operacion.hora_informe,0,23,22),
+    tope_gasto:num(b.operacion.tope_gasto,0,100000,350),
+    metros_entrega:num(b.operacion.metros_entrega,20,5000,300),
+    min_detenido:num(b.operacion.min_detenido,5,240,45),
+    radio_dup_m:num(b.operacion.radio_dup_m,1,200,15),
+    min_gps_respaldo:num(b.operacion.min_gps_respaldo,1,120,10)};
+  // ── 4. Mermas e inventario ──
+  if(b.mermas_cfg)kv.mermas_cfg={aviso_desde:num(b.mermas_cfg.aviso_desde,0,100000,30),
+    ajuste_requiere_ok:!!b.mermas_cfg.ajuste_requiere_ok,
+    liquidar_con_stock:!!b.mermas_cfg.liquidar_con_stock};
+  // ── 5. Catálogo ──
+  if(b.catalogo_cfg)kv.catalogo_cfg={precio_cat_nueva:num(b.catalogo_cfg.precio_cat_nueva,0,10000,0),
+    vender_sin_precio:b.catalogo_cfg.vender_sin_precio!==false,
+    conductor_cambia_precio:b.catalogo_cfg.conductor_cambia_precio!==false};
+  if(Array.isArray(b.tipos_tienda))kv.tipos_tienda=b.tipos_tienda.slice(0,12).map(t=>limpia(t,20)).filter(Boolean);
+  if(b.precios_cat&&typeof b.precios_cat==="object"){
+    kv.precios_cat={};
+    Object.keys(b.precios_cat).slice(0,12).forEach(t=>{
+      const tt=limpia(t,20);if(!tt)return;kv.precios_cat[tt]={};
+      Object.keys(b.precios_cat[t]||{}).slice(0,60).forEach(k=>{
+        const kk=limpia(k,20),v=num(b.precios_cat[t][k],0,10000);if(kk&&v)kv.precios_cat[tt][kk]=v;});
+    });
+  }
+  if(b.costos&&typeof b.costos==="object"){
+    kv.costos={};Object.keys(b.costos).slice(0,60).forEach(k=>{const kk=limpia(k,20);if(kk)kv.costos[kk]=num(b.costos[k],0,10000);});
+  }
+  // ── 6. Modalidades y almacenes ──
+  if(Array.isArray(b.modalidades))kv.modalidades=b.modalidades.slice(0,12).map(m=>({
+    id:limpia(m.id,20)||limpia(String(m.nombre||"").toLowerCase().replace(/[^a-z0-9]/g,""),20),
+    nombre:txt(m.nombre,40),dias_viaje:num(m.dias_viaje,1,60,3),
+    liquida_en:txt(m.liquida_en,20)||"principal",gps:txt(m.gps,12)||"camion",
+    almacen:txt(m.almacen,20)||"principal"})).filter(m=>m.id&&m.nombre);
+  if(Array.isArray(b.almacenes))kv.almacenes=b.almacenes.slice(0,10).map(a=>({
+    id:limpia(a.id,20)||limpia(String(a.nombre||"").toLowerCase().replace(/[^a-z0-9]/g,""),20),
+    nombre:txt(a.nombre,50),ref:txt(a.ref,120),
+    lat:(a.lat!=null&&a.lat!=="")?num(a.lat,-90,90):null,
+    lon:(a.lon!=null&&a.lon!=="")?num(a.lon,-180,180):null,
+    activo:a.activo!==false})).filter(a=>a.id&&a.nombre);
+  // ── 7. Avisos y funciones que esperan datos ──
+  if(b.avisos_cfg){kv.avisos_cfg=kv.avisos_cfg||{};
+    Object.keys(b.avisos_cfg).slice(0,20).forEach(k=>{kv.avisos_cfg[limpia(k,25)]=!!b.avisos_cfg[k]});}
+  if(b.futuras){kv.futuras=kv.futuras||{};
+    Object.keys(b.futuras).slice(0,20).forEach(k=>{kv.futuras[limpia(k,25)]=!!b.futuras[k]});}
+  if(b.almacen)kv.almacen={nombre:txt(b.almacen.nombre,60),ref:txt(b.almacen.ref,120),
+    lat:(b.almacen.lat!=null)?num(b.almacen.lat,-90,90):null,lon:(b.almacen.lon!=null)?num(b.almacen.lon,-180,180):null};
+  const{error}=await db.from("params").upsert({id:1,kv});
+  if(error)return res.status(500).json({ok:false,error:error.message});
+  await db.from("logs").insert({tipo:"admin",detalle:"Cambió la configuración del sistema"});
+  res.json({ok:true,params:kv});
 });
 app.get("/health",(req,res)=>res.json({ok:true,v:"5.0",ts:new Date().toISOString()}));
 
@@ -502,7 +641,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     db.from("avisos").select("*").or(`para.eq.${u},para.eq.todos`).order("id",{ascending:false}).limit(20),
     db.from("avisos_leidos").select("aviso_id").eq("usuario",u),
     db.from("creditos_mov").select("tipo,monto,por,creado").eq("por",u).gte("creado",hoy()+"T00:00:00"),
-    db.from("conductores").select("lat,lon,gps_fuente,gps_hora,en_turno,turno_ini").eq("usuario",u).maybeSingle(),
+    db.from("conductores").select("lat,lon,gps_fuente,gps_hora,en_turno,turno_ini,lat_cel,lon_cel,cel_hora,modalidad").eq("usuario",u).maybeSingle(),
     db.from("cargas").select("*").eq("conductor",u).eq("estado","pendiente").order("id",{ascending:false}).limit(1).maybeSingle(),
     db.from("traspasos").select("*").eq("para",u).in("estado",["pendiente","parcial"]),
     db.from("traspasos").select("*").eq("de",u).in("estado",["pendiente","parcial"]),
@@ -548,7 +687,15 @@ app.get("/conductor/datos",authC,async(req,res)=>{
         console.log(`datos->${u}: categorias=${(cats||[]).length} productos=${(cat||[]).length} tiendas=${tiendas.length}`);
   res.json({ok:true,params,turno_ini:(yo&&yo.turno_ini)||null,en_turno:!!(yo&&yo.en_turno),catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
     dia:{fiado:fiadoHoy,cobrado:cobradoHoy},
-    gps_camion:(yo&&yo.lat&&yo.gps_fuente&&yo.gps_fuente!=="celular")?{lat:yo.lat,lon:yo.lon,fuente:yo.gps_fuente,hora:yo.gps_hora}:null,
+    gps_camion:(function(){
+      const minResp=num(params.operacion&&params.operacion.min_gps_respaldo,1,120,10);
+      const frescoCam=(yo&&yo.lat&&yo.gps_hora)&&((Date.now()-new Date(yo.gps_hora).getTime())<minResp*60000);
+      if(frescoCam)return{lat:yo.lat,lon:yo.lon,fuente:yo.gps_fuente||"camion",hora:yo.gps_hora};
+      if(yo&&yo.lat_cel&&yo.cel_hora)return{lat:yo.lat_cel,lon:yo.lon_cel,fuente:"celular",hora:yo.cel_hora,
+        nota:"El GPS del camión no reporta hace más de "+minResp+" min"};
+      if(yo&&yo.lat)return{lat:yo.lat,lon:yo.lon,fuente:yo.gps_fuente||"camion",hora:yo.gps_hora,nota:"Última posición conocida"};
+      return null;
+    })(),
     carga_pendiente:cg?{id:cg.id,items:cg.items,prods:cg.prods||null,detalle:cg.detalle||null}:null,
     traspasos_entrantes:(trs||[]).map(t=>({id:String(t.id),de:t.de_nombre||t.de,items:t.items,estado:t.estado,yo_confirme:!!t.conf_para,otro_confirmo:!!t.conf_de})),
     traspasos_completados:(trsOk||[]).map(t=>({id:String(t.id),items:t.items,rol:t.para===u?"recibe":"entrega",otro:t.para===u?(t.de_nombre||t.de):t.para})),
@@ -761,7 +908,7 @@ app.post("/perdidas",authC,async(req,res)=>{
   await db.from("kardex").insert({conductor:req.cond.u,tipo:tipo==="ajuste"?"ajuste":"perdida",
     detalle:motivo+" · "+unid+" unid · S/"+fila.valor.toFixed(2)+(fila.detalle?(" · "+fila.detalle):"")});
   // avisar al dueño solo cuando vale la pena
-  if(tipo==="merma"&&fila.costo>=num(params.aviso_merma,0,100000,30))
+  if(tipo==="merma"&&fila.costo>=num(params.mermas_cfg&&params.mermas_cfg.aviso_desde,0,100000,30))
     await avisarAdmin("📉 Merma de "+req.cond.u+"\n"+motivo+" · "+unid+" unidades\nValor S/"+fila.valor.toFixed(2)+" (costo S/"+fila.costo.toFixed(2)+")\n"+fila.detalle);
   if(tipo==="ajuste")
     await avisarAdmin("⚖️ Ajuste de inventario de "+req.cond.u+"\n"+unid+" unidades · "+fila.detalle+"\nMotivo: "+motivo);
@@ -789,7 +936,9 @@ app.post("/liquidaciones",authC,async(req,res)=>{
   // ── 1) el camión debe estar vacío ──
   const st=await leerStock(u);
   const quedan=Object.keys(st.prods).reduce((s,k)=>s+Number(st.prods[k]||0),0);
-  if(quedan>0&&req.body.forzar!==true){
+  const pCfg=await getParams();
+  const permiteConStock=!!(pCfg.mermas_cfg&&pCfg.mermas_cfg.liquidar_con_stock);
+  if(quedan>0&&req.body.forzar!==true&&!permiteConStock){
     const cats=await porCategoria(st.prods);
     return res.status(409).json({ok:false,motivo:"camion_con_stock",quedan,
       por_categoria:cats,

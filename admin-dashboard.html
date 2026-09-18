@@ -121,6 +121,37 @@ tr.clk{cursor:pointer}tr.clk:hover td{background:#FCFBF7}
  #map{height:340px}
 }
 </style>
+<style id="v5movil">
+/* ═══ Panel usable desde el celular ═══ */
+@media(max-width:820px){
+  /* el contenido respira y nada se sale de la pantalla */
+  .content{padding:12px 12px 90px!important}
+  .card{padding:13px 13px!important;border-radius:14px!important}
+  .card *{max-width:100%}
+  /* rejillas de 3 o más columnas pasan a 2, y las de 2 a 1 cuando aprietan */
+  .card div[style*="grid-template-columns:1fr 1fr 1fr"]{grid-template-columns:1fr 1fr!important}
+  .card div[style*="grid-template-columns:repeat"]{grid-template-columns:1fr 1fr!important}
+  /* tablas y bloques anchos se desplazan en lugar de romper la página */
+  table{display:block;overflow-x:auto;white-space:nowrap}
+  pre,code{overflow-x:auto}
+  /* campos cómodos: 16px evita que el iPhone haga zoom al tocarlos */
+  input,select,textarea{font-size:16px!important;padding:10px!important;border-radius:10px!important}
+  button{min-height:40px}
+  /* los botones que puse con ancho mínimo dejan de desbordar */
+  .card button[style*="min-width:150px"],.card button[style*="min-width"]{min-width:0!important;width:100%!important}
+  .card div[style*="display:flex"][style*="gap"]{flex-wrap:wrap}
+  /* barra superior fija, para no perder el botón del menú al desplazar */
+  .top{position:sticky;top:0;z-index:700}
+}
+@media(max-width:560px){
+  .card div[style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}
+  .ct{font-size:13px!important}
+  .card{font-size:12.5px}
+}
+/* velo detrás del cajón lateral, para cerrarlo tocando fuera */
+#v5velo-menu{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:790;display:none}
+#v5velo-menu.on{display:block}
+</style>
 </head>
 <body>
 <div class="shell">
@@ -3406,6 +3437,484 @@ if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
   +'style="width:100%;padding:9px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;margin-bottom:9px">'
   +'<div id="comp-box" style="font-size:12px;opacity:.7">…</div></div>'+h;
 };}
+})();
+</script>
+<script id="v5preciounico">
+(function(){
+/* ═══ Un solo cálculo de precio para TODO el panel ═══
+   Antes cada pantalla resolvía el precio a su manera y, si no había tipo de
+   tienda elegido, caía al precio de la categoría — que en "Otros" y en las
+   categorías nuevas es 0. De ahí los precios que no cuadraban. */
+window.tipoPorDefecto=function(){
+ var t=(PARAMS_A.tipos_tienda&&PARAMS_A.tipos_tienda.length)?PARAMS_A.tipos_tienda[0]:'bodega';
+ return t;
+};
+window.precioPanel=function(prodId,cat,tipo){
+ tipo=tipo||tipoPorDefecto();
+ var pp=(window.PRECIOS||{})[prodId]||{};
+ if(pp[tipo]!=null)return Number(pp[tipo]);                 /* precio de ese tipo */
+ var pc=((PARAMS_A.precios_cat||{})[tipo]||{})[cat&&cat.id];
+ if(pc!=null)return Number(pc);                             /* precio de categoría para el tipo */
+ var otros=Object.keys(pp);
+ if(otros.length)return Number(pp[otros[0]]);               /* algún precio cargado, mejor que 0 */
+ var g=((window.CATE||{})[prodId]||{}).precio;
+ if(g!=null&&Number(g)>0)return Number(g);                  /* precio general del producto */
+ return Number((cat&&cat.precio)||0);                       /* último recurso */
+};
+window.precioOrigen=function(prodId,cat,tipo){
+ tipo=tipo||tipoPorDefecto();
+ var pp=(window.PRECIOS||{})[prodId]||{};
+ if(pp[tipo]!=null)return 'precio de '+tipo;
+ if(((PARAMS_A.precios_cat||{})[tipo]||{})[cat&&cat.id]!=null)return 'precio de categoría para '+tipo;
+ var otros=Object.keys(pp);
+ if(otros.length)return 'precio de '+otros[0]+' (sin precio para '+tipo+')';
+ if(((window.CATE||{})[prodId]||{}).precio>0)return 'precio general del producto';
+ return (cat&&Number(cat.precio)>0)?'precio de la categoría':'⚠️ sin precio cargado';
+};
+/* Pedidos WhatsApp usa el cálculo común */
+if(typeof precioPedido==='function'){window.precioPedido=function(prodId,cat){
+ return precioPanel(prodId,cat,(typeof tipoPedido==='function')?tipoPedido():null);
+};}
+/* la cabecera del selector deja de mostrar el precio único de la categoría */
+if(typeof pkPinta==='function'){var _pp=pkPinta;window.pkPinta=function(p){
+ var r=_pp.apply(this,arguments);
+ try{
+  var cont=document.getElementById(p+'-prods');
+  var cab=cont&&cont.firstElementChild;
+  var cat=CATA[(window._PK&&_PK[p]&&_PK[p].cat)||0];
+  if(cab&&cat){
+   var tipo=(p==='pd'&&typeof tipoPedido==='function')?(tipoPedido()||tipoPorDefecto()):null;
+   cab.textContent=cat.nom+(p==='pd'?(' · precios de '+(tipo||tipoPorDefecto())):'');
+  }
+  /* aviso si algún producto de la categoría no tiene precio */
+  if(p==='pd'&&cat){
+   var sin=(cat.prods||[]).filter(function(x){return !precioPanel(x.id,cat)});
+   var av=document.getElementById('pd-sinprecio');
+   if(!av&&cont&&cont.parentNode){av=document.createElement('div');av.id='pd-sinprecio';
+    av.style.cssText='font-size:11px;color:#8A6410;background:#FDF6E4;border:1px solid #EFDCA8;border-radius:9px;padding:7px 9px;margin:6px 0';
+    cont.parentNode.insertBefore(av,cont.nextSibling);}
+   if(av)av.style.display=sin.length?'block':'none';
+   if(av&&sin.length)av.textContent='Sin precio cargado: '+sin.map(function(x){return x.n}).join(', ')+'. Ponlos en Catálogo y precios o se registrarán en S/0.';
+  }
+ }catch(e){}
+ return r;};}
+})();
+</script>
+<script id="v5catreal">
+(function(){
+/* ═══ Todo el panel usa las categorías reales del catálogo ═══
+   CATC era la lista fija de 8 categorías del código. Se mantiene solo como
+   respaldo si el catálogo aún no cargó. */
+window.catsReales=function(){
+ if(window.CATA&&CATA.length)return CATA.map(function(c){return [c.id,(c.emoji?c.emoji+' ':'')+c.nom]});
+ return (typeof CATC!=='undefined')?CATC:[];
+};
+/* 1. Almacén: stock por categoría real */
+if(typeof rAlmacen==='function'){var _ra=rAlmacen;window.rAlmacen=function(){
+ var guardo=window.CATC;
+ try{window.CATC=catsReales();var h=_ra.apply(this,arguments);window.CATC=guardo;return h;}
+ catch(e){window.CATC=guardo;return '';}
+};}
+/* 2. Sugerencia de carga y tendencia: categorías reales */
+['rTendencia','cgSugerir','cgSugerirTxt','rConfig','paGuardar'].forEach(function(fn){
+ if(typeof window[fn]!=='function')return;
+ var _o=window[fn];
+ window[fn]=function(){
+  var guardo=window.CATC;window.CATC=catsReales();
+  try{var r=_o.apply(this,arguments);window.CATC=guardo;return r;}
+  catch(e){window.CATC=guardo;throw e;}
+ };
+});
+/* 3. El envío al almacén usa los identificadores reales */
+if(typeof almGuardarStock==='function'){var _ag=almGuardarStock;window.almGuardarStock=function(){
+ var guardo=window.CATC;window.CATC=catsReales();
+ try{var r=_ag.apply(this,arguments);window.CATC=guardo;return r;}
+ catch(e){window.CATC=guardo;throw e;}
+};}
+})();
+</script>
+<div id="v5velo-menu" onclick="cerrarMenuMovil()"></div>
+<script id="v5movil-js">
+(function(){
+/* el cajón se cierra al tocar fuera o al elegir una sección */
+window.cerrarMenuMovil=function(){
+ try{
+  var s=document.querySelector('.side');if(s)s.classList.remove('on');
+  var v=document.getElementById('v5velo-menu');if(v)v.classList.remove('on');
+ }catch(e){}
+};
+function vigilar(){
+ try{
+  var s=document.querySelector('.side'),v=document.getElementById('v5velo-menu');
+  if(!s||!v)return;
+  var abierto=s.classList.contains('on');
+  v.classList.toggle('on',abierto&&window.innerWidth<=860);
+ }catch(e){}
+}
+setInterval(vigilar,400);
+document.addEventListener('click',function(e){
+ try{
+  var ni=e.target.closest&&e.target.closest('.ni');
+  if(ni&&window.innerWidth<=860)setTimeout(cerrarMenuMovil,120);
+ }catch(er){}
+},true);
+})();
+</script>
+<script id="v5bandeja2">
+(function(){
+/* ═══ Bandeja: filtros, agrupación de repetidas y acciones reales ═══ */
+var FTIPO='todos',ABIERTO={};
+var META={
+ camion_detenido:{n:'Camión detenido',i:'🛑',acc:null},
+ inactivas:{n:'Tiendas inactivas',i:'😴',acc:null},
+ tienda_nueva:{n:'Tienda nueva',i:'🏪',acc:{si:'Verificar',no:'Rechazar',ayuda:'Verificar la deja en la ruta normal; rechazar la desactiva.'}},
+ boleta:{n:'Comprobante pedido',i:'🧾',acc:{si:'Marcar enviado',no:null}},
+ liquidacion:{n:'Liquidación',i:'💰',acc:{si:'Confirmar',no:'Observar',ayuda:'Confirmar cierra el viaje; observar lo deja marcado con nota.'}},
+ gastos:{n:'Gasto',i:'⛽',acc:{si:'Aprobar',no:'Rechazar',ayuda:'Rechazar hace que no cuente en la liquidación.'}},
+ credito_sin_permiso:{n:'Crédito sin permiso',i:'⚠️',acc:{si:'Autorizar crédito',no:'Revisar'}},
+ carga:{n:'Carga con diferencias',i:'📦',acc:{si:'Aceptar diferencias',no:'Revisar'}},
+ traspaso:{n:'Traspaso',i:'↔️',acc:null},
+ correccion:{n:'Corrección propuesta',i:'✏️',acc:{si:'Aplicar',no:'Descartar'}},
+ zona:{n:'Fuera de zona',i:'📍',acc:null},
+ almacen:{n:'Almacén',i:'🏬',acc:null},
+ visita:{n:'Visita',i:'👣',acc:null},
+ usuario:{n:'Usuario',i:'👤',acc:null},
+ respaldo:{n:'Respaldo',i:'💾',acc:null}
+};
+function metaDe(t){return META[t]||{n:t,i:'🔔',acc:null}}
+function hora(f){try{return new Date(f).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
+
+window.agruparAvisos=function(evs){
+ var g={};
+ evs.forEach(function(e){
+  /* misma clase de aviso y mismo título = una sola fila, con su cascada */
+  var k=e.tipo+'|'+String(e.titulo||'').slice(0,60);
+  (g[k]=g[k]||{tipo:e.tipo,titulo:e.titulo,items:[]}).items.push(e);
+ });
+ return Object.keys(g).map(function(k){
+  var x=g[k];
+  x.items.sort(function(a,b){return new Date(b.creado)-new Date(a.creado)});
+  x.ultimo=x.items[0];x.n=x.items.length;x.id=k;
+  return x;
+ }).sort(function(a,b){return new Date(b.ultimo.creado)-new Date(a.ultimo.creado)});
+};
+window.filtrarAvisos=function(t){FTIPO=t;renderForzado()};
+window.toggleAviso=function(k){ABIERTO[k]=!ABIERTO[k];renderForzado()};
+window.accionAviso=async function(id,accion,tipo){
+ var nota='';
+ if(accion==='rechazar'&&(tipo==='liquidacion'||tipo==='gastos')){
+  nota=prompt('¿Por qué? (queda guardado)','')||'';
+  if(!nota)return;
+ }
+ var r=await apiA('/admin/eventos/'+id+'/accion',{accion:accion,nota:nota});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ alert('✓ '+(r.hecho||'Listo'));
+ if(typeof cargarAdm==='function')await cargarAdm();
+ renderForzado();
+};
+window.archivarGrupo=async function(k){
+ var evs=(window.EVENTOS||[]).filter(function(e){return (e.tipo+'|'+String(e.titulo||'').slice(0,60))===k});
+ var r=await apiA('/admin/eventos/vistos',{ids:evs.map(function(e){return e.id})});
+ if(r&&r.ok){if(typeof cargarAdm==='function')await cargarAdm();renderForzado();}
+};
+
+window.htmlBandeja=function(evs,compacto){
+ if(!evs||!evs.length)return '<div style="font-size:12px;opacity:.65">Sin avisos pendientes.</div>';
+ var tipos={};evs.forEach(function(e){tipos[e.tipo]=(tipos[e.tipo]||0)+1});
+ var chips='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'
+  +'<button onclick="filtrarAvisos(\'todos\')" style="padding:6px 11px;border-radius:14px;border:1.5px solid '+(FTIPO==='todos'?'#1D4ED8':'rgba(128,128,128,.35)')+';background:'+(FTIPO==='todos'?'rgba(29,78,216,.12)':'none')+';color:inherit;font-size:11px;font-weight:800;cursor:pointer">Todos ('+evs.length+')</button>'
+  +Object.keys(tipos).map(function(t){var m=metaDe(t);
+    return '<button onclick="filtrarAvisos(\''+t+'\')" style="padding:6px 11px;border-radius:14px;border:1.5px solid '+(FTIPO===t?'#1D4ED8':'rgba(128,128,128,.35)')+';background:'+(FTIPO===t?'rgba(29,78,216,.12)':'none')+';color:inherit;font-size:11px;font-weight:800;cursor:pointer">'+m.i+' '+m.n+' ('+tipos[t]+')</button>';
+   }).join('')+'</div>';
+ var lista=agruparAvisos(FTIPO==='todos'?evs:evs.filter(function(e){return e.tipo===FTIPO}));
+ if(compacto)lista=lista.slice(0,6);
+ return chips+lista.map(function(g){
+  var m=metaDe(g.tipo),ab=ABIERTO[g.id];
+  var h='<div style="border:1px solid var(--linea);border-radius:12px;padding:10px 12px;margin-bottom:7px">'
+   +'<div onclick="toggleAviso(\''+g.id.replace(/'/g,"")+'\')" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;cursor:pointer">'
+   +'<div style="flex:1;min-width:0"><b style="font-size:12.5px">'+m.i+' '+(g.titulo||m.n)+'</b>'
+   +(g.n>1?(' <span style="font-size:10.5px;background:rgba(29,78,216,.14);color:#1D4ED8;border-radius:10px;padding:1px 7px;font-weight:800">'+g.n+' avisos</span>'):'')
+   +'<div style="font-size:10.5px;opacity:.65;margin-top:2px">'+hora(g.ultimo.creado)
+   +(g.n>1?(' · el más antiguo '+hora(g.items[g.n-1].creado)):'')+'</div>'
+   +'<div style="font-size:11.5px;opacity:.85;margin-top:3px">'+(g.ultimo.descripcion||'')+'</div></div>'
+   +'<span style="font-size:11px;opacity:.5">'+(ab?'▲':'▼')+'</span></div>';
+  if(ab&&g.n>1){
+   h+='<div style="margin-top:8px;border-left:2px solid var(--linea);padding-left:9px">'
+    +g.items.map(function(e){return '<div style="font-size:11px;padding:4px 0;opacity:.85">'+hora(e.creado)+' · '+(e.descripcion||e.titulo)+'</div>'}).join('')
+    +'</div>';
+  }
+  if(m.acc){
+   h+='<div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">'
+    +'<button onclick="accionAviso('+g.ultimo.id+',\'aceptar\',\''+g.tipo+'\')" style="flex:1;min-width:110px;padding:8px;border-radius:9px;border:1.5px solid #2F6B4F;background:#EEF6EE;color:#2F6B4F;font-size:11.5px;font-weight:800;cursor:pointer">'+m.acc.si+'</button>'
+    +(m.acc.no?('<button onclick="accionAviso('+g.ultimo.id+',\'rechazar\',\''+g.tipo+'\')" style="flex:1;min-width:110px;padding:8px;border-radius:9px;border:1.5px solid #B23B2E;background:none;color:#B23B2E;font-size:11.5px;font-weight:800;cursor:pointer">'+m.acc.no+'</button>'):'')
+    +'</div>'
+    +(m.acc.ayuda?('<div style="font-size:10.5px;opacity:.6;margin-top:5px">'+m.acc.ayuda+'</div>'):'');
+  }else{
+   h+='<button onclick="archivarGrupo(\''+g.id.replace(/'/g,"")+'\')" style="width:100%;margin-top:8px;padding:7px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-size:11px;font-weight:700;cursor:pointer">Archivar'+(g.n>1?(' los '+g.n):'')+'</button>';
+  }
+  return h+'</div>';
+ }).join('');
+};
+/* se usa en Bandeja y en el Resumen */
+if(typeof rBandeja==='function'){var _rb=rBandeja;window.rBandeja=function(){
+ var evs=(window.EVENTOS||[]).filter(function(e){return !e.visto});
+ return '<div class="card"><div class="ct">Avisos del servidor</div>'+htmlBandeja(evs,false)+'</div>';
+};}
+if(typeof rResumen==='function'){var _rr=rResumen;window.rResumen=function(){
+ var h=_rr.apply(this,arguments);
+ try{
+  var evs=(window.EVENTOS||[]).filter(function(e){return !e.visto});
+  if(evs.length)h=h.replace(/<div class="card"><div class="ct">[^<]*[Aa]visos[\s\S]*?<\/div><\/div>/,
+   '<div class="card"><div class="ct">Avisos del servidor</div>'+htmlBandeja(evs,true)+'</div>');
+ }catch(e){}
+ return h;};}
+})();
+</script>
+<script id="v5kardex2">
+(function(){
+/* ═══ Kardex: períodos libres, tarjetas plegables y filtros ═══ */
+var PLEG={};
+try{PLEG=JSON.parse(localStorage.getItem('v5a_plegado')||'{}')}catch(e){PLEG={}}
+window.plegar=function(k){PLEG[k]=!PLEG[k];try{localStorage.setItem('v5a_plegado',JSON.stringify(PLEG))}catch(e){}renderForzado()};
+window.estaPlegado=function(k,pordefecto){return (PLEG[k]===undefined)?!!pordefecto:PLEG[k]};
+window.cabecera=function(k,titulo,extra){
+ var p=estaPlegado(k);
+ return '<div class="ct" onclick="plegar(\''+k+'\')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center">'
+  +'<span>'+titulo+'</span><span style="font-size:11px;opacity:.6">'+(extra||'')+' '+(p?'▼':'▲')+'</span></div>';
+};
+
+/* ── período: día suelto y desde el inicio ── */
+window.PKX_D=null;window.PKX_H=null;
+var _rango=window.rangoPKX;
+window.rangoPKX=function(){
+ if(PKX==='dia'&&PKX_D)return{desde:PKX_D,hasta:PKX_D};
+ if(PKX==='rango'&&PKX_D&&PKX_H)return{desde:PKX_D,hasta:PKX_H};
+ if(PKX==='inicio')return{desde:PKX_D||'2020-01-01',hasta:new Date().toISOString().slice(0,10)};
+ return _rango();
+};
+var _etiq=window.etiquetaPKX;
+window.etiquetaPKX=function(){
+ if(PKX==='dia'&&PKX_D)return 'el '+PKX_D;
+ if(PKX==='rango'&&PKX_D&&PKX_H)return 'del '+PKX_D+' al '+PKX_H;
+ if(PKX==='inicio')return 'todo el historial';
+ return _etiq();
+};
+window.elegirDia=function(){
+ var d=prompt('¿Qué día quieres ver? (AAAA-MM-DD)',new Date().toISOString().slice(0,10));
+ if(!d||!/^\d{4}-\d{2}-\d{2}$/.test(d))return;
+ PKX='dia';PKX_D=d;cambiarPKX('dia');
+};
+window.elegirRango=function(){
+ var d=prompt('Desde (AAAA-MM-DD):',new Date(Date.now()-7*86400000).toISOString().slice(0,10));
+ if(!d||!/^\d{4}-\d{2}-\d{2}$/.test(d))return;
+ var h=prompt('Hasta (AAAA-MM-DD):',new Date().toISOString().slice(0,10));
+ if(!h||!/^\d{4}-\d{2}-\d{2}$/.test(h))return;
+ PKX='rango';PKX_D=d;PKX_H=h;cambiarPKX('rango');
+};
+window.desdeElInicio=async function(){
+ var r=await apiA('/admin/primera-venta'+((window.FKX&&FKX!=='todos')?('?conductor='+encodeURIComponent(FKX)):''));
+ if(!(r&&r.ok)||!r.fecha)return alert('Todavía no hay ventas registradas.');
+ PKX='inicio';PKX_D=String(r.fecha).slice(0,10);
+ alert('Mostrando desde la primera venta registrada: '+PKX_D);
+ cambiarPKX('inicio');
+};
+/* botones nuevos junto a los de período */
+if(typeof rKardex==='function'){var _rk=rKardex;window.rKardex=function(){
+ var h=_rk.apply(this,arguments);
+ var extra='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px">'
+  +'<button onclick="elegirDia()" style="flex:1;min-width:110px;padding:7px;border-radius:12px;border:1.5px solid '+(PKX==='dia'?'#1D4ED8':'rgba(128,128,128,.35)')+';background:none;color:inherit;font-size:11.5px;font-weight:800;cursor:pointer">📅 Un día</button>'
+  +'<button onclick="elegirRango()" style="flex:1;min-width:110px;padding:7px;border-radius:12px;border:1.5px solid '+(PKX==='rango'?'#1D4ED8':'rgba(128,128,128,.35)')+';background:none;color:inherit;font-size:11.5px;font-weight:800;cursor:pointer">📆 Entre fechas</button>'
+  +'<button onclick="desdeElInicio()" style="flex:1;min-width:110px;padding:7px;border-radius:12px;border:1.5px solid '+(PKX==='inicio'?'#1D4ED8':'rgba(128,128,128,.35)')+';background:none;color:inherit;font-size:11.5px;font-weight:800;cursor:pointer">🕐 Desde el inicio</button></div>';
+ return h.replace('</div>'+'<div class="card">',extra+'</div><div class="card">');
+};}
+
+/* ── Comprobantes: plegable y con filtros ── */
+window.COMPF={conductor:'todos',estado:'vigentes',metodo:'todos'};
+window.compFiltro=function(k,v){COMPF[k]=v;rComprobantes(document.getElementById('comp-q')?document.getElementById('comp-q').value:'')};
+if(typeof rComprobantes==='function'){var _rc=rComprobantes;window.rComprobantes=async function(q){
+ var box=document.getElementById('comp-box');if(!box)return;
+ if(estaPlegado('comp')){box.innerHTML='<div style="font-size:11.5px;opacity:.6">Plegado. Toca el título para abrir.</div>';return;}
+ box.textContent='Consultando…';
+ var r0=(typeof rangoPKX==='function')?rangoPKX():null;
+ var u='/admin/comprobantes?estado='+COMPF.estado+'&metodo='+COMPF.metodo
+  +(COMPF.conductor!=='todos'?('&conductor='+encodeURIComponent(COMPF.conductor)):'')
+  +(r0?('&desde='+r0.desde+'&hasta='+r0.hasta):'')+(q?('&q='+encodeURIComponent(q)):'');
+ var r=await apiA(u);
+ if(!(r&&r.ok))return box.textContent='No se pudo consultar.';
+ COMPS=r.comprobantes||[];
+ var conds=(typeof USRS!=='undefined'?USRS:[]).filter(function(x){return x.activo});
+ var sel=function(k,ops,val){return '<select onchange="compFiltro(\''+k+'\',this.value)" style="flex:1;min-width:120px;padding:7px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:11.5px">'
+  +ops.map(function(o){return '<option value="'+o[0]+'"'+(val===o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select>'};
+ var filtros='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px">'
+  +sel('conductor',[['todos','Todos los conductores']].concat(conds.map(function(u2){return [u2.usuario,u2.nombre]})),COMPF.conductor)
+  +sel('estado',[['vigentes','Vigentes'],['anuladas','Anuladas'],['todas','Todas']],COMPF.estado)
+  +sel('metodo',[['todos','Toda forma de pago'],['efectivo','Efectivo'],['yape','Yape'],['credito','Crédito'],['mixto','Mixto']],COMPF.metodo)
+  +'</div><div style="font-size:11px;opacity:.65;margin-bottom:8px">'+etiquetaPKX()+' · '+COMPS.length+' comprobante(s)</div>';
+ var guardado=box.innerHTML;
+ await _rc.call(this,q);
+ box.innerHTML=filtros+box.innerHTML;
+};}
+/* títulos plegables en las tarjetas del Kardex */
+if(typeof rKardex==='function'){var _rk2=rKardex;window.rKardex=function(){
+ var h=_rk2.apply(this,arguments);
+ h=h.replace('<div class="ct">🧾 Comprobantes</div>',cabecera('comp','🧾 Comprobantes'));
+ h=h.replace('<div class="ct">Kardex por conductor</div>',cabecera('kxc','Kardex por conductor'));
+ if(estaPlegado('kxc'))h=h.replace(/(<div class="ct"[^>]*>[\s\S]*?Kardex por conductor[\s\S]*?<\/div>)[\s\S]*?(<\/div>\s*<div class="card")/,'$1<div style="font-size:11.5px;opacity:.6">Plegado. Toca el título para abrir.</div>$2');
+ return h;};}
+})();
+</script>
+<script id="v5config2">
+(function(){
+/* ═══ Configuración real: siete bloques que sí guardan ═══ */
+var P={};
+window.cargarConfig=async function(){
+ var r=await apiA('/admin/params');
+ if(r&&r.ok){P=r.params||{};window.PARAMS_A=Object.assign(window.PARAMS_A||{},P);}
+ return P;
+};
+function v(ruta,def){
+ var p=ruta.split('.'),o=P;
+ for(var i=0;i<p.length;i++){if(o==null)return def;o=o[p[i]];}
+ return (o===undefined||o===null)?def:o;
+}
+function campo(id,etq,val,tipo,ayuda){
+ return '<div style="margin-bottom:9px"><label style="font-size:11.5px;display:block;margin-bottom:3px">'+etq+'</label>'
+  +'<input id="cf-'+id+'" type="'+(tipo||'text')+'" value="'+(val==null?'':String(val).replace(/"/g,'&quot;'))+'" '
+  +'style="width:100%;padding:9px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'
+  +(ayuda?('<div style="font-size:10.5px;opacity:.6;margin-top:2px">'+ayuda+'</div>'):'')+'</div>';
+}
+function inter(id,etq,val,ayuda){
+ return '<label style="display:flex;align-items:flex-start;gap:9px;margin-bottom:9px;cursor:pointer">'
+  +'<input id="cf-'+id+'" type="checkbox" '+(val?'checked':'')+' style="width:20px;height:20px;margin-top:1px">'
+  +'<span><span style="font-size:12.5px">'+etq+'</span>'
+  +(ayuda?('<div style="font-size:10.5px;opacity:.6">'+ayuda+'</div>'):'')+'</span></label>';
+}
+function val(id){var e=document.getElementById('cf-'+id);return e?e.value:''}
+function chk(id){var e=document.getElementById('cf-'+id);return e?!!e.checked:false}
+
+window.guardarConfig=async function(){
+ var cuerpo={
+  negocio:{nombre:val('neg_nom'),tel:val('neg_tel'),moneda:val('neg_mon')},
+  credito_cfg:{limite:Number(val('cr_lim'))||0,dias_vencida:Number(val('cr_dias'))||30,
+    fiar_sin_permiso:chk('cr_permiso'),aviso_desde:Number(val('cr_aviso'))||0},
+  operacion:{hora_informe:Number(val('op_hora'))||22,tope_gasto:Number(val('op_gasto'))||0,
+    metros_entrega:Number(val('op_metros'))||300,min_detenido:Number(val('op_det'))||45,
+    radio_dup_m:Number(val('op_dup'))||15,min_gps_respaldo:Number(val('op_gps'))||10},
+  mermas_cfg:{aviso_desde:Number(val('me_aviso'))||0,ajuste_requiere_ok:chk('me_ok'),
+    liquidar_con_stock:chk('me_stock')},
+  catalogo_cfg:{precio_cat_nueva:Number(val('ca_precio'))||0,vender_sin_precio:chk('ca_sinprecio'),
+    conductor_cambia_precio:chk('ca_cambia')},
+  avisos_cfg:{},futuras:{}
+ };
+ ['tienda_nueva','liquidacion','gastos','credito_sin_permiso','carga','merma','camion_detenido','zona','inactivas']
+  .forEach(function(k){cuerpo.avisos_cfg[k]=chk('av_'+k)});
+ ['sugerencia_carga','vip_auto','gastos_inusuales','orden_ruta','prediccion_compra']
+  .forEach(function(k){cuerpo.futuras[k]=chk('fu_'+k)});
+ var r=await apiA('/admin/params',cuerpo);
+ if(r&&r.ok){P=r.params||P;alert('✓ Configuración guardada. Los conductores la reciben al sincronizar.');renderForzado();}
+ else alert('No se pudo guardar: '+((r&&r.error)||'sin respuesta'));
+};
+
+/* ── modalidades y almacenes ── */
+window.modAgregar=async function(){
+ var n=prompt('Nombre de la modalidad (ej: Ruta Chumbivilcas):','');if(!n)return;
+ var d=prompt('¿Cuántos días suele durar ese viaje?','3');
+ var mods=(v('modalidades',[])||[]).slice();
+ mods.push({id:n.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20),nombre:n,dias_viaje:Number(d)||3,
+  liquida_en:'principal',gps:'camion',almacen:'principal'});
+ var r=await apiA('/admin/params',{modalidades:mods});
+ if(r&&r.ok){P=r.params;renderForzado();}
+};
+window.modQuitar=async function(id){
+ if(!confirm('¿Quitar esta modalidad? Los conductores que la tengan quedan sin modalidad.'))return;
+ var mods=(v('modalidades',[])||[]).filter(function(m){return m.id!==id});
+ var r=await apiA('/admin/params',{modalidades:mods});
+ if(r&&r.ok){P=r.params;renderForzado();}
+};
+window.almAgregar=async function(){
+ var n=prompt('Nombre del almacén (ej: Almacén Espinar):','');if(!n)return;
+ var ref=prompt('Referencia o dirección:','')||'';
+ var als=(v('almacenes',[])||[]).slice();
+ als.push({id:n.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20),nombre:n,ref:ref,activo:true});
+ var r=await apiA('/admin/params',{almacenes:als});
+ if(r&&r.ok){P=r.params;alert('✓ Almacén agregado. Ya puedes enviarle mercadería y asignarlo a una modalidad.');renderForzado();}
+};
+window.almQuitar=async function(id){
+ if(!confirm('¿Quitar este almacén? Su stock deja de mostrarse, pero no se borra.'))return;
+ var als=(v('almacenes',[])||[]).filter(function(a){return a.id!==id});
+ var r=await apiA('/admin/params',{almacenes:als});
+ if(r&&r.ok){P=r.params;renderForzado();}
+};
+
+window.rConfig=function(){
+ var caja=function(t,cont,nota){return '<div class="card"><div class="ct">'+t+'</div>'
+  +(nota?('<div style="font-size:11px;opacity:.65;margin-bottom:9px">'+nota+'</div>'):'')+cont+'</div>'};
+ var mods=v('modalidades',[]),als=v('almacenes',[]);
+ var h='';
+ h+=caja('🏢 Negocio',
+   campo('neg_nom','Nombre del negocio',v('negocio.nombre',''))
+  +campo('neg_tel','WhatsApp del dueño',v('negocio.tel',''),'tel','Ahí llegan los avisos del sistema.')
+  +campo('neg_mon','Símbolo de moneda',v('negocio.moneda','S/')));
+ h+=caja('💳 Crédito y cobranza',
+   campo('cr_lim','Límite de crédito por defecto',v('credito_cfg.limite',230),'number','Se aplica a las tiendas que no tengan uno propio.')
+  +campo('cr_dias','Días para considerar una deuda vencida',v('credito_cfg.dias_vencida',30),'number')
+  +campo('cr_aviso','Avisarme desde (S/)',v('credito_cfg.aviso_desde',150),'number')
+  +inter('cr_permiso','El conductor puede fiar sin pedirme permiso',v('credito_cfg.fiar_sin_permiso',true),'Si lo apagas, cada venta a crédito te llega como aviso para autorizar.'));
+ h+=caja('🚚 Operación diaria',
+   campo('op_hora','Hora del informe diario',v('operacion.hora_informe',22),'number','0 a 23.')
+  +campo('op_gasto','Tope de gasto sin aprobación (S/)',v('operacion.tope_gasto',350),'number')
+  +campo('op_metros','Distancia máxima para dar por válida una entrega (m)',v('operacion.metros_entrega',300),'number')
+  +campo('op_det','Minutos sin moverse para avisar "camión detenido"',v('operacion.min_detenido',45),'number')
+  +campo('op_dup','Radio para detectar tiendas duplicadas (m)',v('operacion.radio_dup_m',15),'number')
+  +campo('op_gps','Minutos sin señal del camión antes de usar el celular',v('operacion.min_gps_respaldo',10),'number','Pasado ese tiempo, el mapa usa el GPS del celular del conductor.'));
+ h+=caja('📉 Mermas e inventario',
+   campo('me_aviso','Avisarme de mermas desde (S/ de costo)',v('mermas_cfg.aviso_desde',30),'number')
+  +inter('me_ok','Los ajustes de conteo requieren mi visto bueno',v('mermas_cfg.ajuste_requiere_ok',false))
+  +inter('me_stock','Permitir liquidar con mercadería en el camión',v('mermas_cfg.liquidar_con_stock',false),'Lo normal es exigir el camión vacío.'));
+ h+=caja('🏷️ Catálogo',
+   campo('ca_precio','Precio por defecto de una categoría nueva',v('catalogo_cfg.precio_cat_nueva',0),'number')
+  +inter('ca_sinprecio','Permitir vender productos sin precio cargado',v('catalogo_cfg.vender_sin_precio',true),'Si lo apagas, el conductor no podrá cobrarlos hasta que les pongas precio.')
+  +inter('ca_cambia','El conductor puede cambiar precios a mano en la venta',v('catalogo_cfg.conductor_cambia_precio',true)));
+ h+=caja('🚦 Modalidades de conductor',
+   (mods.length?mods.map(function(m){
+     return '<div style="border:1px solid var(--linea);border-radius:10px;padding:9px 11px;margin-bottom:7px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center">'
+      +'<b style="font-size:12.5px">'+m.nombre+'</b>'
+      +'<button onclick="modQuitar(\''+m.id+'\')" style="background:none;border:0;color:#B23B2E;font-size:11px;font-weight:800;cursor:pointer">Quitar</button></div>'
+      +'<div style="font-size:11px;opacity:.7;margin-top:2px">Viaje de ~'+m.dias_viaje+' día(s) · liquida en '+m.liquida_en+' · GPS '+m.gps+'</div></div>';
+    }).join(''):'<div style="font-size:12px;opacity:.65;margin-bottom:8px">Sin modalidades todavía.</div>')
+  +'<button onclick="modAgregar()" style="width:100%;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px;font-weight:700;cursor:pointer">+ Agregar modalidad</button>',
+   'Todos los conductores pueden hacer lo mismo y ven todas las tiendas. La modalidad solo define la duración esperada del viaje, dónde liquida y qué GPS usa.');
+ h+=caja('🏬 Almacenes',
+   (als.length?als.map(function(a){
+     return '<div style="border:1px solid var(--linea);border-radius:10px;padding:9px 11px;margin-bottom:7px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center">'
+      +'<b style="font-size:12.5px">'+a.nombre+'</b>'
+      +'<button onclick="almQuitar(\''+a.id+'\')" style="background:none;border:0;color:#B23B2E;font-size:11px;font-weight:800;cursor:pointer">Quitar</button></div>'
+      +(a.ref?('<div style="font-size:11px;opacity:.7;margin-top:2px">'+a.ref+'</div>'):'')+'</div>';
+    }).join(''):'<div style="font-size:12px;opacity:.65;margin-bottom:8px">Solo el almacén principal.</div>')
+  +'<button onclick="almAgregar()" style="width:100%;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px;font-weight:700;cursor:pointer">+ Agregar almacén</button>',
+   'Puedes tener varios. Cada uno guarda su propio stock y puede recibir o enviar mercadería.');
+ var avisos=[['tienda_nueva','Tienda nueva registrada'],['liquidacion','Liquidaciones'],['gastos','Gastos sobre el tope'],
+  ['credito_sin_permiso','Crédito sin autorización'],['carga','Cargas con diferencias'],['merma','Mermas'],
+  ['camion_detenido','Camión detenido'],['zona','Ventas fuera de zona'],['inactivas','Tiendas inactivas']];
+ h+=caja('🔔 Qué avisos me llegan por WhatsApp',
+   avisos.map(function(a){return inter('av_'+a[0],a[1],v('avisos_cfg.'+a[0],true))}).join(''),
+   'Los que apagues siguen llegando a la Bandeja; solo dejan de sonarte en el teléfono.');
+ var fut=[['sugerencia_carga','Sugerir la carga según el historial','Necesita 3 o 4 viajes registrados'],
+  ['vip_auto','Marcar tiendas VIP automáticamente','Necesita ~2 meses de ventas'],
+  ['gastos_inusuales','Avisar de gastos fuera de lo normal','Necesita ~1 mes de gastos'],
+  ['orden_ruta','Sugerir el orden de la ruta','Necesita el GPS estable y horarios de tienda cargados'],
+  ['prediccion_compra','Predecir cuándo vuelve a comprar cada tienda','Necesita ~3 meses de historial']];
+ h+=caja('⏳ Funciones que mejoran con el tiempo',
+   fut.map(function(f){return inter('fu_'+f[0],f[1],v('futuras.'+f[0],false),f[2])}).join(''),
+   'Puedes activarlas cuando quieras. Mientras no haya datos suficientes, el sistema lo avisará en vez de inventar resultados.');
+ h+='<div class="card"><button onclick="guardarConfig()" style="width:100%;padding:12px;border-radius:11px;border:0;background:#2F6B4F;color:#fff;font-size:13px;font-weight:800;cursor:pointer">Guardar configuración</button></div>';
+ return h;
+};
+if(typeof cargarAdm==='function'){var _ca=cargarAdm;window.cargarAdm=async function(){
+ var r=await _ca.apply(this,arguments);await cargarConfig();return r;};}
+cargarConfig();
 })();
 </script>
 </body>
