@@ -270,7 +270,7 @@ function rTiendas(){
  ${L2.map(t=>{const r=repTP(t);const pct=Math.min(100,t.sa/LIMITE*100);return `<tr class="clk" onclick="ficha(${t.id})">
   <td><span class="dot" style="background:${r.c};width:11px;height:11px"></span></td>
   <td><b>${t.n}</b> ${t.vip?'<span style="color:var(--trigo)">★</span>':''}${chipRitmo(t)}${t.act?'':' <span class="pill p-gr">inactiva</span>'}<div style="font-size:10.5px;color:var(--mut)">${t.z}</div></td>
-  <td><div style="font-size:11px;font-weight:700;color:${r.c}">${r.l}</div><div style="font-size:10px;color:var(--mut)">${t.d} días · ciclo ${ritmoP(t.ritmo).ciclo_dias}d</div></td>
+  <td><div style="font-size:11px;font-weight:700;color:${r.c}">${r.l}</div><div style="font-size:10px;color:var(--mut)">${t.d} días · ciclo ${ritmoP(t.ritmo).ciclo_dias}d</div>${abreHoyP(t)?'':'<div style="font-size:10px;font-weight:800;color:#B97A1F">🚫 hoy no atiende</div>'}<div style="font-size:9.5px;color:var(--mut);letter-spacing:.5px">${diasTextoP(t.dias)}</div></td>
   <td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:${pct}%;background:${pct>=100?'var(--rojo)':pct>60?'var(--r5)':'var(--verde)'}"></i></div><span class="mono" style="font-size:11px">${money(t.sa)}</span></div>${t.sinMov?`<div style="font-size:9.5px;color:var(--rojo);font-weight:800">🐌 ${t.sinMov}d sin movimiento</div>`:''}</td>
   <td>${t.falta.length?`<span class="pill ${t.falta.length>1?'p-ro':'p-tr'}">falta: ${t.falta.join(', ')}</span>`:'<span class="pill p-ve">completo</span>'}</td>
   <td style="color:var(--mut)">›</td></tr>`;}).join('')}
@@ -658,8 +658,8 @@ window.atGuardar=async function(){
  var lat=parseFloat(g('at-lat')),lon=parseFloat(g('at-lon'));
  if(isNaN(lat)||isNaN(lon)){lat=null;lon=null;}
  var cond=g('at-c');
- var pay={n:n,z:g('at-z'),tp:g('at-tp')||'bodega',ritmo:g('at-ritmo')||'activa',d:g('at-d'),tel:g('at-tel').replace(/\D/g,''),lat:lat,lon:lon,conductor:cond||null,h_ini:g('at-hi'),h_fin:g('at-hf'),dias_no:g('at-dn')};
- if(typeof TIENDAS!=='undefined')TIENDAS.push({id:'loc'+Date.now(),n:n,z:pay.z,due:pay.d,tel:pay.tel,lat:lat,lon:lon,ritmo:pay.ritmo,d:(ritmoP(pay.ritmo).ciclo_dias||3),vip:false,sa:0,cr:false,li:0,act:true,nueva:false,verificada:true,falta:[],mov:[],conductor_asig:cond||null});
+ var pay={n:n,z:g('at-z'),tp:g('at-tp')||'bodega',ritmo:g('at-ritmo')||'activa',dias:(window.AT_DIAS||'1111111'),d:g('at-d'),tel:g('at-tel').replace(/\D/g,''),lat:lat,lon:lon,conductor:cond||null,h_ini:g('at-hi'),h_fin:g('at-hf')};
+ if(typeof TIENDAS!=='undefined')TIENDAS.push({id:'loc'+Date.now(),n:n,z:pay.z,due:pay.d,tel:pay.tel,lat:lat,lon:lon,ritmo:pay.ritmo,dias:pay.dias,abre_hoy:(diasNormP(pay.dias).charAt(diaHoyP())!=='0'),d:(ritmoP(pay.ritmo).ciclo_dias||3),vip:false,sa:0,cr:false,li:0,act:true,nueva:false,verificada:true,falta:[],mov:[],conductor_asig:cond||null});
  var r=await apiA('/admin/tiendas',pay);
  render();
  if(r&&r.ok)alert('✓ Tienda guardada en el servidor'+(cond?'. Aviso 🔔 enviado a @'+cond+' — entra en su ruta de HOY.':'.'));
@@ -1625,7 +1625,7 @@ window.guardarTiendaAdm=async function(){
  var t=TIENDAS[TSEL];if(!t)return;
  var g=function(id){var e=document.getElementById(id);return e?e.value.trim():null};
  var r=await apiA('/admin/tiendas/'+t.id+'/editar',{nombre:g('et-nom'),zona:g('et-zona'),dueno:g('et-due'),tel:g('et-tel'),
-  tipo:g('et-tipo'),ritmo:g('et-ritmo'),vip:g('et-vip')==='1',hora_ini:g('et-hi'),hora_fin:g('et-hf'),notas:g('et-not'),
+  tipo:g('et-tipo'),ritmo:g('et-ritmo'),dias:(window.ET_DIAS||'1111111'),vip:g('et-vip')==='1',hora_ini:g('et-hi'),hora_fin:g('et-hf'),notas:g('et-not'),
   lat:parseFloat(g('et-lat'))||null,lon:parseFloat(g('et-lon'))||null});
  if(r&&r.ok){alert(r.sin_cambios?'Sin cambios':'✓ Guardado');await cargarAdm();abrirTienda(TSEL);}
  else alert((r&&r.error)||'No se pudo guardar');
@@ -3608,6 +3608,10 @@ var META={
  carga:{n:'Carga con diferencias',i:'📦',acc:{si:'Aceptar diferencias',no:'Revisar'}},
  traspaso:{n:'Traspaso',i:'↔️',acc:null},
  correccion:{n:'Corrección propuesta',i:'✏️',acc:{si:'Aplicar',no:'Descartar'}},
+ dias_sugeridos:{n:'Días de atención propuestos',i:'📅',acc:{si:'Aplicar los días',no:'Descartar',
+   ayuda:'Aplicar cambia los días de esa tienda: los días que no atiende dejan de contar para su reposición y ese día baja de prioridad en la ruta.'}},
+ pedido_dia:{n:'Pedido en día cerrado',i:'📅',acc:{si:'Revisado',no:null,
+   ayuda:'Se registró un pedido para un día en que esa tienda tiene marcado que no atiende. Revisa si los días están bien cargados.'}},
  ritmo_sugerido:{n:'Cambio de ciclo propuesto',i:'🔁',acc:{si:'Aplicar el ciclo',no:'Descartar',
    ayuda:'Aplicar cambia el ciclo de esa tienda: desde ese momento se mide con la escala del ciclo nuevo y cambia cuándo entra a la ruta.'}},
  zona:{n:'Fuera de zona',i:'📍',acc:null},
@@ -4561,6 +4565,192 @@ if(typeof rConfig==='function'){var _rc=rConfig;window.rConfig=function(){
   /* se inserta dentro de la tarjeta de ritmos, justo antes de su cierre */
   var marca='<div style="font-size:10.5px;opacity:.6;margin-top:8px;line-height:1.5">Para pasar tiendas de un ritmo a otro';
   if(h.indexOf(marca)>=0)h=h.replace(marca,barra+marca);
+ }catch(e){}
+ return h;
+};}
+})();
+</script>
+<script id="v5diasP">
+(function(){
+/* ═══ 167 · Días de atención en el panel ═══ */
+var DIA_COR=['L','M','M','J','V','S','D'];
+var DIA_NOM=['lunes','martes','miércoles','jueves','viernes','sábado','domingo'];
+window.DIA_NOM_P=DIA_NOM;
+
+window.diaHoyP=function(){
+ try{var d=(window._ultAdm||{}).dia_hoy;if(d!=null)return Number(d);}catch(e){}
+ var x=new Date(Date.now()-5*3600000);return (x.getUTCDay()+6)%7;   /* Perú, UTC-5 */
+};
+window.diasNormP=function(v){
+ var t=String(v==null?'':v).replace(/[^012]/g,'');
+ if(t.length!==7)t='1111111';
+ if(t.indexOf('1')<0&&t.indexOf('2')<0)t='1111111';
+ return t;
+};
+window.abreHoyP=function(t){
+ if(t&&t.abre_hoy!=null)return !!t.abre_hoy;
+ return diasNormP(t&&t.dias).charAt(diaHoyP())!=='0';
+};
+window.diasTextoP=function(v){
+ var t=diasNormP(v);
+ if(t.indexOf('0')<0)return 'todos los días';
+ return DIA_COR.map(function(d,i){return t.charAt(i)==='0'?'·':d}).join(' ');
+};
+window.cuadrosDiasP=function(val,fn){
+ var t=diasNormP(val),hoy=diaHoyP();
+ return '<div style="display:flex;gap:4px">'+DIA_COR.map(function(d,i){
+  var on=t.charAt(i)!=='0';
+  return '<button type="button" onclick="'+fn+'('+i+')" title="'+DIA_NOM[i]+(i===hoy?' (hoy)':'')+'" '
+   +'style="flex:1;padding:8px 0;border-radius:9px;border:1.5px solid '+(on?'#2F7D4F':'var(--linea)')+';'
+   +'background:'+(on?'rgba(47,125,79,.12)':'none')+';color:'+(on?'#2F7D4F':'inherit')+';'
+   +'font-size:12px;font-weight:800;cursor:pointer;'+(i===hoy?'box-shadow:0 0 0 2px rgba(29,78,216,.25);':'')+'">'+d+'</button>';
+ }).join('')+'</div>';
+};
+function resumen(t){
+ var c=[];for(var i=0;i<7;i++)if(diasNormP(t).charAt(i)==='0')c.push(DIA_NOM[i]);
+ return c.length?('No atiende: '+c.join(', ')):'Atiende todos los días';
+}
+
+/* ── alta ─────────────────────────────────────────────────────────── */
+window.AT_DIAS=window.AT_DIAS||'1111111';
+window.atTogDia=function(i){
+ var t=diasNormP(window.AT_DIAS).split('');
+ t[i]=(t[i]==='0')?'1':'0';
+ if(t.join('').indexOf('1')<0)return alert('La tienda tiene que atender al menos un día.');
+ window.AT_DIAS=t.join('');pintaAt();
+};
+function pintaAt(){
+ var h=document.getElementById('at-dias');if(!h)return;
+ h.innerHTML='<div style="font-size:11px;font-weight:800;opacity:.75;margin-bottom:5px">📅 Días que atiende</div>'
+  +cuadrosDiasP(window.AT_DIAS,'atTogDia')
+  +'<div style="font-size:10.5px;opacity:.65;margin-top:4px">'+resumen(window.AT_DIAS)+'</div>';
+}
+/* ── edición ──────────────────────────────────────────────────────── */
+window.ET_DIAS=window.ET_DIAS||'1111111';
+window.etTogDia=function(i){
+ var t=diasNormP(window.ET_DIAS).split('');
+ t[i]=(t[i]==='0')?'1':'0';
+ if(t.join('').indexOf('1')<0)return alert('La tienda tiene que atender al menos un día.');
+ window.ET_DIAS=t.join('');pintaEt();
+};
+function pintaEt(){
+ var h=document.getElementById('et-dias');if(!h)return;
+ h.innerHTML='<div style="font-size:11px;font-weight:800;opacity:.75;margin-bottom:5px">📅 Días que atiende</div>'
+  +cuadrosDiasP(window.ET_DIAS,'etTogDia')
+  +'<div style="font-size:10.5px;opacity:.65;margin-top:4px">'+resumen(window.ET_DIAS)+'</div>';
+}
+/* los contenedores se insertan cuando la pantalla ya está pintada */
+function monta(){
+ try{
+  var at=document.getElementById('at-ritmo');
+  if(at&&at.parentNode&&!document.getElementById('at-dias')){
+   var d=document.createElement('div');d.id='at-dias';
+   d.style.cssText='grid-column:1/-1;margin-top:2px';
+   at.parentNode.appendChild(d);
+  }
+  pintaAt();
+  var dn=document.getElementById('at-dn');if(dn){dn.style.display='none';dn.value='';}
+  var et=document.getElementById('et-ritmo');
+  if(et&&et.parentNode&&!document.getElementById('et-dias')){
+   var e=document.createElement('div');e.id='et-dias';
+   e.style.cssText='grid-column:1/-1;margin-top:2px';
+   et.parentNode.appendChild(e);
+  }
+  pintaEt();
+ }catch(e){}
+}
+if(typeof render==='function'){var _r=render;window.render=function(){
+ var r=_r.apply(this,arguments);
+ setTimeout(monta,60);setTimeout(monta,320);
+ return r;};}
+/* al abrir la ficha de edición, los días parten de los de esa tienda */
+if(typeof abrirTienda==='function'){var _ab=abrirTienda;window.abrirTienda=async function(i){
+ try{var t=TDS()[i];if(t)window.ET_DIAS=diasNormP(t.dias);}catch(e){}
+ var r=await _ab.apply(this,arguments);
+ setTimeout(monta,120);setTimeout(monta,400);
+ return r;};}
+
+/* ── el puntaje del panel baja si hoy no atiende ──────────────────── */
+function peso(){
+ try{var v=(window._ultAdm||{}).peso_cerrada;if(v!=null)return Math.max(0,Math.min(1,Number(v)));}catch(e){}
+ return 0.15;
+}
+if(typeof puntos==='function'){var _p=puntos;window.puntos=function(t){
+ var r=_p.apply(this,arguments);
+ try{
+  if(!t||r.sc<=0)return r;
+  if(abreHoyP(t)){r.abre=true;return r;}
+  var conPedido=!!t.pedidoHoy, base=conPedido?Math.max(0,r.sc-100):r.sc;
+  r={sc:Math.round(base*peso())+(conPedido?100:0),nivel:r.nivel,abre:false,
+     why:r.why+' · 🚫 hoy no atiende'+(conPedido?' (pero pidió hoy: revisa sus días)':'')};
+ }catch(e){}
+ return r;};}
+
+/* ── la tabla de tiendas muestra los días ─────────────────────────── */
+if(typeof rTiendas==='function'){var _rt=rTiendas;window.rTiendas=function(){
+ var h='';try{h=_rt.apply(this,arguments)}catch(e){return ''}
+ try{
+  var cerradas=TDS().filter(function(t){return t.act&&!abreHoyP(t)}).length;
+  if(cerradas){
+   var aviso='<div style="background:rgba(217,163,47,.12);border:1px solid rgba(217,163,47,.35);color:#B97A1F;'
+    +'border-radius:10px;padding:9px 12px;font-size:11.5px;line-height:1.5;margin-bottom:8px">'
+    +'📅 Hoy es <b>'+DIA_NOM[diaHoyP()]+'</b>: <b>'+cerradas+'</b> tienda(s) no atienden. '
+    +'Siguen en la lista y en la ruta, pero con prioridad baja y marcadas.</div>';
+   h=aviso+h;
+  }
+ }catch(e){}
+ return h;
+};}
+})();
+</script>
+<script id="v5diascfg">
+(function(){
+/* ═══ 167 · Ajuste de los días en Configuración ═══ */
+window.guardarDiasCfg=async function(){
+ var g=function(id){var e=document.getElementById(id);return e?e.value:''};
+ var c=function(id){var e=document.getElementById(id);return e?!!e.checked:false};
+ var pct=Math.max(0,Math.min(100,Number(g('dc-peso'))||0));
+ var r=await apiA('/admin/params',{dias_cfg:{peso_cerrada:pct/100,
+   avisar_pedido:c('dc-ped'),avisar_ruta:c('dc-ruta')}});
+ if(r&&r.ok){alert('✓ Guardado. Las apps lo toman en la siguiente sincronización.');await cargarAdm();render();}
+ else alert('No se pudo guardar: '+((r&&r.error)||'sin respuesta'));
+};
+if(typeof rConfig==='function'){var _rc=rConfig;window.rConfig=function(){
+ var h='';try{h=_rc.apply(this,arguments)}catch(e){return ''}
+ try{
+  var P=(window.PARAMS_A||{}).dias_cfg||{};
+  var pct=Math.round(((P.peso_cerrada!=null?P.peso_cerrada:0.15))*100);
+  var hoy=(typeof diaHoyP==='function')?diaHoyP():0;
+  var cerradas=0;try{cerradas=TDS().filter(function(t){return t.act&&!abreHoyP(t)}).length}catch(e){}
+  var card='<div class="card" style="border-left:4px solid #2F7D4F"><div class="ct">📅 Días de atención de las tiendas</div>'
+   +'<div style="font-size:11.5px;opacity:.75;line-height:1.55;margin-bottom:10px">'
+   +'Cada tienda tiene marcados los días en que atiende. Eso hace dos cosas: '
+   +'<b>los días cerrados no cuentan</b> para su reposición —una tienda cerrada no está vendiendo, así que su mercadería no se acaba esos días— '
+   +'y <b>el día que no atiende baja de prioridad</b> en la ruta, sin desaparecer de ella.</div>'
+   +'<div style="background:rgba(128,128,128,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:11.5px">'
+   +'Hoy es <b>'+((window.DIA_NOM_P||[])[hoy]||'—')+'</b> · <b>'+cerradas+'</b> tienda(s) no atienden hoy.</div>'
+   +'<label style="font-size:11.5px;display:block;margin-bottom:3px">Prioridad que conserva una tienda cerrada hoy</label>'
+   +'<div style="display:flex;align-items:center;gap:9px;margin-bottom:4px">'
+   +'<input id="dc-peso" type="number" min="0" max="100" value="'+pct+'" style="width:84px;padding:9px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:center">'
+   +'<span style="font-size:12px">% de su puntaje normal</span></div>'
+   +'<div style="font-size:10.5px;opacity:.65;margin-bottom:10px;line-height:1.5">'
+   +'Con <b>15%</b> baja al final de la lista pero sigue visible, que es lo recomendado: si los días estuvieran mal cargados no pierdes la tienda. '
+   +'Con <b>0%</b> queda fuera de la ruta ese día. Un pedido de WhatsApp del día siempre manda por encima de esto.</div>'
+   +'<label style="display:flex;align-items:flex-start;gap:9px;margin-bottom:7px;cursor:pointer">'
+   +'<input id="dc-ped" type="checkbox" '+((P.avisar_pedido!==false)?'checked':'')+' style="width:20px;height:20px;margin-top:1px">'
+   +'<span><span style="font-size:12.5px">Avisarme si registro un pedido para un día que esa tienda no atiende</span>'
+   +'<div style="font-size:10.5px;opacity:.6">El pedido se guarda igual; solo te avisa para que revises los días.</div></span></label>'
+   +'<label style="display:flex;align-items:flex-start;gap:9px;margin-bottom:10px;cursor:pointer">'
+   +'<input id="dc-ruta" type="checkbox" '+((P.avisar_ruta!==false)?'checked':'')+' style="width:20px;height:20px;margin-top:1px">'
+   +'<span><span style="font-size:12.5px">Marcar en la ruta del conductor las tiendas que hoy no atienden</span>'
+   +'<div style="font-size:10.5px;opacity:.6">Aparecen con 🚫 y al final del orden.</div></span></label>'
+   +'<button onclick="guardarDiasCfg()" style="width:100%;background:#2F7D4F;color:#fff;border:none">Guardar</button>'
+   +'<div style="font-size:10.5px;opacity:.6;margin-top:8px;line-height:1.5">Los días de cada tienda se marcan en su ficha (Tiendas → Editar), al crearla, o cuando el conductor propone una corrección desde su app.</div>'
+   +'</div>';
+  /* va justo antes de la tarjeta de ritmos, que es su pariente más cercano */
+  var marca='<div class="card" style="border-left:4px solid #5B3FA0"><div class="ct">🔁 Ritmos de reposición';
+  if(h.indexOf(marca)>=0)h=h.replace(marca,card+marca);
+  else h=card+h;
  }catch(e){}
  return h;
 };}

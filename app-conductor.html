@@ -619,7 +619,7 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
 
 <!-- ═══ TIENDAS ═══ -->
 <div class="sc off" id="sc-tiendas">
-  <button onclick="abrirRegT()" style="position:absolute;right:14px;bottom:86px;z-index:40;background:#20241E;color:#fff;border:none;border-radius:16px;padding:13px 16px;font-size:13px;font-weight:800;box-shadow:0 8px 22px rgba(0,0,0,.35);cursor:pointer">➕ Registrar tienda</button>
+  <button id="btn-regt" onclick="abrirRegT()" style="position:absolute;right:14px;bottom:86px;z-index:40;background:#20241E;color:#fff;border:none;border-radius:16px;padding:13px 16px;font-size:13px;font-weight:800;box-shadow:0 8px 22px rgba(0,0,0,.35);cursor:pointer">➕ Registrar tienda</button>
   <div class="tb">
     <div class="tbt">Mis tiendas</div>
     <button class="ib" id="btn-vista" onclick="toggleVista()" title="Mapa / lista">📋</button>
@@ -2755,7 +2755,7 @@ window.guardarTienda=function(){
  var n=($('rt-n').value||'').trim();
  if(!n)return toast('El nombre es obligatorio','e');
  var ll=_rtMk?_rtMk.getLatLng():{lat:T[0]?T[0].lat:-14.7924,lng:T[0]?T[0].lon:-71.4198};
- _rtPend={n:n,z:($('rt-z').value||'').trim()||'—',tp:rtTipo,ritmo:(window.RT_RITMO||'activa'),d:($('rt-d').value||'').trim()||'—',tel:($('rt-tel').value||'').replace(/\D/g,''),no:($('rt-no').value||'').trim(),h_ini:($('rt-hi').value||''),h_fin:($('rt-hf').value||''),dias_no:($('rt-dn').value||'').trim(),lat:+ll.lat.toFixed(6),lon:+ll.lng.toFixed(6),e:'pendiente',cr:false,sa:0,li:0,di:'—',dr:0,vip:false,act:true,ab:true,h:[],nueva:true,verificada:false,enRuta:true,foto:_rtFoto||null};
+ _rtPend={n:n,z:($('rt-z').value||'').trim()||'—',tp:rtTipo,ritmo:(window.RT_RITMO||'activa'),dias:(window.RT_DIAS||'1111111'),d:($('rt-d').value||'').trim()||'—',tel:($('rt-tel').value||'').replace(/\D/g,''),no:($('rt-no').value||'').trim(),h_ini:($('rt-hi').value||''),h_fin:($('rt-hf').value||''),dias_no:($('rt-dn').value||'').trim(),lat:+ll.lat.toFixed(6),lon:+ll.lng.toFixed(6),e:'pendiente',cr:false,sa:0,li:0,di:'—',dr:0,vip:false,act:true,ab:true,h:[],nueva:true,verificada:false,enRuta:true,foto:_rtFoto||null};
  var nn=normN(n);_dupIdx=-1;
  for(var i=0;i<T.length;i++){var t=T[i];if(t.act===false)continue;
   var _rad=(window.DUPR||10)/1000;var cerca=t.lat&&distKm(t.lat,t.lon,_rtPend.lat,_rtPend.lon)<_rad;
@@ -4059,7 +4059,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-21-B';
+window.BUILD='2026-09-21-C';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -5419,6 +5419,342 @@ if(typeof vtd==='function'){var _v=vtd;window.vtd=function(i){
     +'</div>';
    di.appendChild(d);
   }
+ }catch(e){}
+ return r;};}
+})();
+</script>
+<style id="v5botones2-css">
+/* ═══ 167 · Los botones del mapa vuelven al borde de la app ═══
+   En el bloque 164 los metí dentro de #sc-tiendas para que se ocultaran
+   solos. Funcionó para ocultarlos, pero los descolocó: #sc-tiendas vive
+   dentro de .screens, que termina 56–64 px más arriba que .app (ahí empieza
+   la barra de menús). Así que "bottom:70px" pasó a medirse desde un borde
+   distinto al del botón ⚡, y los tres subieron y quedaron desalineados.
+   Ahora vuelven a colgar de .app —misma regla que ⚡— y se ocultan con una
+   clase CSS, que no depende de que ningún temporizador llegue a tiempo. */
+#btn-centrar,#btn-sync-t,#btn-regt{display:none!important}
+#app-root.en-tiendas #btn-centrar,
+#app-root.en-tiendas #btn-sync-t,
+#app-root.en-tiendas #btn-regt{display:flex!important}
+</style>
+<script id="v5botones2">
+(function(){
+var BASE='position:absolute;z-index:60;width:46px;height:46px;border-radius:50%;'
+ +'border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:18px;'
+ +'cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.2);align-items:center;justify-content:center';
+
+window.acomodarBotones=window.botonesTiendas=function(){
+ try{
+  var app=document.getElementById('app-root')||document.querySelector('.app');
+  if(!app)return;
+  if(typeof pintaLeyenda==='function')pintaLeyenda();
+
+  /* el zoom de Leaflet, arriba a la derecha, lejos de todo lo demás */
+  var z=document.querySelector('#mapa-t .leaflet-control-zoom');
+  if(z){
+   var esq=document.querySelector('#mapa-t .leaflet-top.leaflet-right');
+   if(esq&&z.parentElement!==esq)esq.appendChild(z);
+   z.style.margin='10px 10px 0 0';
+  }
+
+  /* ⚡ venta rápida: el único que acompaña a los demás menús */
+  var fab=document.getElementById('fab');
+  if(fab){fab.style.right='14px';fab.style.bottom='66px';}
+
+  /* los tres de Tiendas, en la misma fila y con la misma referencia que ⚡ */
+  var poner=function(el,css){
+   if(!el)return;
+   if(el.parentElement!==app)app.appendChild(el);
+   el.style.cssText=BASE+';'+css;
+  };
+  poner(document.getElementById('btn-centrar'),'right:78px;bottom:70px');
+  var br=document.getElementById('btn-regt')||document.querySelector('[onclick*="abrirRegT"]');
+  if(br&&(br.className||'').indexOf('fab')<0){
+   br.id='btn-regt';
+   poner(br,'right:142px;bottom:70px');
+   br.textContent='🏪';br.title='Registrar tienda';
+  }
+  poner(document.getElementById('btn-sync-t'),'left:14px;bottom:70px');
+ }catch(e){}
+};
+
+/* la clase decide la visibilidad: sin temporizadores de por medio */
+window.marcaTiendas=function(sc){
+ try{
+  var app=document.getElementById('app-root')||document.querySelector('.app');
+  if(!app)return;
+  if(sc==='tiendas')app.classList.add('en-tiendas');
+  else app.classList.remove('en-tiendas');
+ }catch(e){}
+};
+if(typeof irA==='function'){var _ir=irA;window.irA=function(sc){
+ var r=_ir.apply(this,arguments);
+ try{
+  marcaTiendas(sc);
+  if(sc==='tiendas'){setTimeout(botonesTiendas,300);setTimeout(botonesTiendas,1100);}
+ }catch(e){}
+ return r;};}
+[900,3400,4200].forEach(function(t){setTimeout(botonesTiendas,t)});
+setTimeout(function(){try{marcaTiendas((typeof getCurrentSc==='function')?getCurrentSc():'')}catch(e){}},500);
+})();
+</script>
+<script id="v5dias">
+(function(){
+/* ═══ 167 · DÍAS DE ATENCIÓN + mapa de registro bien centrado ═══ */
+
+var DIA_COR=['L','M','M','J','V','S','D'];
+var DIA_NOM=['lunes','martes','miércoles','jueves','viernes','sábado','domingo'];
+window.DIAS_COR=DIA_COR;window.DIAS_NOM=DIA_NOM;
+
+/* Perú no tiene horario de verano: siempre UTC-5 */
+window.diaHoy=function(){var d=new Date(Date.now()-5*3600000);return (d.getUTCDay()+6)%7;};
+window.diasNormApp=function(v){
+ var t=String(v==null?'':v).replace(/[^012]/g,'');
+ if(t.length!==7)t='1111111';
+ if(t.indexOf('1')<0&&t.indexOf('2')<0)t='1111111';
+ return t;
+};
+window.abreHoyT=function(t){
+ if(t&&t.abre_hoy!=null)return !!t.abre_hoy;          /* lo que dijo el servidor */
+ return diasNormApp(t&&t.dias).charAt(diaHoy())!=='0';
+};
+window.diasTextoApp=function(v){
+ var t=diasNormApp(v);
+ if(t.indexOf('0')<0)return 'todos los días';
+ return DIA_COR.map(function(d,i){return t.charAt(i)==='0'?'·':d}).join(' ');
+};
+window.pesoCerrada=function(){
+ try{var c=((window._ultDatos||{}).params||{}).dias_cfg||{};
+  var v=Number(c.peso_cerrada);return isFinite(v)?Math.max(0,Math.min(1,v)):0.15;
+ }catch(e){return 0.15}
+};
+
+/* ── 1. Selector de días, reutilizable ───────────────────────────── */
+window.cuadrosDias=function(val,fn){
+ var t=diasNormApp(val),hoy=diaHoy();
+ return '<div style="display:flex;gap:5px">'+DIA_COR.map(function(d,i){
+  var on=t.charAt(i)!=='0';
+  return '<button onclick="'+fn+'('+i+')" title="'+DIA_NOM[i]+'" style="flex:1;padding:9px 0;border-radius:10px;'
+   +'border:1.5px solid '+(on?'#2F7D4F':'var(--bd)')+';background:'+(on?'#EAF7EE':'transparent')+';'
+   +'color:'+(on?'#128C3A':'var(--mu)')+';font-size:13px;font-weight:800;cursor:pointer;position:relative">'
+   +d+(i===hoy?'<span style="position:absolute;left:50%;transform:translateX(-50%);bottom:2px;width:4px;height:4px;border-radius:50%;background:'+(on?'#128C3A':'var(--mu)')+'"></span>':'')
+   +'</button>';
+ }).join('')+'</div>';
+};
+
+/* ── 2. En el formulario de registrar tienda ─────────────────────── */
+window.RT_DIAS=window.RT_DIAS||'1111111';
+window.rtTogDia=function(i){
+ var t=diasNormApp(window.RT_DIAS).split('');
+ t[i]=(t[i]==='0')?'1':'0';
+ if(t.join('').indexOf('1')<0){toast('La tienda tiene que atender al menos un día','w');return;}
+ window.RT_DIAS=t.join('');pintaRtDias();
+};
+function pintaRtDias(){
+ var h=document.getElementById('rt-dias');if(!h)return;
+ var t=diasNormApp(window.RT_DIAS),cerr=[];
+ for(var i=0;i<7;i++)if(t.charAt(i)==='0')cerr.push(DIA_NOM[i]);
+ h.innerHTML='<div style="font-size:11px;color:var(--mu);margin-bottom:5px">📅 ¿Qué días atiende? — toca para apagar los que cierra</div>'
+  +cuadrosDias(t,'rtTogDia')
+  +'<div style="font-size:10.5px;color:'+(cerr.length?'#8A6410':'var(--mu)')+';margin-top:5px">'
+  +(cerr.length?('No atiende: '+cerr.join(', ')):'Atiende todos los días')+'</div>';
+}
+function montaRtDias(){
+ try{
+  var ancla=document.getElementById('rt-ritmos')||document.getElementById('rt-tipos');
+  if(!ancla||!ancla.parentNode)return;
+  if(!document.getElementById('rt-dias')){
+   var d=document.createElement('div');d.id='rt-dias';d.style.margin='0 0 10px';
+   ancla.parentNode.insertBefore(d,ancla.nextSibling);
+  }
+  pintaRtDias();
+  /* el campo de texto libre de días deja de pedirse: ahora se marca */
+  var dn=document.getElementById('rt-dn');
+  if(dn){dn.style.display='none';dn.value='';}
+ }catch(e){}
+}
+
+/* ── 3. El mapa del registro se centra como el de Tiendas ────────── */
+window.posRegT=function(){
+ /* Una sola fuente: GPSCAM ya viene resuelto por el servidor (camión si
+    reportó dentro del margen configurado, si no el celular). Antes este
+    mapa volvía a decidirlo por su cuenta con una regla de 20 minutos
+    escrita a mano, y podía descartar una posición que el servidor daba
+    por buena. */
+ if(typeof posCamion==='function'){var p=posCamion();if(p&&isFinite(p.lat))return p;}
+ var g=window.GPSCAM;
+ if(g&&isFinite(g.lat))return {lat:Number(g.lat),lon:Number(g.lon),fuente:g.fuente||'camión',hora:g.hora,nota:g.nota};
+ if(window._miPos&&isFinite(window._miPos.lat))return {lat:_miPos.lat,lon:_miPos.lon,fuente:'celular'};
+ return null;
+};
+window.centrarRegT=function(avisar){
+ try{
+  if(!window._rtm||!window._rtMk)return false;
+  var p=posRegT();
+  var av=document.getElementById('rt-fuente');
+  if(!av){av=document.createElement('div');av.id='rt-fuente';
+   av.style.cssText='font-size:11px;color:var(--mu);margin:-2px 0 8px';
+   var mp=document.getElementById('rt-mapa');
+   if(mp&&mp.parentNode)mp.parentNode.insertBefore(av,mp.nextSibling);}
+  if(!p){
+   av.innerHTML='📍 Buscando la posición del camión… mientras tanto arrastra el pin sobre la tienda';
+   return false;
+  }
+  var ll=[p.lat,p.lon];
+  _rtMk.setLatLng(ll);_rtm.setView(ll,18);
+  try{_rtm.invalidateSize()}catch(e){}
+  if(typeof L!=='undefined'){
+   if(window._rtCam){try{_rtm.removeLayer(_rtCam)}catch(e){}}
+   if(window._rtCir){try{_rtm.removeLayer(_rtCir)}catch(e){}}
+   window._rtCam=L.circleMarker(ll,{radius:7,color:'#1D4ED8',fillColor:'#1D4ED8',fillOpacity:.9,weight:2}).addTo(_rtm);
+   _rtCam.bindTooltip((p.fuente==='celular'?'📱':'🛰️')+' '+p.fuente);
+   window._rtCir=L.circle(ll,{radius:40,color:'#1D4ED8',opacity:.25,fillOpacity:.06,weight:1}).addTo(_rtm);
+  }
+  var min=p.hora?Math.round((Date.now()-new Date(p.hora).getTime())/60000):null;
+  av.innerHTML='📍 Centrado en <b>'+(p.fuente==='celular'?'tu celular':'el camión (GPS)')+'</b>'
+   +(min!=null?(' · hace '+min+' min'):'')
+   +(p.nota?('<br><span style="color:#8A6410">'+p.nota+'</span>'):'')
+   +'<br>Toca el mapa o arrastra el pin sobre la tienda';
+  if(!_rtm._tocar){_rtm._tocar=true;_rtm.on('click',function(ev){_rtMk.setLatLng(ev.latlng)});}
+  if(avisar&&typeof toast==='function')toast('📍 Centrado en '+(p.fuente==='celular'?'tu celular':'el camión'),'g');
+  return true;
+ }catch(e){return false}
+};
+/* el botón "volver a mi ubicación" usa la misma fuente, no el GPS del
+   navegador por su cuenta (que llegaba tarde y pisaba el centrado bueno) */
+window.rtMiUbic=function(){
+ if(centrarRegT(true))return;
+ if(!navigator.geolocation)return toast('Sin posición disponible — coloca el pin a mano','w');
+ navigator.geolocation.getCurrentPosition(function(p){
+  window._miPos={lat:p.coords.latitude,lon:p.coords.longitude};
+  centrarRegT(true);
+ },function(){toast('Sin señal ni permiso de GPS — arrastra el pin a la ubicación','w')},
+ {enableHighAccuracy:true,timeout:8000});
+};
+
+if(typeof abrirRegT==='function'){var _ar=abrirRegT;window.abrirRegT=function(){
+ var r=_ar.apply(this,arguments);
+ window.RT_DIAS='1111111';
+ [150,500,1300,2400].forEach(function(t){setTimeout(montaRtDias,t)});
+ /* se centra varias veces por si la posición llega tarde */
+ [420,1200,2600].forEach(function(t){setTimeout(function(){centrarRegT(false)},t)});
+ return r;};}
+/* si el GPS llega mientras el formulario está abierto, se recentra solo */
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{
+  var ov=document.getElementById('ov-regt');
+  if(ov&&ov.classList&&ov.classList.contains('on')&&window._rtMk&&!window._rtMk._movidoAMano)centrarRegT(false);
+ }catch(e){}
+ return r;};}
+/* si el conductor mueve el pin, ya no se le recentra encima */
+setTimeout(function(){try{if(window._rtMk)_rtMk.on('dragend',function(){_rtMk._movidoAMano=true});}catch(e){}},2000);
+
+/* ── 4. El puntaje de ruta baja si hoy no atiende ─────────────────── */
+if(typeof puntosT==='function'){var _pt=puntosT;window.puntosT=function(t){
+ var r=_pt.apply(this,arguments);
+ try{
+  if(!t||r.sc<=0)return r;
+  var abre=abreHoyT(t);
+  if(!abre){
+   var conPedido=!!t.pedidoHoy;
+   var base=conPedido?Math.max(0,r.sc-100):r.sc;
+   var nueva=Math.round(base*pesoCerrada())+(conPedido?100:0);
+   r={sc:nueva,nivel:r.nivel,abre:false,
+      why:r.why+' · 🚫 hoy no atiende'+(conPedido?' (pero pidió hoy: revisa sus días)':'')};
+  }else r.abre=true;
+ }catch(e){}
+ return r;};}
+
+/* ── 5. La ficha muestra los días y avisa si hoy está cerrada ─────── */
+window._diasT=-1;
+window.abrirPropDias=function(i){
+ window._diasT=i;var t=T[i];if(!t)return;
+ window.PROP_DIAS=diasNormApp(t.dias);
+ var ov=document.getElementById('ov-dias');
+ if(!ov){
+  ov=document.createElement('div');ov.className='ov';ov.id='ov-dias';
+  ov.innerHTML='<div class="sh"><div class="sh-top"><div class="sh-tit">📅 Días de atención</div>'
+   +'<button class="sh-x" onclick="cov(\'ov-dias\')">✕</button></div>'
+   +'<div class="sh-b"><div id="dias-body"></div></div></div>';
+  document.body.appendChild(ov);
+ }
+ pintaPropDias();
+ if(typeof aov==='function')aov('ov-dias');
+};
+window.propTogDia=function(i){
+ var t=diasNormApp(window.PROP_DIAS).split('');
+ t[i]=(t[i]==='0')?'1':'0';
+ if(t.join('').indexOf('1')<0){toast('Tiene que atender al menos un día','w');return;}
+ window.PROP_DIAS=t.join('');pintaPropDias();
+};
+function pintaPropDias(){
+ var box=document.getElementById('dias-body');if(!box)return;
+ var t=T[window._diasT];if(!t)return;
+ var act=diasNormApp(t.dias),prop=diasNormApp(window.PROP_DIAS),cambia=(act!==prop);
+ var cerr=[];for(var i=0;i<7;i++)if(prop.charAt(i)==='0')cerr.push(DIA_NOM[i]);
+ box.innerHTML='<div style="font-size:12.5px;font-weight:800;margin-bottom:3px">'+t.n+'</div>'
+  +'<div style="font-size:11.5px;color:var(--mu);line-height:1.55;margin-bottom:10px">'
+  +'Hoy tiene marcado: <b>'+diasTextoApp(act)+'</b>. Los días que no atiende no cuentan para su reposición, '
+  +'y en esos días baja de prioridad en la ruta.</div>'
+  +cuadrosDias(prop,'propTogDia')
+  +'<div style="font-size:10.5px;color:'+(cerr.length?'#8A6410':'var(--mu)')+';margin:6px 0 9px">'
+  +(cerr.length?('No atendería: '+cerr.join(', ')):'Atendería todos los días')+'</div>'
+  +'<textarea id="dias-mot" placeholder="¿Por qué? (ej: los domingos siempre está cerrada)" '
+  +'style="width:100%;min-height:58px;padding:10px;border-radius:11px;border:1.5px solid var(--bd);font-size:12.5px;margin-bottom:9px"></textarea>'
+  +'<button class="bt2" style="width:100%'+(cambia?'':';opacity:.5')+'" onclick="enviarPropDias()">'
+  +(cambia?'Enviar la propuesta al administrador':'Cambia algún día para proponer')+'</button>'
+  +'<div style="font-size:10.5px;color:var(--mu);margin-top:7px;line-height:1.5">Tú propones; se aplica cuando el administrador lo acepta. Si no hay señal, se envía al reconectar.</div>';
+}
+window.enviarPropDias=function(){
+ var t=T[window._diasT];if(!t)return;
+ if(diasNormApp(window.PROP_DIAS)===diasNormApp(t.dias))return toast('No cambiaste ningún día','w');
+ if(!t.id||String(t.id).indexOf('loc')===0)return toast('Esa tienda aún no está en el servidor','w');
+ var mot=(document.getElementById('dias-mot')||{}).value||'';
+ if(typeof sync==='function')
+  sync('/conductor/dias-sugeridos',{tienda_id:t.id,dias:window.PROP_DIAS,motivo:mot.slice(0,200)},
+       'Días propuestos: '+t.n);
+ if(typeof cov==='function')cov('ov-dias');
+ toast('✓ Propuesta enviada — el administrador la verá en su bandeja','g');
+};
+
+if(typeof vtd==='function'){var _v=vtd;window.vtd=function(i){
+ var r=_v.apply(this,arguments);
+ try{
+  var di=document.getElementById('det-i'),t=T[i];
+  if(di&&t&&!document.getElementById('det-dias')){
+   var abre=abreHoyT(t),hoy=diaHoy();
+   var d=document.createElement('div');d.id='det-dias';
+   d.style.cssText='border:1.5px solid '+(abre?'var(--bd)':'#EFDCA8')+';background:'+(abre?'transparent':'#FDF6E4')
+    +';border-radius:11px;padding:10px 11px;margin-top:8px';
+   d.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+    +'<div><div style="font-size:11px;color:var(--mu)">Días de atención</div>'
+    +'<b style="font-size:12.5px">'+diasTextoApp(t.dias)+'</b>'
+    +(abre?'<div style="font-size:11px;color:#128C3A;font-weight:700;margin-top:2px">✓ Hoy '+DIA_NOM[hoy]+' sí atiende</div>'
+          :'<div style="font-size:11px;color:#8A6410;font-weight:800;margin-top:2px">🚫 Hoy '+DIA_NOM[hoy]+' no atiende</div>')
+    +'</div>'
+    +'<button onclick="abrirPropDias('+i+')" style="padding:8px 11px;border-radius:10px;border:1.5px solid #2F7D4F;background:#EAF7EE;color:#128C3A;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap">📅 Corregir<br>los días</button>'
+    +'</div>';
+   di.appendChild(d);
+  }
+ }catch(e){}
+ return r;};}
+
+/* ── 6. La lista marca las que hoy no atienden ────────────────────── */
+if(typeof anotarTiendas==='function'){var _at=anotarTiendas;window.anotarTiendas=function(){
+ var r=_at.apply(this,arguments);
+ try{
+  var lt=document.getElementById('lista-t');if(!lt)return r;
+  var cards=lt.querySelectorAll('.c'),i=0;
+  cards.forEach(function(card){
+   var t=T[i++];if(!t||card.querySelector('.dia-chip'))return;
+   if(abreHoyT(t))return;
+   var slot=card.querySelector('div div')||card;
+   var c=document.createElement('div');c.className='dia-chip';
+   c.style.cssText='font-size:10px;font-weight:800;margin-top:3px;color:#8A6410';
+   c.innerHTML='🚫 Hoy no atiende · '+diasTextoApp(t.dias);
+   slot.appendChild(c);
+  });
  }catch(e){}
  return r;};}
 })();

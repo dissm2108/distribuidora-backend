@@ -129,27 +129,47 @@ function nivelDe(d,ritmo){
 }
 const NIVEL_TXT=["","Reci\u00e9n surtida","Con mercader\u00eda","Por terminar","Reponer imprescindible",
   "Posible desabastecimiento","Visitar necesariamente","Posible cliente perdido","Cliente perdido"];
-function puntajeDe(d,ritmo,vip,pedidoHoy){
+function puntajeDe(d,ritmo,vip,pedidoHoy,dias,pesoCerrada){
   const n=nivelDe(d,ritmo);
-  if(n>=7)return {sc:0,nivel:n,why:NIVEL_TXT[n]+" \u2014 alerta admin, no entra a ruta"};
+  if(n>=7)return {sc:0,nivel:n,abre:true,why:NIVEL_TXT[n]+" \u2014 alerta admin, no entra a ruta"};
   let b=(ritmo&&ritmo.pesos&&ritmo.pesos[n-1])!=null?Number(ritmo.pesos[n-1]):0;
   const w=[NIVEL_TXT[n]+" ("+d+"d)"];
   if(vip&&n>=4){b=Math.round(b*1.5);w.push("\u2605 VIP potencia (desde nivel 4)");}
   else if(vip){w.push("VIP sin efecto (nivel <4)");}
-  if(pedidoHoy){b+=100;w.push("\u{1F4E9} Pedido de hoy \u2014 garantizado");}
-  return {sc:b,nivel:n,why:w.join(" \u00b7 ")};
+  /* Hoy cerrada: no se excluye, baja de prioridad y se marca. Si el dato de
+     días estuviera mal cargado, la tienda sigue visible al final de la lista
+     en vez de desaparecer sin que nadie se entere. */
+  const abre=(dias==null)?true:abreHoy(dias);
+  if(!abre){
+    const f=Math.max(0,Math.min(1,pesoCerrada==null?0.15:Number(pesoCerrada)));
+    b=Math.round(b*f);
+    w.push("\u{1F6AB} hoy no atiende");
+  }
+  /* Un pedido de hoy se suma DESPUÉS del castigo por cierre: si la tienda
+     pidió mercadería hoy es que hoy está, y ese hecho real pesa más que un
+     dato de días que puede estar viejo. Además se marca la contradicción. */
+  if(pedidoHoy){
+    b+=100;
+    w.push(abre?"\u{1F4E9} Pedido de hoy \u2014 garantizado"
+               :"\u{1F4E9} Pedido de hoy \u2014 garantizado (pidi\u00f3 en un d\u00eda marcado como cerrado: revisa sus d\u00edas)");
+  }
+  return {sc:b,nivel:n,abre,why:w.join(" \u00b7 ")};
 }
 // Días desde la última compra buena, con el descuento por compras chicas.
 // Una sola definición: la usan igual la app del conductor y el panel.
-function diasRepo(ventasDeLaTienda,ritmo,drAjuste,drBase){
+function diasRepo(ventasDeLaTienda,ritmo,drAjuste,drBase,dias){
   const UMB=Number(ritmo&&ritmo.umbral_repo)||40, RESTA=Number(ritmo&&ritmo.resta_parcial)||2;
   const CIC=Number(ritmo&&ritmo.ciclo_dias)||3;
   const vs=ventasDeLaTienda||[];
   const iBig=vs.findIndex(v=>Number(v.total||0)>=UMB);
   const baseV=iBig>=0?vs[iBig]:(vs.length?vs[vs.length-1]:null);
   const nBajas=iBig>=0?iBig:vs.length;
-  const diasBase=baseV?Math.round((Date.now()-new Date(baseV.creado).getTime())/86400000)
-                      :(drBase==null?3:drBase);
+  let diasBase;
+  if(baseV){
+    const t0=new Date(baseV.creado).getTime();
+    const cal=Math.round((Date.now()-t0)/86400000);
+    diasBase=diasAbiertosTras(t0,cal,dias);   // solo los días que atiende
+  }else diasBase=(drBase==null?3:drBase);
   /* El crédito por compras chicas no puede pasar de UN ciclo entero.
      Sin este tope, una tienda con muchas compras chicas y ninguna buena
      restaba tantos días que salía "Recién surtida" llevando semanas sin
@@ -157,6 +177,54 @@ function diasRepo(ventasDeLaTienda,ritmo,drAjuste,drBase){
      Todas las compras chicas juntas valen, como mucho, una reposición. */
   const credito=Math.min(RESTA*nBajas,CIC);
   return Math.max(0,diasBase-credito-(Number(drAjuste)||0));
+}
+
+
+// ════════ DÍAS EN QUE LA TIENDA ATIENDE ════════
+// Siete caracteres, lunes a domingo. '1' atiende, '0' no atiende.
+// ('2' queda reservado para "día fuerte / de feria" sin migrar nada.)
+// Antes esto era un texto libre (dias_no) que se comparaba buscando la
+// palabra del día dentro de la cadena: "domingos" funcionaba, "dom" no,
+// y nadie se enteraba del fallo.
+const DIA_NOM=["lunes","martes","miércoles","jueves","viernes","sábado","domingo"];
+const DIA_COR=["L","M","M","J","V","S","D"];
+// Perú no tiene horario de verano: siempre UTC-5.
+function diaIdx(ms){const d=new Date((ms==null?Date.now():ms)-5*3600000);return (d.getUTCDay()+6)%7;}
+function diasNorm(v){
+  let t=String(v==null?"":v).replace(/[^012]/g,"");
+  if(t.length!==7)t="1111111";
+  if(t.indexOf("1")<0&&t.indexOf("2")<0)t="1111111"; // nunca cerrada los 7 días
+  return t;
+}
+function abreEl(dias,idx){return diasNorm(dias).charAt(idx)!=="0";}
+function abreHoy(dias){return abreEl(dias,diaIdx());}
+function diasAbiertosSemana(dias){const t=diasNorm(dias);let n=0;for(let i=0;i<7;i++)if(t.charAt(i)!=="0")n++;return n;}
+// Texto legible, y compatibilidad con el campo viejo dias_no
+function diasNoTexto(dias){
+  const t=diasNorm(dias),f=[];
+  for(let i=0;i<7;i++)if(t.charAt(i)==="0")f.push(DIA_NOM[i]);
+  if(!f.length)return "";
+  if(f.length===1)return f[0];
+  return f.slice(0,-1).join(", ")+" y "+f[f.length-1];
+}
+function diasTexto(dias){
+  const t=diasNorm(dias);
+  if(diasAbiertosSemana(t)===7)return "todos los días";
+  return DIA_COR.map((d,i)=>t.charAt(i)==="0"?"·":d).join(" ");
+}
+// Cuántos DÍAS DE ATENCIÓN hay en los N días de calendario posteriores a `desde`.
+// Una tienda que cierra dos días por semana no vacía su mercadería en 3 días
+// de calendario sino en 5: está cerrada, no está vendiendo. Contar solo los
+// días que atiende es lo que hace que el ciclo signifique lo mismo para todas.
+function diasAbiertosTras(desdeMs,nCal,dias){
+  const t=diasNorm(dias), porSem=diasAbiertosSemana(t);
+  if(porSem===7)return nCal;                 // caso normal: nada cambia
+  const n=Math.max(0,Math.floor(nCal));
+  const semanas=Math.floor(n/7), resto=n%7;
+  let c=semanas*porSem;
+  const ini=diaIdx(desdeMs);
+  for(let k=1;k<=resto;k++)if(t.charAt((ini+k)%7)!=="0")c++;
+  return c;
 }
 
 function pipSrv(lat,lon,poly){let d=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const yi=poly[i][0],xi=poly[i][1],yj=poly[j][0],xj=poly[j][1];if(((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi)+xi))d=!d;}return d;}
@@ -198,10 +266,12 @@ app.get("/version",(req,res)=>{
   const marcas={
     "app-conductor.html":["v5no304","v5origen","v5notipos","v5stockp","cpGetPrecio(cat.id,p.id)",
       "onclick=\"abrirMerma()\"","v5botones","v5ritmo","window.repoT","window.nivelApp",
-      "v5ciclo","abrirPropCiclo","window.RT_RITMO"],
+      "v5ciclo","abrirPropCiclo","window.RT_RITMO",
+      "v5botones2","v5dias","window.centrarRegT","window.RT_DIAS","en-tiendas"],
     "admin-dashboard.html":["v5sinprestamo","v5pdprecios","v5dupids","v5catipo",
       "v5almmover","window.pkTipo","pkEtiqueta(p)","v5ritmo2","v5ritmocfg","window.repTP","window.nivelP",
-      "v5ciclofiltro","window.TDS","window.EVENTOS=r.eventos","ritmo_sugerido"]
+      "v5ciclofiltro","window.TDS","window.EVENTOS=r.eventos","ritmo_sugerido",
+      "v5diasP","v5diascfg","window.AT_DIAS","dias_sugeridos"]
   };
   const out={servidor:{etag_desactivado:app.get("etag")===false,consultas_en_paralelo:true,hora:new Date().toISOString()},archivos:{}};
   Object.keys(marcas).forEach(f=>{
@@ -573,6 +643,15 @@ app.post("/admin/eventos/:id/accion",authA,async(req,res)=>{
       }
     }else if(ev.tipo==="carga"){
       hecho=(accion==="aceptar")?"Diferencias aceptadas.":"Marcado para revisar con el conductor.";
+    }else if(ev.tipo==="dias_sugeridos"){
+      const par=String(ref).split("|"), tid=Number(par[0])||0, dn=diasNorm(par[1]);
+      if(accion==="aceptar"&&tid){
+        await db.from("tiendas").update({dias_atiende:dn,dias_no:diasNoTexto(dn)}).eq("id",tid);
+        await db.from("logs").insert({tipo:"tienda",detalle:"#"+tid+" días → "+diasTexto(dn)+" (propuesto por el conductor)"});
+        hecho="Días actualizados: "+diasTexto(dn)+". Cambia cuándo entra a la ruta y cómo se cuenta su reposición.";
+      }else if(accion==="rechazar"){
+        hecho="Propuesta descartada: la tienda mantiene sus días.";
+      }
     }else if(ev.tipo==="ritmo_sugerido"){
       const par=String(ref).split("|"), tid=Number(par[0])||0, rid=par[1]||"";
       if(accion==="aceptar"&&tid&&rid){
@@ -622,6 +701,11 @@ app.post("/admin/params",authA,async(req,res)=>{
       .filter(r=>{ if(!r.id||vistos[r.id])return false; vistos[r.id]=1; return true; });
     if(lista.length)kv.ritmos=lista;
   }
+  // ── 0.b Días de atención ──
+  if(b.dias_cfg)kv.dias_cfg={
+    peso_cerrada:num(b.dias_cfg.peso_cerrada,0,1,0.15),
+    avisar_pedido:b.dias_cfg.avisar_pedido!==false,
+    avisar_ruta:b.dias_cfg.avisar_ruta!==false};
   // ── 1. Negocio ──
   if(b.negocio)kv.negocio={nombre:txt(b.negocio.nombre,60),
     tel:String(b.negocio.tel||"").replace(/\D/g,"").slice(0,15),moneda:txt(b.negocio.moneda,6)||"S/"};
@@ -755,7 +839,8 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     const vs=(ultV||[]).filter(v=>v.tienda_id===t.id).slice(0,5);
     const RIT=ritmoDe(params,t.ritmo), UMB=RIT.umbral_repo;
     const vsAll=(ultV||[]).filter(v=>v.tienda_id===t.id);
-    const dr=diasRepo(vsAll,RIT,t.dr_ajuste,RIT.ciclo_dias);
+    const DIAS=diasNorm(t.dias_atiende), ABRE=abreHoy(DIAS);
+    const dr=diasRepo(vsAll,RIT,t.dr_ajuste,RIT.ciclo_dias,DIAS);
     const ultBaja=(vsAll.length&&Number(vsAll[0].total||0)<UMB)?Number(vsAll[0].total||0):null;
     const vo=(vHoy||[]).find(v=>v.tienda_id===t.id&&v.conductor!==u&&v.tipo==="venta");
     const pd=(peds||[]).find(p=>(p.tienda_id&&p.tienda_id===t.id)||(p.tienda&&String(p.tienda).toLowerCase().trim()===String(t.nombre).toLowerCase().trim()));
@@ -765,6 +850,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
       no:t.notas||"",ab:true,lat:t.lat,lon:t.lon,dr,vip:!!t.vip,act:true,
       ritmo:RIT.id,ciclo:RIT.ciclo_dias,nivel:nivelDe(dr,RIT),
       ritmo_nom:RIT.nombre,ritmo_emo:RIT.emoji,umbral:RIT.umbral_repo,
+      dias:DIAS,abre_hoy:ABRE,dias_txt:diasTexto(DIAS),
       nueva:!!t.nueva,verificada:!!t.verificada,foto:t.foto||null,id:t.id,
       h:vs.map(v=>({f:new Date(v.creado).toLocaleDateString("es-PE"),p:v.resumen||"",m:Number(v.total)})),
       ultima_compra:(vs[0]&&Array.isArray(vs[0].items))?vs[0].items.filter(x=>x&&x.id).map(x=>({id:x.id,n:x.n,c:num(x.c,0,9999)})):[],
@@ -865,7 +951,23 @@ app.post("/ventas",authC,async(req,res)=>{
 app.post("/visitas",authC,async(req,res)=>{
   const t=await tiendaPorNombre(req.body.tienda||"");
   await db.from("visitas").insert({tienda_id:t?t.id:null,tienda:req.body.tienda,conductor:req.cond.u,tipo:(["venta","fallida","no_quiso","registro"].includes(req.body.tipo)?req.body.tipo:"fallida"),fecha:hoy(),hora:horaPE()});
-  if((req.body.tipo||"")==="fallida")await evento("visita","🚫 Visita fallida — "+req.body.tienda,req.cond.u+" la encontró cerrada. Reprogramada para mañana con prioridad; la reposición sigue contando.",t?t.id:"");
+  if((req.body.tipo||"")==="fallida"){
+    const cerradaHoy=t&&!abreHoy(t.dias_atiende);
+    await evento("visita","🚫 Visita fallida — "+req.body.tienda,
+      req.cond.u+" la encontró cerrada. Reprogramada para mañana con prioridad; la reposición sigue contando."
+      +(cerradaHoy?" (Según sus días, hoy "+DIA_NOM[diaIdx()]+" no atiende: era esperable.)":""),
+      t?t.id:"");
+    /* Si el sistema decía que hoy SÍ abre y estaba cerrada, el dato de días
+       probablemente esté mal. Se avisa una vez para poder corregirlo. */
+    if(t&&!cerradaHoy){
+      const hoyIdx=diaIdx(), prop=diasNorm(t.dias_atiende).split("");
+      prop[hoyIdx]="0";
+      await evento("dias_sugeridos","📅 ¿Esta tienda cierra los "+DIA_NOM[hoyIdx]+"? — "+t.nombre,
+        req.cond.u+" la encontró cerrada un "+DIA_NOM[hoyIdx]+", y según el sistema ese día sí atiende. "
+        +"Si es su día de descanso, acepta para quitarlo: "+diasTexto(t.dias_atiende)+" → "+diasTexto(prop.join("")),
+        String(t.id)+"|"+prop.join(""));
+    }
+  }
   if((req.body.tipo||"")==="no_quiso"&&t){
     /* Restar 2 días fijos castigaba igual a una tienda de ciclo 3 que a una de
        ciclo 7. Ahora el descuento es proporcional: ~0,7 ciclos. Para la activa
@@ -880,12 +982,29 @@ app.post("/visitas",authC,async(req,res)=>{
 });
 app.post("/tiendas",authC,async(req,res)=>{
   const b=req.body;
-  const _pmsC=await getParams();
-  const{data:t,error}=await db.from("tiendas").insert({nombre:b.n,zona:b.z,tipo:b.tp,ritmo:ritmoDe(_pmsC,b.ritmo).id,dueno:b.d,tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),foto:fotoOK(b.foto)?b.foto:null,cr:false,sa:0,li:0,vip:false,act:true,nueva:true,verificada:false,conductor_reg:req.cond.u}).select().single();
+  const _pmsC=await getParams(), _diasC=diasNorm(b.dias);
+  const{data:t,error}=await db.from("tiendas").insert({nombre:b.n,zona:b.z,tipo:b.tp,ritmo:ritmoDe(_pmsC,b.ritmo).id,
+    dias_atiende:_diasC,dueno:b.d,tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),foto:fotoOK(b.foto)?b.foto:null,cr:false,sa:0,li:0,vip:false,act:true,nueva:true,verificada:false,conductor_reg:req.cond.u}).select().single();
   if(error)return res.status(500).json({ok:false,error:error.message});
   await evento("tienda_nueva","🆕 Tienda nueva por verificar — "+b.n,"Registrada por "+req.cond.u+" en "+(b.z||"—")+". Contado habilitado; crédito bloqueado hasta que la verifiques.",t.id);
   avisarAdmin("🆕 Tienda nueva por verificar: "+b.n+" ("+(b.z||"—")+") — registrada por "+req.cond.u);
   res.json({ok:true,id:t.id});
+});
+app.post("/conductor/dias-sugeridos",authC,async(req,res)=>{
+  /* Mismo criterio que el ciclo: el conductor propone, el dueño aprueba.
+     Es el que está parado en la puerta, así que es quien mejor lo sabe. */
+  const id=Number(req.body.tienda_id)||0;
+  if(!id)return res.status(400).json({ok:false,error:"Falta la tienda"});
+  const{data:t}=await db.from("tiendas").select("id,nombre,dias_atiende").eq("id",id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
+  const dn=diasNorm(req.body.dias), ant=diasNorm(t.dias_atiende);
+  if(dn===ant)return res.json({ok:false,error:"Esos son los días que ya tiene"});
+  await evento("dias_sugeridos","📅 Días de atención propuestos — "+t.nombre,
+    req.cond.u+" propone cambiar los días: "+diasTexto(ant)+" → "+diasTexto(dn)
+    +(diasNoTexto(dn)?(". No atendería: "+diasNoTexto(dn)):". Atendería todos los días.")
+    +(limpia(req.body.motivo,200)?" Motivo: "+limpia(req.body.motivo,200):""),
+    String(t.id)+"|"+dn);
+  res.json({ok:true});
 });
 app.post("/conductor/ritmo-sugerido",authC,async(req,res)=>{
   /* El conductor es quien ve cómo vende cada tienda. Propone el ciclo; el
@@ -1177,7 +1296,7 @@ app.get("/admin/datos",authA,async(req,res)=>{
      Antes el panel contaba días desde CUALQUIER venta, así que mostraba un
      número distinto al que veía el conductor para la misma tienda. */
   const _ritT=(t)=>ritmoDe(_pms,t.ritmo);
-  const _diasT=(t)=>{const R=_ritT(t);return diasRepo(_vpt[t.id]||[],R,t.dr_ajuste,R.ciclo_dias);};
+  const _diasT=(t)=>{const R=_ritT(t);return diasRepo(_vpt[t.id]||[],R,t.dr_ajuste,R.ciclo_dias,t.dias_atiende);};
   res.json({ok:true,
     resumen:{tiendas:(tds||[]).length,conductores:(us||[]).length,
       en_turno:(us||[]).filter(x=>(x.en_turno!==undefined&&x.en_turno!==null)?x.en_turno:turnoDe[x.usuario]).length,
@@ -1189,11 +1308,15 @@ app.get("/admin/datos",authA,async(req,res)=>{
     eventos:(evs||[]).map(e=>({id:e.id,tipo:e.tipo,titulo:e.titulo,
       desc:e.descripcion,descripcion:e.descripcion,
       creado:e.creado,visto:!!e.visto,
-      ref:(e.tipo==="tienda_nueva"||e.tipo==="correccion"||e.tipo==="ritmo_sugerido")?e.ref:String(e.id)})),
+      ref:(e.tipo==="tienda_nueva"||e.tipo==="correccion"||e.tipo==="ritmo_sugerido"||e.tipo==="dias_sugeridos")?e.ref:String(e.id)})),
     tiendas:(tds||[]).map(t=>{const R=_ritT(t),d=_diasT(t);return {id:t.id,n:t.nombre,z:t.zona,d,sa:Number(t.sa||0),cr:!!t.cr,li:Number(t.li||0),vip:!!t.vip,act:t.act,nueva:!!t.nueva,verificada:!!t.verificada,conductor:t.conductor_reg,lat:t.lat,lon:t.lon,tel:t.tel,due:t.dueno,
       ritmo:R.id,ciclo:R.ciclo_dias,nivel:nivelDe(d,R),ritmo_nom:R.nombre,ritmo_emo:R.emoji,
+      dias:diasNorm(t.dias_atiende),abre_hoy:abreHoy(t.dias_atiende),dias_txt:diasTexto(t.dias_atiende),
+      h_ini:t.hora_ini||"",h_fin:t.hora_fin||"",
       tp:t.tipo||"bodega",falta:[],mov:[]};}),
     ritmos:ritmosDe(_pms),
+    dia_hoy:diaIdx(),dia_hoy_nom:DIA_NOM[diaIdx()],
+    peso_cerrada:num((_pms.dias_cfg||{}).peso_cerrada,0,1,0.15),
     pedidos_hoy:(pds||[]).map(p=>({tienda:p.tienda,conductor:p.conductor,items:p.items,nota:p.nota,hora:p.hora})),
     params:await getParams()});
 });
@@ -1224,7 +1347,19 @@ app.post("/pedidos",authA,async(req,res)=>{
   let t=await tiendaPorNombre(req.body.tienda||"");
   if(!t&&req.body.tienda){const{data:aprox}=await db.from("tiendas").select("id,nombre").ilike("nombre","%"+String(req.body.tienda).slice(0,20)+"%").limit(1);t=(aprox||[])[0]||null;}
   await db.from("pedidos").insert({tienda_id:t?t.id:null,tienda:req.body.tienda,conductor:req.body.conductor,items:(Array.isArray(req.body.items)?req.body.items.slice(0,60):[]).map(x=>({p:String(x.p||"").slice(0,60),c:num(x.c,1,999)})),nota:req.body.nota||"",hora:req.body.hora||horaPE(),fecha:hoy(),estado:"pendiente"});
-  res.json({ok:true});
+  /* Si la tienda hoy no atiende, el pedido se registra igual —puede ser para
+     recoger, o el dato de días puede estar mal— pero se avisa, para no mandar
+     al conductor a una puerta cerrada. */
+  let aviso=null;
+  if(t&&!abreHoy(t.dias_atiende)){
+    aviso="⚠️ "+t.nombre+" no atiende los "+DIA_NOM[diaIdx()]+" según sus días cargados. El pedido queda registrado igual.";
+    const _pp=await getParams();
+    if(((_pp.dias_cfg||{}).avisar_pedido)!==false)
+      await evento("pedido_dia","📅 Pedido para un día que no atiende — "+t.nombre,
+        "Se registró un pedido para hoy "+DIA_NOM[diaIdx()]+", pero esa tienda tiene marcado que no atiende ese día ("+diasTexto(t.dias_atiende)+"). Revisa si los días están bien cargados.",
+        String(t.id));
+  }
+  res.json({ok:true,aviso});
 });
 app.post("/admin/cargas/leer",authA,async(req,res)=>{
   if(!anthropic)return res.json({ok:false,error:"Falta ANTHROPIC_API_KEY en Railway para leer imágenes."});
@@ -1336,8 +1471,17 @@ app.get("/liquidaciones/sugerencia",authA,async(req,res)=>{
 app.post("/admin/tiendas/:id/editar",authA,async(req,res)=>{
   const{data:ant}=await db.from("tiendas").select("*").eq("id",req.params.id).maybeSingle();
   if(!ant)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
-  const campos={nombre:60,zona:40,tipo:20,dueno:60,tel:15,notas:200,hora_ini:5,hora_fin:5,dias_no:30,ritmo:20};
+  const campos={nombre:60,zona:40,tipo:20,dueno:60,tel:15,notas:200,hora_ini:5,hora_fin:5,ritmo:20};
   const upd={},cambios=[];
+  /* Los días vienen marcados, no escritos: dias_no pasa a ser un texto que
+     el servidor genera, nunca algo que el cliente mande. */
+  if(req.body.dias!=null){
+    const dn=diasNorm(req.body.dias);
+    if(diasNorm(ant.dias_atiende)!==dn){
+      upd.dias_atiende=dn; upd.dias_no=diasNoTexto(dn);
+      cambios.push("Días: "+diasTexto(ant.dias_atiende)+" → "+diasTexto(dn));
+    }
+  }
   Object.keys(campos).forEach(k=>{
     if(req.body[k]==null)return;
     const v=(k==="tel")?String(req.body[k]).replace(/\D/g,"").slice(0,15):limpia(req.body[k],campos[k]);
@@ -1364,7 +1508,9 @@ app.post("/admin/tiendas",authA,async(req,res)=>{
   const b=req.body;
   if(!b.n)return res.status(400).json({ok:false,error:"Falta el nombre"});
   const _pmsN=await getParams();
-  const fila={nombre:b.n,zona:b.z||"",tipo:b.tp||"bodega",ritmo:ritmoDe(_pmsN,b.ritmo).id,dueno:b.d||"",tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),cr:!!b.cr,sa:0,li:Number(b.li)||0,vip:false,act:true,nueva:false,verificada:true,conductor_reg:"admin"};
+  const _diasN=diasNorm(b.dias);
+  const fila={nombre:b.n,zona:b.z||"",tipo:b.tp||"bodega",ritmo:ritmoDe(_pmsN,b.ritmo).id,
+    dias_atiende:_diasN,dueno:b.d||"",tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:diasNoTexto(_diasN),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),cr:!!b.cr,sa:0,li:Number(b.li)||0,vip:false,act:true,nueva:false,verificada:true,conductor_reg:"admin"};
   if(b.conductor){fila.conductor_asig=b.conductor;fila.asig_fecha=hoy();} // reservada: no vence
   const{data:t,error}=await db.from("tiendas").insert(fila).select().single();
   if(error)return res.status(500).json({ok:false,error:error.message});
