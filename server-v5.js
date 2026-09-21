@@ -197,9 +197,11 @@ app.get("/",(req,res)=>res.type("html").send('<meta charset="utf-8"><div style="
 app.get("/version",(req,res)=>{
   const marcas={
     "app-conductor.html":["v5no304","v5origen","v5notipos","v5stockp","cpGetPrecio(cat.id,p.id)",
-      "onclick=\"abrirMerma()\"","v5botones","v5ritmo","window.repoT","window.nivelApp"],
+      "onclick=\"abrirMerma()\"","v5botones","v5ritmo","window.repoT","window.nivelApp",
+      "v5ciclo","abrirPropCiclo","window.RT_RITMO"],
     "admin-dashboard.html":["v5sinprestamo","v5pdprecios","v5dupids","v5catipo",
-      "v5almmover","window.pkTipo","pkEtiqueta(p)","v5ritmo2","v5ritmocfg","window.repTP","window.nivelP"]
+      "v5almmover","window.pkTipo","pkEtiqueta(p)","v5ritmo2","v5ritmocfg","window.repTP","window.nivelP",
+      "v5ciclofiltro","window.TDS","window.EVENTOS=r.eventos","ritmo_sugerido"]
   };
   const out={servidor:{etag_desactivado:app.get("etag")===false,consultas_en_paralelo:true,hora:new Date().toISOString()},archivos:{}};
   Object.keys(marcas).forEach(f=>{
@@ -571,6 +573,16 @@ app.post("/admin/eventos/:id/accion",authA,async(req,res)=>{
       }
     }else if(ev.tipo==="carga"){
       hecho=(accion==="aceptar")?"Diferencias aceptadas.":"Marcado para revisar con el conductor.";
+    }else if(ev.tipo==="ritmo_sugerido"){
+      const par=String(ref).split("|"), tid=Number(par[0])||0, rid=par[1]||"";
+      if(accion==="aceptar"&&tid&&rid){
+        const R2=ritmoDe(await getParams(),rid);
+        await db.from("tiendas").update({ritmo:R2.id}).eq("id",tid);
+        await db.from("logs").insert({tipo:"tienda",detalle:"#"+tid+" ritmo → "+R2.nombre+" (propuesto por el conductor)"});
+        hecho="Ciclo cambiado a "+R2.nombre+": desde ahora se mide con "+R2.ciclo_dias+" días.";
+      }else if(accion==="rechazar"){
+        hecho="Propuesta descartada: la tienda sigue con su ciclo actual.";
+      }
     }
   }catch(e){return res.status(500).json({ok:false,error:e.message});}
   await db.from("eventos").update({visto:true,resuelto:accion,resuelto_en:new Date().toISOString()}).eq("id",ev.id);
@@ -875,6 +887,25 @@ app.post("/tiendas",authC,async(req,res)=>{
   avisarAdmin("🆕 Tienda nueva por verificar: "+b.n+" ("+(b.z||"—")+") — registrada por "+req.cond.u);
   res.json({ok:true,id:t.id});
 });
+app.post("/conductor/ritmo-sugerido",authC,async(req,res)=>{
+  /* El conductor es quien ve cómo vende cada tienda. Propone el ciclo; el
+     dueño lo acepta o lo rechaza desde la Bandeja. No lo cambia él solo. */
+  const id=Number(req.body.tienda_id)||0;
+  const _p=await getParams(), R=ritmoDe(_p,req.body.ritmo);
+  if(!id||R.id!==String(req.body.ritmo||""))
+    return res.status(400).json({ok:false,error:"Falta la tienda o ese ciclo no existe"});
+  const{data:t}=await db.from("tiendas").select("id,nombre,ritmo").eq("id",id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
+  if((t.ritmo||"activa")===R.id)
+    return res.json({ok:false,error:"Esa tienda ya está en el ciclo "+R.nombre});
+  const ant=ritmoDe(_p,t.ritmo);
+  const motivo=limpia(req.body.motivo,200);
+  await evento("ritmo_sugerido","🔁 Cambio de ciclo propuesto — "+t.nombre,
+    req.cond.u+" propone pasarla de "+ant.nombre+" (ciclo "+ant.ciclo_dias+"d) a "
+    +R.nombre+" (ciclo "+R.ciclo_dias+"d)."+(motivo?" Motivo: "+motivo:""),
+    String(t.id)+"|"+R.id);
+  res.json({ok:true});
+});
 app.post("/correcciones",authC,async(req,res)=>{
   const{data:c}=await db.from("correcciones").insert({tienda:req.body.tienda,referencia:req.body.referencia,monto_correcto:Number(req.body.monto_correcto)||0,motivo:req.body.motivo,conductor:req.cond.u,estado:"pendiente"}).select().single();
   await evento("correccion","✎ Corrección propuesta — "+req.body.tienda,req.body.referencia+" → S/"+Number(req.body.monto_correcto||0).toFixed(2)+". Motivo: "+req.body.motivo+" (por "+req.cond.u+")",c.id);
@@ -1153,7 +1184,12 @@ app.get("/admin/datos",authA,async(req,res)=>{
       pedidos_hoy:(pds||[]).filter(p=>String(p.fecha||p.creado||"").slice(0,10)===hoy()).length,
       pedidos_pendientes:(pds||[]).filter(p=>p.estado!=="entregado").length},
     usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:u.tipo,camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||"",en_turno:(u.en_turno!==undefined&&u.en_turno!==null)?!!u.en_turno:!!turnoDe[u.usuario]})),
-    eventos:(evs||[]).map(e=>({tipo:e.tipo,titulo:e.titulo,desc:e.descripcion,ref:e.tipo==="tienda_nueva"||e.tipo==="correccion"?e.ref:String(e.id)})),
+    /* La bandeja agrupada necesita id, creado y visto; antes solo llegaban
+       tipo, titulo, desc y ref, así que no podía ni ordenar ni accionar. */
+    eventos:(evs||[]).map(e=>({id:e.id,tipo:e.tipo,titulo:e.titulo,
+      desc:e.descripcion,descripcion:e.descripcion,
+      creado:e.creado,visto:!!e.visto,
+      ref:(e.tipo==="tienda_nueva"||e.tipo==="correccion"||e.tipo==="ritmo_sugerido")?e.ref:String(e.id)})),
     tiendas:(tds||[]).map(t=>{const R=_ritT(t),d=_diasT(t);return {id:t.id,n:t.nombre,z:t.zona,d,sa:Number(t.sa||0),cr:!!t.cr,li:Number(t.li||0),vip:!!t.vip,act:t.act,nueva:!!t.nueva,verificada:!!t.verificada,conductor:t.conductor_reg,lat:t.lat,lon:t.lon,tel:t.tel,due:t.dueno,
       ritmo:R.id,ciclo:R.ciclo_dias,nivel:nivelDe(d,R),ritmo_nom:R.nombre,ritmo_emo:R.emoji,
       tp:t.tipo||"bodega",falta:[],mov:[]};}),

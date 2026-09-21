@@ -519,7 +519,7 @@ window.cargarAdm=async function(){
  var r=await apiA('/admin/datos');
  if(!r||!r.ok)return;
  if(r.usuarios&&r.usuarios.length){USRS.length=0;r.usuarios.forEach(function(u){USRS.push(u)});saveU();}
- if(r.eventos)SERV_EVT=r.eventos;
+ if(r.eventos){SERV_EVT=r.eventos;window.EVENTOS=r.eventos;}
  if(r.tiendas&&r.tiendas.length&&typeof TIENDAS!=='undefined'){TIENDAS.length=0;r.tiendas.forEach(function(t){TIENDAS.push(t)});}
  if(r.pedidos_hoy)PEDIDOS_ADM=r.pedidos_hoy;
  if(r.params){Object.assign(PARAMS_A,r.params);savePA();}
@@ -615,6 +615,7 @@ function atCard(){
  +'<input id="at-d" placeholder="Dueño/encargado" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'
  +'<input id="at-tel" placeholder="Teléfono" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'
  +'<select id="at-tp" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><option value="bodega">bodega</option><option value="minimarket">minimarket</option><option value="puesto">puesto</option><option value="cafetería">cafetería</option><option value="otro">otro</option></select>'
+ +'<select id="at-ritmo" title="Ciclo de reposición" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit">'+opcionesRitmo('activa')+'</select>'
  +selConds('at-c','— sin asignar (visible para todos) —')
  +'</div>'
  +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;opacity:.6;margin:2px 0 4px">Horario de atención (opcional)</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px"><input id="at-hi" type="time" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><input id="at-hf" type="time" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"><input id="at-dn" placeholder="No atiende (domingo)" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit"></div>'
@@ -657,8 +658,8 @@ window.atGuardar=async function(){
  var lat=parseFloat(g('at-lat')),lon=parseFloat(g('at-lon'));
  if(isNaN(lat)||isNaN(lon)){lat=null;lon=null;}
  var cond=g('at-c');
- var pay={n:n,z:g('at-z'),tp:g('at-tp')||'bodega',d:g('at-d'),tel:g('at-tel').replace(/\D/g,''),lat:lat,lon:lon,conductor:cond||null,h_ini:g('at-hi'),h_fin:g('at-hf'),dias_no:g('at-dn')};
- if(typeof TIENDAS!=='undefined')TIENDAS.push({id:'loc'+Date.now(),n:n,z:pay.z,due:pay.d,tel:pay.tel,lat:lat,lon:lon,d:3,vip:false,sa:0,cr:false,li:0,act:true,nueva:false,verificada:true,falta:[],mov:[],conductor_asig:cond||null});
+ var pay={n:n,z:g('at-z'),tp:g('at-tp')||'bodega',ritmo:g('at-ritmo')||'activa',d:g('at-d'),tel:g('at-tel').replace(/\D/g,''),lat:lat,lon:lon,conductor:cond||null,h_ini:g('at-hi'),h_fin:g('at-hf'),dias_no:g('at-dn')};
+ if(typeof TIENDAS!=='undefined')TIENDAS.push({id:'loc'+Date.now(),n:n,z:pay.z,due:pay.d,tel:pay.tel,lat:lat,lon:lon,ritmo:pay.ritmo,d:(ritmoP(pay.ritmo).ciclo_dias||3),vip:false,sa:0,cr:false,li:0,act:true,nueva:false,verificada:true,falta:[],mov:[],conductor_asig:cond||null});
  var r=await apiA('/admin/tiendas',pay);
  render();
  if(r&&r.ok)alert('✓ Tienda guardada en el servidor'+(cond?'. Aviso 🔔 enviado a @'+cond+' — entra en su ruta de HOY.':'.'));
@@ -3607,6 +3608,8 @@ var META={
  carga:{n:'Carga con diferencias',i:'📦',acc:{si:'Aceptar diferencias',no:'Revisar'}},
  traspaso:{n:'Traspaso',i:'↔️',acc:null},
  correccion:{n:'Corrección propuesta',i:'✏️',acc:{si:'Aplicar',no:'Descartar'}},
+ ritmo_sugerido:{n:'Cambio de ciclo propuesto',i:'🔁',acc:{si:'Aplicar el ciclo',no:'Descartar',
+   ayuda:'Aplicar cambia el ciclo de esa tienda: desde ese momento se mide con la escala del ciclo nuevo y cambia cuándo entra a la ruta.'}},
  zona:{n:'Fuera de zona',i:'📍',acc:null},
  almacen:{n:'Almacén',i:'🏬',acc:null},
  visita:{n:'Visita',i:'👣',acc:null},
@@ -4277,6 +4280,10 @@ var NIV=[null,
  {l:'Cliente perdido',c:'var(--r8)',h:'#54222E'}];
 var CORTES=[0.35,0.75,1.0,1.45,1.9,3.4];
 
+/* TIENDAS se declara como `const` global: NO es TDS(). Leerlo por
+   window daba siempre undefined y los conteos salían en 0. Este accesor lo
+   toma del ámbito léxico, que es donde vive de verdad. */
+window.TDS=function(){ try{ return (typeof TIENDAS!=='undefined'&&TIENDAS)?TIENDAS:[] }catch(e){ return [] } };
 window.ritmoP=function(id){
  var L=(window.RITMOS&&window.RITMOS.length)?window.RITMOS:RITMOS_DEF;
  for(var i=0;i<L.length;i++)if(L[i].id===String(id||'activa'))return L[i];
@@ -4346,7 +4353,7 @@ if(typeof rTiendas==='function'){var _rt=rTiendas;window.rTiendas=function(){
  var h='';try{h=_rt.apply(this,arguments)}catch(e){return ''}
  var L=(window.RITMOS&&window.RITMOS.length)?window.RITMOS:RITMOS_DEF;
  var cuenta=L.map(function(r){
-  var n=(window.TIENDAS||[]).filter(function(t){return (t.ritmo||'activa')===r.id}).length;
+  var n=TDS().filter(function(t){return (t.ritmo||'activa')===r.id}).length;
   return '<button onclick="filtrarRitmo(\''+r.id+'\')" style="padding:6px 10px;border-radius:14px;border:1.5px solid '
    +((window.RFILTRO===r.id)?'#1D4ED8':'var(--linea)')+';background:'+((window.RFILTRO===r.id)?'rgba(29,78,216,.10)':'none')
    +';color:inherit;font-size:11px;font-weight:800;cursor:pointer">'+(r.emoji||'')+' '+r.nombre+' ('+n+')</button>';
@@ -4356,7 +4363,7 @@ if(typeof rTiendas==='function'){var _rt=rTiendas;window.rTiendas=function(){
   +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'
   +'<button onclick="filtrarRitmo(\'\')" style="padding:6px 10px;border-radius:14px;border:1.5px solid '
     +(window.RFILTRO?'var(--linea)':'#1D4ED8')+';background:'+(window.RFILTRO?'none':'rgba(29,78,216,.10)')
-    +';color:inherit;font-size:11px;font-weight:800;cursor:pointer">Todas ('+((window.TIENDAS||[]).length)+')</button>'
+    +';color:inherit;font-size:11px;font-weight:800;cursor:pointer">Todas ('+(TDS().length)+')</button>'
   +cuenta+'</div>'
   +'<div style="border-top:1px solid var(--linea);padding-top:8px">'
   +'<div style="font-size:11px;font-weight:800;opacity:.75;margin-bottom:5px">Cambiar el ritmo de toda una zona de una vez</div>'
@@ -4368,7 +4375,7 @@ if(typeof rTiendas==='function'){var _rt=rTiendas;window.rTiendas=function(){
  return barra+h;
 };}
 function zonasOpts(){
- var z={};(window.TIENDAS||[]).forEach(function(t){if(t.z)z[t.z]=(z[t.z]||0)+1});
+ var z={};TDS().forEach(function(t){if(t.z)z[t.z]=(z[t.z]||0)+1});
  var k=Object.keys(z).sort();
  return k.length?k.map(function(n){return '<option value="'+n+'">'+n+' ('+z[n]+')</option>'}).join('')
               :'<option value="">— aún no hay zonas —</option>';
@@ -4378,7 +4385,7 @@ window.aplicarRitmoZona=async function(){
  var z=document.getElementById('rz-zona'),r=document.getElementById('rz-ritmo');
  if(!z||!z.value)return alert('Elige una zona.');
  var R=ritmoP(r.value);
- var n=(window.TIENDAS||[]).filter(function(t){return t.z===z.value}).length;
+ var n=TDS().filter(function(t){return t.z===z.value}).length;
  if(!confirm('Pasar las '+n+' tienda(s) de la zona "'+z.value+'" al ritmo '+R.nombre+'.\n\n'
   +'Se medirán con un ciclo de '+R.ciclo_dias+' días y compra buena desde S/'+R.umbral_repo+'.\n\n'
   +'Esto cambia cuándo entran a la ruta. ¿Continuar?'))return;
@@ -4387,7 +4394,7 @@ window.aplicarRitmoZona=async function(){
  else alert('No se pudo: '+((res&&res.error)||'sin respuesta'));
 };
 /* el filtro se aplica sobre la lista que pinta la tabla */
-if(typeof window.TIENDAS!=='undefined'){}
+if(typeof TDS()!=='undefined'){}
 })();
 </script>
 <script id="v5ritmocfg">
@@ -4446,7 +4453,7 @@ function tarjeta(r,i){
 if(typeof rConfig==='function'){var _rc=rConfig;window.rConfig=function(){
  var base='';try{base=_rc.apply(this,arguments)}catch(e){}
  var L=(window.RITMOS&&window.RITMOS.length)?window.RITMOS:[];
- var cuenta={};(window.TIENDAS||[]).forEach(function(t){var k=t.ritmo||'activa';cuenta[k]=(cuenta[k]||0)+1});
+ var cuenta={};TDS().forEach(function(t){var k=t.ritmo||'activa';cuenta[k]=(cuenta[k]||0)+1});
  var card='<div class="card" style="border-left:4px solid #5B3FA0"><div class="ct">🔁 Ritmos de reposición de las tiendas</div>'
   +'<div style="font-size:11.5px;opacity:.75;line-height:1.55;margin-bottom:10px">'
   +'No todas las tiendas venden al mismo ritmo. Una tienda de alto movimiento vacía su mercadería en unos días; '
@@ -4475,7 +4482,7 @@ window.ritQuitar=function(i){
  var L=(window.RITMOS||[]).slice();
  var r=L[i];if(!r)return;
  if(r.id==='activa')return alert('El ritmo base no se puede quitar.');
- var n=(window.TIENDAS||[]).filter(function(t){return (t.ritmo||'activa')===r.id}).length;
+ var n=TDS().filter(function(t){return (t.ritmo||'activa')===r.id}).length;
  if(n&&!confirm('Hay '+n+' tienda(s) con el ritmo "'+r.nombre+'".\n\nSi lo quitas pasarán a medirse con el ritmo base (Activa).\n\n¿Continuar?'))return;
  L.splice(i,1);window.RITMOS=L;render();
 };
@@ -4496,6 +4503,67 @@ window.ritGuardar=async function(){
  if(r&&r.ok){alert('✓ Ritmos guardados. Las apps los toman en la siguiente sincronización.');await cargarAdm();render();}
  else alert('No se pudo guardar: '+((r&&r.error)||'sin respuesta'));
 };
+})();
+</script>
+<script id="v5ciclofiltro">
+(function(){
+/* ═══ 166 · Filtrar por ciclo en Configuración ═══
+   En el editor de ritmos, cada uno muestra qué tiendas tiene y deja saltar
+   directo a esa lista, filtrada, en la sección Tiendas. */
+
+window.verTiendasDeRitmo=function(id){
+ window.RFILTRO=id||'';
+ if(typeof ir==='function')ir('tiendas');
+ else if(typeof render==='function')render();
+};
+window.CFILTRO=window.CFILTRO||'';
+window.filtrarCfgRitmo=function(id){window.CFILTRO=(window.CFILTRO===id)?'':id;render();};
+
+if(typeof rConfig==='function'){var _rc=rConfig;window.rConfig=function(){
+ var h='';try{h=_rc.apply(this,arguments)}catch(e){return ''}
+ try{
+  var L=(window.RITMOS&&window.RITMOS.length)?window.RITMOS:[];
+  if(!L.length)return h;
+  var TD=TDS();
+  /* barra de filtro por ciclo, arriba del editor */
+  var chips=L.map(function(r){
+   var n=TD.filter(function(t){return (t.ritmo||'activa')===r.id}).length;
+   var on=(window.CFILTRO===r.id);
+   return '<button onclick="filtrarCfgRitmo(\''+r.id+'\')" style="padding:7px 11px;border-radius:15px;'
+    +'border:1.5px solid '+(on?'#5B3FA0':'var(--linea)')+';background:'+(on?'rgba(91,63,160,.12)':'none')
+    +';color:inherit;font-size:11px;font-weight:800;cursor:pointer">'+(r.emoji||'')+' '+r.nombre+' ('+n+')</button>';
+  }).join('');
+
+  var detalle='';
+  if(window.CFILTRO){
+   var R=(typeof ritmoP==='function')?ritmoP(window.CFILTRO):null;
+   var ls=TD.filter(function(t){return (t.ritmo||'activa')===window.CFILTRO});
+   detalle='<div style="border:1.5px solid rgba(91,63,160,.35);border-radius:12px;padding:10px 12px;margin-top:8px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+    +'<b style="font-size:12.5px">'+(R?(R.emoji+' '+R.nombre+' · ciclo '+R.ciclo_dias+' d'):window.CFILTRO)+'</b>'
+    +'<button onclick="verTiendasDeRitmo(\''+window.CFILTRO+'\')" style="border:0;background:none;color:#1D4ED8;font-size:11px;font-weight:800;cursor:pointer">Ver en Tiendas ›</button></div>'
+    +(ls.length
+      ? ls.slice(0,60).map(function(t){
+         var rr=(typeof repTP==='function')?repTP(t):{l:'',c:'inherit'};
+         return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--linea)">'
+          +'<span style="flex:1;font-size:11.5px;overflow:hidden;text-overflow:ellipsis">'+t.n+'<span style="opacity:.55"> · '+(t.z||'sin zona')+'</span></span>'
+          +'<span style="font-size:10.5px;font-weight:800;color:'+rr.c+'">'+rr.l+'</span>'
+          +'<span style="font-size:10.5px;opacity:.7;min-width:34px;text-align:right">'+(t.d!=null?t.d+'d':'—')+'</span></div>';
+        }).join('')+(ls.length>60?('<div style="font-size:10.5px;opacity:.6;padding-top:5px">y '+(ls.length-60)+' más…</div>'):'')
+      : '<div style="font-size:11.5px;opacity:.65;padding:4px 0">Ninguna tienda tiene este ciclo todavía.</div>')
+    +'</div>';
+  }
+
+  var barra='<div style="border-top:1px solid var(--linea);margin-top:10px;padding-top:9px">'
+   +'<div style="font-size:11px;font-weight:800;opacity:.75;margin-bottom:6px">Ver las tiendas de cada ciclo</div>'
+   +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+chips+'</div>'+detalle+'</div>';
+
+  /* se inserta dentro de la tarjeta de ritmos, justo antes de su cierre */
+  var marca='<div style="font-size:10.5px;opacity:.6;margin-top:8px;line-height:1.5">Para pasar tiendas de un ritmo a otro';
+  if(h.indexOf(marca)>=0)h=h.replace(marca,barra+marca);
+ }catch(e){}
+ return h;
+};}
 })();
 </script>
 </body>

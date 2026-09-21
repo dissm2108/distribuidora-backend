@@ -2755,7 +2755,7 @@ window.guardarTienda=function(){
  var n=($('rt-n').value||'').trim();
  if(!n)return toast('El nombre es obligatorio','e');
  var ll=_rtMk?_rtMk.getLatLng():{lat:T[0]?T[0].lat:-14.7924,lng:T[0]?T[0].lon:-71.4198};
- _rtPend={n:n,z:($('rt-z').value||'').trim()||'—',tp:rtTipo,d:($('rt-d').value||'').trim()||'—',tel:($('rt-tel').value||'').replace(/\D/g,''),no:($('rt-no').value||'').trim(),h_ini:($('rt-hi').value||''),h_fin:($('rt-hf').value||''),dias_no:($('rt-dn').value||'').trim(),lat:+ll.lat.toFixed(6),lon:+ll.lng.toFixed(6),e:'pendiente',cr:false,sa:0,li:0,di:'—',dr:0,vip:false,act:true,ab:true,h:[],nueva:true,verificada:false,enRuta:true,foto:_rtFoto||null};
+ _rtPend={n:n,z:($('rt-z').value||'').trim()||'—',tp:rtTipo,ritmo:(window.RT_RITMO||'activa'),d:($('rt-d').value||'').trim()||'—',tel:($('rt-tel').value||'').replace(/\D/g,''),no:($('rt-no').value||'').trim(),h_ini:($('rt-hi').value||''),h_fin:($('rt-hf').value||''),dias_no:($('rt-dn').value||'').trim(),lat:+ll.lat.toFixed(6),lon:+ll.lng.toFixed(6),e:'pendiente',cr:false,sa:0,li:0,di:'—',dr:0,vip:false,act:true,ab:true,h:[],nueva:true,verificada:false,enRuta:true,foto:_rtFoto||null};
  var nn=normN(n);_dupIdx=-1;
  for(var i=0;i<T.length;i++){var t=T[i];if(t.act===false)continue;
   var _rad=(window.DUPR||10)/1000;var cerca=t.lat&&distKm(t.lat,t.lon,_rtPend.lat,_rtPend.lon)<_rad;
@@ -4059,7 +4059,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-21-A';
+window.BUILD='2026-09-21-B';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -5077,19 +5077,11 @@ setTimeout(acomodarBotones,3000);
 </script>
 <script id="v5leyenda">
 (function(){
+/* 166 · La leyenda "Días sin comprar" ya no se dibuja.
+   Se quita aquí, en el bloque que la creaba, y no anulándola desde otro
+   bloque posterior: así no depende del orden en que carguen los bloques. */
 window.pintaLeyenda=function(){
- try{
-  var host=document.getElementById('mapa-t');if(!host||!host.parentElement)return;
-  var e=document.getElementById('mapa-leyenda');
-  if(!e){e=document.createElement('div');e.id='mapa-leyenda';
-   e.style.cssText='position:absolute;left:10px;top:10px;z-index:450;background:var(--wh);border:1px solid var(--bd);border-radius:10px;padding:7px 9px;font-size:10px;line-height:1.6;color:var(--tx);box-shadow:0 2px 8px rgba(0,0,0,.15);max-width:150px';
-   if(getComputedStyle(host.parentElement).position==='static')host.parentElement.style.position='relative';
-   host.parentElement.appendChild(e);}
-  e.innerHTML='<b style="font-size:10px">Días sin comprar</b><br>'
-   +leyendaColores().map(function(x){
-     return '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+x[0]+';margin-right:5px"></span>'+x[1];
-   }).join('<br>');
- }catch(e){}
+ try{var e=document.getElementById('mapa-leyenda');if(e)e.remove();}catch(e){}
 };
 if(typeof irA==='function'){var _ir=irA;window.irA=function(sc){
  var r=_ir.apply(this,arguments);
@@ -5310,6 +5302,123 @@ if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async
   if(d&&Array.isArray(d.ritmos)&&d.ritmos.length)window.RITMOS=d.ritmos;
   if(typeof repintarPuntos==='function')repintarPuntos();
   if(typeof anotarTiendas==='function')anotarTiendas();
+ }catch(e){}
+ return r;};}
+})();
+</script>
+<script id="v5ciclo">
+(function(){
+/* ═══ 166 · Elegir el ciclo al registrar, y proponer cambios ═══
+   El conductor es quien ve cómo vende cada tienda: puede elegir el ciclo al
+   registrarla y proponer un cambio después. Proponer, no cambiar: el dueño
+   acepta o rechaza desde la Bandeja del panel. */
+
+window.RT_RITMO=window.RT_RITMO||'activa';
+
+function lista(){
+ var L=(window.RITMOS&&window.RITMOS.length)?window.RITMOS:[];
+ return L.length?L:[{id:'activa',nombre:'Activa',emoji:'🏪',ciclo_dias:3},
+                    {id:'semanal',nombre:'Semanal',emoji:'📅',ciclo_dias:7}];
+}
+function botones(sel,fn){
+ return lista().map(function(r){
+  var on=(r.id===sel);
+  return '<button onclick="'+fn+'(\''+r.id+'\')" style="flex:1;min-width:104px;padding:9px 8px;border-radius:11px;'
+   +'border:1.5px solid '+(on?'#5B3FA0':'var(--bd)')+';background:'+(on?'#F1EDFA':'transparent')+';'
+   +'color:'+(on?'#5B3FA0':'var(--tx)')+';font-size:11.5px;font-weight:800;cursor:pointer;text-align:left">'
+   +(r.emoji||'')+' '+r.nombre+'<div style="font-size:10px;font-weight:600;opacity:.7">vende en ~'+r.ciclo_dias+' días</div></button>';
+ }).join('');
+}
+
+/* ── 1. Al registrar una tienda ─────────────────────────────────── */
+window.rtSetRitmo=function(id){window.RT_RITMO=id;pintaRtRitmo();};
+function pintaRtRitmo(){
+ var host=document.getElementById('rt-ritmos');if(!host)return;
+ host.innerHTML='<div style="font-size:11px;color:var(--mu);margin-bottom:5px">🔁 ¿Cada cuánto termina su mercadería?</div>'
+  +'<div style="display:flex;gap:6px;flex-wrap:wrap">'+botones(window.RT_RITMO,'rtSetRitmo')+'</div>';
+}
+function montaRtRitmo(){
+ try{
+  var tipos=document.getElementById('rt-tipos');if(!tipos||!tipos.parentNode)return;
+  if(!document.getElementById('rt-ritmos')){
+   var d=document.createElement('div');d.id='rt-ritmos';d.style.marginBottom='8px';
+   tipos.parentNode.insertBefore(d,tipos.nextSibling);
+  }
+  pintaRtRitmo();
+ }catch(e){}
+}
+if(typeof abrirRegT==='function'){var _ar=abrirRegT;window.abrirRegT=function(){
+ var r=_ar.apply(this,arguments);
+ window.RT_RITMO='activa';
+ setTimeout(montaRtRitmo,120);setTimeout(montaRtRitmo,500);
+ return r;};}
+
+/* ── 2. En la ficha: ver el ciclo y proponer otro ──────────────── */
+window._ritT=-1;
+window.abrirPropCiclo=function(i){
+ window._ritT=i;
+ var t=T[i];if(!t)return;
+ var R=(typeof ritmoDeT==='function')?ritmoDeT(t):{id:'activa',nombre:'Activa',ciclo_dias:3};
+ window.PROP_RITMO=R.id;
+ var ov=document.getElementById('ov-ciclo');
+ if(!ov){
+  ov=document.createElement('div');ov.className='ov';ov.id='ov-ciclo';
+  ov.innerHTML='<div class="sh"><div class="sh-top"><div class="sh-tit">🔁 Proponer otro ciclo</div>'
+   +'<button class="sh-x" onclick="cov(\'ov-ciclo\')">✕</button></div>'
+   +'<div class="sh-b"><div id="ciclo-body"></div></div></div>';
+  document.body.appendChild(ov);
+ }
+ pintaPropCiclo();
+ if(typeof aov==='function')aov('ov-ciclo');
+};
+window.propSetRitmo=function(id){window.PROP_RITMO=id;pintaPropCiclo();};
+function pintaPropCiclo(){
+ var box=document.getElementById('ciclo-body');if(!box)return;
+ var t=T[window._ritT];if(!t)return;
+ var R=(typeof ritmoDeT==='function')?ritmoDeT(t):{nombre:'Activa',ciclo_dias:3};
+ var cambia=(window.PROP_RITMO!==R.id);
+ box.innerHTML='<div style="font-size:12.5px;font-weight:800;margin-bottom:3px">'+t.n+'</div>'
+  +'<div style="font-size:11.5px;color:var(--mu);line-height:1.55;margin-bottom:10px">'
+  +'Ahora se mide como <b>'+R.nombre+'</b>: el sistema espera que termine su mercadería en unos <b>'+R.ciclo_dias+' días</b>. '
+  +'Si en la práctica tarda más o menos, propón el cambio y el administrador lo revisa.</div>'
+  +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+botones(window.PROP_RITMO,'propSetRitmo')+'</div>'
+  +'<textarea id="ciclo-mot" placeholder="¿Por qué? (ej: siempre le sobra la mitad, o me pide más cada 2 días)" '
+  +'style="width:100%;min-height:62px;padding:10px;border-radius:11px;border:1.5px solid var(--bd);font-size:12.5px;margin-bottom:9px"></textarea>'
+  +'<button class="bt2'+(cambia?'':' ')+'" style="width:100%'+(cambia?'':';opacity:.5')+'" onclick="enviarPropCiclo()">'
+  +(cambia?'Enviar la propuesta al administrador':'Elige un ciclo distinto al actual')+'</button>'
+  +'<div style="font-size:10.5px;color:var(--mu);margin-top:7px;line-height:1.5">Tú propones; el cambio se aplica solo cuando el administrador lo acepta. Si no hay señal, se envía al reconectar.</div>';
+}
+window.enviarPropCiclo=function(){
+ var t=T[window._ritT];if(!t)return;
+ var R=(typeof ritmoDeT==='function')?ritmoDeT(t):{id:'activa'};
+ if(window.PROP_RITMO===R.id)return toast('Elige un ciclo distinto al que ya tiene','w');
+ if(!t.id||String(t.id).indexOf('loc')===0)return toast('Esa tienda aún no está en el servidor','w');
+ var mot=(document.getElementById('ciclo-mot')||{}).value||'';
+ if(typeof sync==='function')
+  sync('/conductor/ritmo-sugerido',{tienda_id:t.id,ritmo:window.PROP_RITMO,motivo:mot.slice(0,200)},
+       'Cambio de ciclo propuesto: '+t.n);
+ if(typeof cov==='function')cov('ov-ciclo');
+ toast('✓ Propuesta enviada — el administrador la verá en su bandeja','g');
+};
+
+/* la ficha muestra el ciclo y el acceso para proponer otro */
+if(typeof vtd==='function'){var _v=vtd;window.vtd=function(i){
+ var r=_v.apply(this,arguments);
+ try{
+  var di=document.getElementById('det-i'),t=T[i];
+  if(di&&t&&!document.getElementById('det-ciclo')){
+   var R=(typeof ritmoDeT==='function')?ritmoDeT(t):{nombre:'Activa',emoji:'🏪',ciclo_dias:3};
+   var info=(typeof repoT==='function')?repoT(t):{l:'',c:'var(--tx)'};
+   var d=document.createElement('div');d.id='det-ciclo';
+   d.style.cssText='border:1.5px solid var(--bd);border-radius:11px;padding:10px 11px;margin-top:8px';
+   d.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+    +'<div><div style="font-size:11px;color:var(--mu)">Ciclo de reposición</div>'
+    +'<b style="font-size:12.5px">'+(R.emoji||'')+' '+R.nombre+' · ~'+R.ciclo_dias+' días</b>'
+    +'<div style="font-size:11px;font-weight:700;margin-top:2px;color:'+info.c+'">&#9679; '+info.l+' · '+((t.dr!=null)?t.dr:R.ciclo_dias)+'d</div></div>'
+    +'<button onclick="abrirPropCiclo('+i+')" style="padding:8px 11px;border-radius:10px;border:1.5px solid #5B3FA0;background:#F1EDFA;color:#5B3FA0;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap">🔁 Proponer<br>otro ciclo</button>'
+    +'</div>';
+   di.appendChild(d);
+  }
  }catch(e){}
  return r;};}
 })();
