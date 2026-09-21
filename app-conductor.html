@@ -671,7 +671,7 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
     <div class="c"><div class="ct">Acciones del turno</div>
       <div class="ir" style="cursor:pointer" onclick="irA('traspaso')"><span class="irl">↔ Solicitar traspaso</span><span class="irv">›</span></div>
       <div class="ir" style="cursor:pointer" onclick="irA('almacen')"><span class="irl">🏪 Depositar al almacén</span><span class="irv">›</span></div>
-      
+      <div class="ir" style="cursor:pointer" onclick="abrirMerma()"><span class="irl">📉 Registrar merma</span><span class="irv">›</span></div>
   <div class="ir" style="cursor:pointer" onclick="irA('gastos')"><span class="irl">🧾 Registrar gastos</span><span class="irv" id="gastos-badge">›</span></div>
       <div class="ir" style="cursor:pointer" onclick="irA('liquidacion')"><span class="irl">📋 Resumen del viaje</span><span class="irv">›</span></div>
       <div class="ir" style="cursor:pointer" onclick="aov('ov-ef')"><span class="irl">📊 Eficiencia de carga</span><span class="irv">›</span></div>
@@ -1485,7 +1485,7 @@ function renderListaT(){
     switch(F){case 'pendientes':return t.e!=='completada';case 'deuda':return t.sa>0;case 'completadas':return t.e==='completada';case 'vip':return !!t.vip;case 'urgentes':return (t.dr||0)>=5;default:return true;}
   };
   const items=T.map((t,i)=>({t,i})).filter(x=>x.t.act!==false&&pasa(x.t));
-  document.getElementById('lista-t').innerHTML='<div style="height:92px"></div>'+(items.length?items.map(({t,i})=>`<div class="c" data-i="${i}" style="border-left:4px solid ${t.nueva?'#B97A1F':(C[t.e]||'var(--bd)')};padding:11px 13px;cursor:pointer" onclick="vtd(${i})"><div style="display:flex;align-items:center;gap:9px"><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.nueva?'🆕 ':''}${t.n}</div><div style="font-size:11px;color:var(--mu);margin-top:2px">${t.z} · ${t.di} km</div><div style="font-size:10px;font-weight:800;margin-top:2px;color:${repoInfo(t.dr||3).c}">&#9679; ${repoInfo(t.dr||3).l} · ${t.dr||3}d${t.vip?' <span style="color:#B97A1F">★VIP</span>':''}</div>${t.pedido?`<div style="font-size:10px;color:#1D4ED8;font-weight:700;margin-top:2px">📩 ${t.pedido.items.map(x=>x.c+' '+x.p).join(', ').slice(0,52)}</div>`:''}${t.visitadaPor?`<div style="font-size:10px;color:#7C5CBF;font-weight:700;margin-top:2px">👁 Visitada hoy por ${t.visitadaPor.n} · ${t.visitadaPor.h}</div>`:''}${t.sa>0?`<div style="font-size:10px;color:var(--ye);font-weight:700;margin-top:2px">💳 S/${t.sa}</div>`:''}${t.bajoMonto?`<div style="font-size:10px;color:#8A6410;background:#FDF6E4;border:1px solid #EFDCA8;border-radius:6px;padding:3px 6px;font-weight:800;margin-top:3px">⚠ Última compra baja: S/${Number(t.bajoMonto).toFixed(2)} — ofrécele más</div>`:''}${t.nueva?'<div style="font-size:10px;color:#B97A1F;font-weight:800;margin-top:2px">Por verificar · solo contado</div>':''}${t.asigA?`<div style="font-size:10px;color:#5B3FA0;font-weight:800;margin-top:2px">🔒 Reservada para ${t.asigA}</div>`:''}${t.miZona==='otra'?`<div style="font-size:10px;color:#8A6410;font-weight:700;margin-top:2px">Fuera de tu zona</div>`:''}</div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px"><button onclick="event.stopPropagation();${t.asigA?`avisoAsig('${t.asigA}')`:`togRuta(${i})`}" style="padding:6px 10px;border-radius:9px;font-size:10.5px;font-weight:800;border:1.5px solid ${t.enRuta?'#16A34A':'var(--bd)'};background:${t.enRuta?'#16A34A':'var(--wh)'};color:${t.enRuta?'#fff':'var(--mu)'};cursor:pointer">${t.asigA?'🔒 De otro':(t.enRuta?'✓ En ruta':'➕ Ruta')}</button><span style="color:var(--bd)">›</span></div></div><div style="display:flex;gap:6px;margin-top:9px"><button onclick="event.stopPropagation();llamar(${i})" style="flex:1;padding:8px 4px;border-radius:9px;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:11px;font-weight:800;cursor:pointer">📞 Llamar</button><button onclick="event.stopPropagation();wsp(${i})" style="flex:1;padding:8px 4px;border-radius:9px;border:1.5px solid #C6E7CF;background:#EAF7EE;color:#128C3A;font-size:11px;font-weight:800;cursor:pointer">💬 WhatsApp</button><button onclick="event.stopPropagation();cerradaHoy(${i})" style="flex:1;padding:8px 4px;border-radius:9px;border:1.5px solid ${t.noEstaba?'#EFDCA8':'var(--bd)'};background:${t.noEstaba?'#FDF6E4':'var(--wh)'};color:${t.noEstaba?'#8A6410':'var(--mu)'};font-size:11px;font-weight:800;cursor:pointer">🚫 ${t.noEstaba?'Reprogramada':'Cerrada'}</button></div>${t.noEstaba?`<div style="font-size:10px;color:#8A6410;background:#FDF6E4;border:1px solid #EFDCA8;border-radius:8px;padding:6px 9px;margin-top:7px;font-weight:700;line-height:1.5">🚫 Cerrada / no estaba hoy — entra a la ruta de MAÑANA con prioridad. La reposición sigue contando.</div>`:''}</div>`).join(''):'<div style="text-align:center;color:var(--mu);padding:40px 10px;font-size:12.5px">Ninguna tienda coincide con el filtro o la búsqueda.</div>');
+  document.getElementById('lista-t').innerHTML='<div style="height:92px"></div>'+(items.length?items.map(({t,i})=>`<div class="c" data-i="${i}" style="border-left:4px solid ${t.nueva?'#B97A1F':(C[t.e]||'var(--bd)')};padding:11px 13px;cursor:pointer" onclick="vtd(${i})"><div style="display:flex;align-items:center;gap:9px"><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.nueva?'🆕 ':''}${t.n}</div><div style="font-size:11px;color:var(--mu);margin-top:2px">${t.z} · ${t.di} km</div><div style="font-size:10px;font-weight:800;margin-top:2px;color:${repoT(t).c}">&#9679; ${repoT(t).l} · ${t.dr||3}d${ritmoChip(t)}${t.vip?' <span style="color:#B97A1F">★VIP</span>':''}</div>${t.pedido?`<div style="font-size:10px;color:#1D4ED8;font-weight:700;margin-top:2px">📩 ${t.pedido.items.map(x=>x.c+' '+x.p).join(', ').slice(0,52)}</div>`:''}${t.visitadaPor?`<div style="font-size:10px;color:#7C5CBF;font-weight:700;margin-top:2px">👁 Visitada hoy por ${t.visitadaPor.n} · ${t.visitadaPor.h}</div>`:''}${t.sa>0?`<div style="font-size:10px;color:var(--ye);font-weight:700;margin-top:2px">💳 S/${t.sa}</div>`:''}${t.bajoMonto?`<div style="font-size:10px;color:#8A6410;background:#FDF6E4;border:1px solid #EFDCA8;border-radius:6px;padding:3px 6px;font-weight:800;margin-top:3px">⚠ Última compra baja: S/${Number(t.bajoMonto).toFixed(2)} — ofrécele más</div>`:''}${t.nueva?'<div style="font-size:10px;color:#B97A1F;font-weight:800;margin-top:2px">Por verificar · solo contado</div>':''}${t.asigA?`<div style="font-size:10px;color:#5B3FA0;font-weight:800;margin-top:2px">🔒 Reservada para ${t.asigA}</div>`:''}${t.miZona==='otra'?`<div style="font-size:10px;color:#8A6410;font-weight:700;margin-top:2px">Fuera de tu zona</div>`:''}</div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px"><button onclick="event.stopPropagation();${t.asigA?`avisoAsig('${t.asigA}')`:`togRuta(${i})`}" style="padding:6px 10px;border-radius:9px;font-size:10.5px;font-weight:800;border:1.5px solid ${t.enRuta?'#16A34A':'var(--bd)'};background:${t.enRuta?'#16A34A':'var(--wh)'};color:${t.enRuta?'#fff':'var(--mu)'};cursor:pointer">${t.asigA?'🔒 De otro':(t.enRuta?'✓ En ruta':'➕ Ruta')}</button><span style="color:var(--bd)">›</span></div></div><div style="display:flex;gap:6px;margin-top:9px"><button onclick="event.stopPropagation();llamar(${i})" style="flex:1;padding:8px 4px;border-radius:9px;border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:11px;font-weight:800;cursor:pointer">📞 Llamar</button><button onclick="event.stopPropagation();wsp(${i})" style="flex:1;padding:8px 4px;border-radius:9px;border:1.5px solid #C6E7CF;background:#EAF7EE;color:#128C3A;font-size:11px;font-weight:800;cursor:pointer">💬 WhatsApp</button><button onclick="event.stopPropagation();cerradaHoy(${i})" style="flex:1;padding:8px 4px;border-radius:9px;border:1.5px solid ${t.noEstaba?'#EFDCA8':'var(--bd)'};background:${t.noEstaba?'#FDF6E4':'var(--wh)'};color:${t.noEstaba?'#8A6410':'var(--mu)'};font-size:11px;font-weight:800;cursor:pointer">🚫 ${t.noEstaba?'Reprogramada':'Cerrada'}</button></div>${t.noEstaba?`<div style="font-size:10px;color:#8A6410;background:#FDF6E4;border:1px solid #EFDCA8;border-radius:8px;padding:6px 9px;margin-top:7px;font-weight:700;line-height:1.5">🚫 Cerrada / no estaba hoy — entra a la ruta de MAÑANA con prioridad. La reposición sigue contando.</div>`:''}</div>`).join(''):'<div style="text-align:center;color:var(--mu);padding:40px 10px;font-size:12.5px">Ninguna tienda coincide con el filtro o la búsqueda.</div>');
 }
 
 // ══════════ VER TIENDA ══════════
@@ -2200,8 +2200,10 @@ if(typeof cpConfirmarCobro==='function'){var _cc=cpConfirmarCobro;window.cpConfi
  else if(metodo==='mixto'){try{me=Number(($('cp-mix-ef')||{}).value)||0}catch(e){};ef=Math.min(me,total);cr=Math.max(0,total-ef);}
  try{items.forEach(function(it){var c=prodCat(it.id);if(c&&CARGA[c.id]!=null)CARGA[c.id]=Math.max(0,CARGA[c.id]-it.c);});}catch(e){}
  if(t){t.sa=Math.max(0,(t.sa||0)+cr-abono);
-   if(total>=UMBRAL_REPO){t.dr=1;}
-   else if(total>0){t.dr=Math.max(1,(t.dr||3)-2);toast('Compra < S/'+UMBRAL_REPO+': reposición baja parcial ⏳ provisional');}}
+   var _rr=ritmoDeT(t);
+   if(total>=_rr.umbral_repo){t.dr=0;t.nivel=1;}
+   else if(total>0){t.dr=Math.max(0,(t.dr||_rr.ciclo_dias)-Math.min(_rr.resta_parcial,_rr.ciclo_dias));t.nivel=nivelApp(t.dr,_rr);
+    toast('Compra < S/'+_rr.umbral_repo+' ('+_rr.nombre+'): reposición parcial, −'+_rr.resta_parcial+'d');}}
  if(cr>0)FIO+=cr;if(abono>0)COBRO+=abono;
  var kx={h:hora(),tipo:'Venta'+(yape?' · Yape':metodo==='credito'?' · crédito':metodo==='mixto'?' · mixto':''),det:(t?t.n:'—'),val:total};
  if(OFFLINE){COLA.push({dia:{ef:ef,ya:ya,ab:abono},kx:kx});window._choquePend=true;toast('⛔ Guardada en el celular — se envía al recuperar señal');}
@@ -2263,8 +2265,10 @@ function inyectar(sc){
   if(host&&!$('alm-extra')){var por=Object.keys(CARGA_DIAS).filter(function(k){return (CARGA[k]||0)>0&&(VIDA_EJ-CARGA_DIAS[k])<=1});
    var d=document.createElement('div');d.id='alm-extra';
    d.innerHTML=(por.length?'<div style="background:#FDF6E4;border:1px solid #EFDCA8;color:#8A6410;border-radius:10px;padding:9px 12px;font-size:11.5px;margin-bottom:10px;line-height:1.5">👀 <b>Producto en observación (hoy):</b> '+por.map(function(k){var cc=(typeof CATS!=='undefined')?CATS.find(function(x){return x.id===k}):null;return (cc?cc.nom:k)+' ×'+CARGA[k]}).join(', ')+'. Véndelo o remátalo hoy. <span style="border:1px dashed #B97A1F;color:#B97A1F;border-radius:6px;padding:1px 6px;font-size:10px">⏳ vida útil ej. '+VIDA_EJ+'d</span></div>':'')
-   +'<button class="btn btn-s" style="width:100%;margin-bottom:10px" onclick="aov(\'ov-merma\')">📉 Registrar merma (dañado / perdido / consumido)</button>';
-   host.insertBefore(d,host.firstChild);}}
+   ;
+   /* 163 · la merma ya no vive aquí: tiene su propio acceso en Acciones del
+      turno. Esta tarjeta solo avisa del producto en observación. */
+   if(d.innerHTML)host.insertBefore(d,host.firstChild);}}
  if(sc==='gastos'){var h2=document.querySelector('#sc-gastos .pad')||document.querySelector('#sc-gastos .scroll')||$('sc-gastos');
   if(h2&&!$('robo-row')){var r=document.createElement('div');r.id='robo-row';
    r.innerHTML='<button class="btn btn-s" style="width:100%;margin-bottom:10px" onclick="aov(\'ov-robo\')">🚨 Reportar robo o incidente (texto al dueño)</button>';
@@ -2275,10 +2279,10 @@ function inyectar(sc){
  
 }
 window.anotarTiendas=function(){var lt=$('lista-t');if(!lt)return;var cards=lt.querySelectorAll('.c');var i=0;
- cards.forEach(function(card){var t=T[i++];if(!t||card.querySelector('.repo-chip'))return;var info=repoInfo(t.dr||3);
+ cards.forEach(function(card){var t=T[i++];if(!t||card.querySelector('.repo-chip'))return;var info=repoT(t);
   var slot=card.querySelector('div div')||card;var chip=document.createElement('div');chip.className='repo-chip';
   chip.style.cssText='font-size:10px;font-weight:800;margin-top:3px;color:'+info.c;
-  chip.innerHTML='&#9679; '+info.l+' · '+(t.dr||3)+'d'+(t.vip?' <span style="color:#B97A1F">★VIP</span>':'');
+  chip.innerHTML='&#9679; '+info.l+' · '+(t.dr||3)+'d'+ritmoChip(t)+(t.vip?' <span style="color:#B97A1F">★VIP</span>':'');
   slot.appendChild(chip);});};
 
 /* ── Liquidación por VIAJE en vivo ── */
@@ -4055,7 +4059,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-17-C';
+window.BUILD='2026-09-21-A';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -5123,6 +5127,189 @@ if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async
    else if(g)e.innerHTML='🛰️ <b>GPS del camión activo</b><br><span style="opacity:.75">Última señal: '+(g.hora?new Date(g.hora).toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}):'—')+'</span>';
    else e.innerHTML='⚠️ <b>Sin ubicación</b><br><span style="opacity:.75">Ni el camión ni tu celular están entregando posición. Revisa el permiso de ubicación.</span>';
   }
+ }catch(e){}
+ return r;};}
+})();
+</script>
+<script id="v5botones">
+(function(){
+/* ═══ 164 · Los botones del mapa viven DENTRO de la pantalla Tiendas ═══
+   El bloque anterior (v5visual) los sacaba de #sc-tiendas y los colgaba de
+   .app para que no se salieran del recuadro en computadora. El efecto no
+   buscado: al colgar de .app dejaban de ser hijos de la pantalla, así que
+   .sc.off ya no los ocultaba y quedaban flotando sobre Inicio, Mi ruta y
+   Mi perfil. Ahora se cuelgan de #sc-tiendas, que también ocupa todo el
+   recuadro de la app (position:absolute;inset:0), así que siguen bien
+   colocados en computadora y desaparecen solos al cambiar de menú.
+   El único que sigue acompañando a los demás menús es ⚡ Venta rápida. */
+
+var BASE='position:absolute;z-index:60;width:46px;height:46px;border-radius:50%;'
+ +'border:1.5px solid var(--bd);background:var(--wh);color:var(--tx);font-size:18px;'
+ +'cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.2);display:flex;align-items:center;'
+ +'justify-content:center';
+
+/* 1 · La leyenda de días no se muestra */
+window.pintaLeyenda=function(){
+ try{var e=document.getElementById('mapa-leyenda');if(e)e.remove();}catch(e){}
+};
+
+/* 2 · Colocación correcta de los tres botones del mapa */
+window.acomodarBotones=window.botonesTiendas=function(){
+ try{
+  var sc=document.getElementById('sc-tiendas');if(!sc)return;
+  pintaLeyenda();
+
+  /* el zoom de Leaflet, arriba a la derecha, lejos de todo lo demás */
+  var z=document.querySelector('#mapa-t .leaflet-control-zoom');
+  if(z){
+   var esq=document.querySelector('#mapa-t .leaflet-top.leaflet-right');
+   if(esq&&z.parentElement!==esq)esq.appendChild(z);
+   z.style.margin='10px 10px 0 0';
+  }
+
+  /* ⚡ venta rápida: el único que acompaña a los demás menús — no se toca,
+     solo se fija su sitio en la fila */
+  var fab=document.getElementById('fab');
+  if(fab){fab.style.right='14px';fab.style.bottom='66px';}
+
+  /* 🛰️ centrar en el camión — a la izquierda de venta rápida */
+  var bc=document.getElementById('btn-centrar');
+  if(bc){
+   if(bc.parentElement!==sc)sc.appendChild(bc);
+   bc.style.cssText=BASE+';right:78px;bottom:70px';
+  }
+
+  /* 🏪 registrar tienda — a la izquierda de centrar */
+  var br=document.querySelector('[onclick*="abrirRegT"]');
+  if(br&&br.id!=='fab'&&br.className.indexOf('fab')<0){
+   if(br.parentElement!==sc)sc.appendChild(br);
+   br.style.cssText=BASE+';right:142px;bottom:70px';
+   br.textContent='🏪';br.title='Registrar tienda';
+  }
+
+  /* 🔄 actualizar — abajo a la izquierda, también dentro de la pantalla */
+  var bs=document.getElementById('btn-sync-t');
+  if(bs){
+   if(bs.parentElement!==sc)sc.appendChild(bs);
+   bs.style.cssText=BASE+';left:14px;bottom:70px';
+  }
+ }catch(e){}
+};
+
+/* 3 · Se aplica al entrar a Tiendas y después de los arreglos antiguos,
+      que siguen programados a los 3 s con la versión anterior. */
+if(typeof irA==='function'){var _ir=irA;window.irA=function(sc){
+ var r=_ir.apply(this,arguments);
+ try{
+  if(sc==='tiendas'){setTimeout(botonesTiendas,300);setTimeout(botonesTiendas,1100);}
+  else{
+   /* por si algún bloque antiguo alcanzó a colgarlos de .app */
+   ['btn-centrar','btn-sync-t'].forEach(function(id){
+    var e=document.getElementById(id);
+    if(e&&e.parentElement&&e.parentElement.id!=='sc-tiendas')e.style.display='none';
+   });
+   var b=document.querySelector('[onclick*="abrirRegT"]');
+   if(b&&b.parentElement&&b.parentElement.id!=='sc-tiendas')b.style.display='none';
+  }
+ }catch(e){}
+ return r;};}
+[900,3400,4200].forEach(function(t){setTimeout(botonesTiendas,t)});
+})();
+</script>
+<script id="v5ritmo">
+(function(){
+/* ═══ 165 · RITMO DE REPOSICIÓN — una escala para todos los tipos de tienda ═══
+   La escala de 8 niveles nunca fue de días: es de CICLOS. Si divides cada
+   corte de la escala vieja entre 3, el nivel 3 cae exacto en 1,00 ciclo. Ese
+   3 estaba escrito a mano en cada corte. Ahora vive en el ritmo de la tienda,
+   así que el mismo código sirve para una tienda activa (ciclo 3), una semanal
+   (ciclo 7) y cualquier ritmo que se cree después, sin tocar nada.
+   Para las tiendas activas los niveles salen EXACTAMENTE iguales que antes. */
+
+var RITMOS_DEF=[
+ {id:'activa', nombre:'Activa', emoji:'🏪', ciclo_dias:3, umbral_repo:40, resta_parcial:2,
+  dias_perdido:30, pesos:[5,12,22,45,65,80]},
+ {id:'semanal',nombre:'Semanal',emoji:'📅', ciclo_dias:7, umbral_repo:90, resta_parcial:5,
+  dias_perdido:45, pesos:[3,8,25,42,58,72]}
+];
+window.RITMOS=RITMOS_DEF.slice();
+
+/* colores y nombres de los 8 niveles — los mismos que ya usaba repoInfo */
+var NIV=[null,
+ {l:'Recién surtida',        c:'#2F7D4F'},
+ {l:'Con mercadería',        c:'#63A05E'},
+ {l:'Por terminar',          c:'#A9AE45'},
+ {l:'Reponer imprescindible',c:'#D9A32F'},
+ {l:'Posible desabastecimiento',c:'#DF7A2B'},
+ {l:'Visitar necesariamente',c:'#C74E2C'},
+ {l:'Posible cliente perdido',c:'#8E3040'},
+ {l:'Cliente perdido',       c:'#54222E'}];
+var CORTES=[0.35,0.75,1.0,1.45,1.9,3.4];
+
+window.ritmoPorId=function(id){
+ var L=(window.RITMOS&&window.RITMOS.length)?window.RITMOS:RITMOS_DEF;
+ for(var i=0;i<L.length;i++)if(L[i].id===String(id||'activa'))return L[i];
+ return L[0];
+};
+/* El ritmo de una tienda: primero lo que mandó el servidor, si no el suyo. */
+window.ritmoDeT=function(t){return ritmoPorId(t&&t.ritmo)};
+
+window.nivelApp=function(d,rit){
+ var c=Number(rit&&rit.ciclo_dias)||3, dd=Math.max(0,Number(d)||0), r=dd/c;
+ for(var i=0;i<CORTES.length;i++)if(r<=CORTES[i]+1e-9)return i+1;
+ return dd<(Number(rit&&rit.dias_perdido)||30)?7:8;
+};
+/* repoInfo sigue existiendo con la misma forma {i,l,c} por compatibilidad:
+   todo lo que la llamaba con un solo número sigue funcionando (ciclo 3). */
+window.repoInfo=function(d,rit){
+ var R=rit||ritmoPorId('activa'), n=nivelApp(d,R);
+ return {i:n,l:NIV[n].l,c:NIV[n].c,nivel:n,ritmo:R.id};
+};
+/* repoT recibe la tienda entera, así que sabe su ritmo */
+window.repoT=function(t){
+ var R=ritmoDeT(t);
+ var d=(t&&t.dr!=null)?t.dr:R.ciclo_dias;
+ return repoInfo(d,R);
+};
+window.ritmoChip=function(t){
+ var R=ritmoDeT(t);
+ if(!R||R.id==='activa')return '';   /* la activa es lo normal: no se etiqueta */
+ return ' <span style="color:#5B3FA0;font-weight:800">'+(R.emoji||'')+R.nombre+'</span>';
+};
+
+/* ═══ Puntaje de ruta: por NIVEL, no por días ═══
+   Antes: base=(d>=6)?80:{1:5,2:12,3:22,4:45,5:65}[d] y VIP desde d>=4.
+   Esos números eran el nivel disfrazado de días. Ahora se leen del ritmo,
+   y para la activa dan exactamente los mismos puntos que antes. */
+window.puntosT=function(t){
+ var R=ritmoDeT(t), d=(t&&t.dr!=null)?t.dr:R.ciclo_dias, n=nivelApp(d,R);
+ if(n>=7)return {sc:0,nivel:n,why:NIV[n].l+' — alerta admin, no entra a ruta'};
+ var base=(R.pesos&&R.pesos[n-1]!=null)?Number(R.pesos[n-1]):0;
+ var why=[NIV[n].l+' ('+d+'d'+(R.id!=='activa'?(' · '+R.nombre):'')+')'];
+ if(t.vip&&n>=4){base=Math.round(base*1.5);why.push('★ VIP potencia (desde nivel 4)');}
+ else if(t.vip){why.push('VIP sin efecto (nivel <4)');}
+ if(t.pedidoHoy){base+=100;why.push('📩 Pedido de hoy — garantizado');}
+ return {sc:base,nivel:n,why:why.join(' · ')};
+};
+
+/* ═══ El color del punto en el mapa usa la MISMA escala ═══
+   Antes había dos escalas distintas: la etiqueta con 8 niveles sobre dr, y el
+   color del punto con 6 cortes sobre días crudos. Una tienda semanal al día 8
+   habría salido roja estando normal. Ahora es una sola fuente. */
+window.colorTienda=function(t){
+ if(t&&t.e==='completada')return NIV[1].c;
+ if(t&&t.dr==null&&typeof diasSinComprar==='function'&&diasSinComprar(t)===null)return '#6B7280';
+ return repoT(t).c;
+};
+
+/* ═══ Los ritmos llegan del servidor con cada sincronización ═══ */
+if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
+ var r=await _cd.apply(this,arguments);
+ try{
+  var d=window._ultDatos;
+  if(d&&Array.isArray(d.ritmos)&&d.ritmos.length)window.RITMOS=d.ritmos;
+  if(typeof repintarPuntos==='function')repintarPuntos();
+  if(typeof anotarTiendas==='function')anotarTiendas();
  }catch(e){}
  return r;};}
 })();

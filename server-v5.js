@@ -84,6 +84,81 @@ async function tiendaPorNombre(n){
 }
 async function getParams(){const{data}=await db.from("params").select("*").eq("id",1).maybeSingle();return (data&&data.kv)||{};}
 
+
+// ════════ RITMO DE REPOSICIÓN DE CADA TIENDA ════════
+// La escala de 8 niveles nunca fue una escala de días: es una escala de CICLOS.
+// Si divides cada corte de la escala vieja entre 3, salen los mismos números
+// (el nivel 3 cae exactamente en 1,00 ciclo). Ese 3 estaba escrito a mano en
+// cada corte. Ahora vive en el ritmo de cada tienda, así que el mismo código
+// sirve para una tienda activa (ciclo 3), una semanal (ciclo 7) y cualquier
+// ritmo que se añada después desde Configuración, sin tocar la base.
+const RITMOS_BASE=[
+  {id:"activa", nombre:"Activa",  emoji:"\u{1F3EA}", ciclo_dias:3, umbral_repo:40, resta_parcial:2,
+   dias_perdido:30, pesos:[5,12,22,45,65,80],
+   desc:"Vende su mercader\u00eda en unos 3 d\u00edas. Alto movimiento, punto estrat\u00e9gico."},
+  {id:"semanal",nombre:"Semanal", emoji:"\u{1F4C5}", ciclo_dias:7, umbral_repo:90, resta_parcial:5,
+   dias_perdido:45, pesos:[3,8,25,42,58,72],
+   desc:"Tarda una semana en vender su mercader\u00eda. Movimiento m\u00e1s lento."}
+];
+function ritmosDe(params){
+  const l=(params&&Array.isArray(params.ritmos)&&params.ritmos.length)?params.ritmos:RITMOS_BASE;
+  return l.map(r=>{
+    const base=RITMOS_BASE.find(x=>x.id===r.id)||RITMOS_BASE[0];
+    const pe=Array.isArray(r.pesos)&&r.pesos.length===6?r.pesos.map(x=>num(x,0,999)||0):base.pesos;
+    return {id:limpia(r.id,20)||"activa", nombre:String(r.nombre||r.id||"").slice(0,30)||base.nombre,
+      emoji:String(r.emoji||base.emoji).slice(0,4),
+      ciclo_dias:num(r.ciclo_dias,1,120)||base.ciclo_dias,
+      umbral_repo:num(r.umbral_repo,1,100000)||base.umbral_repo,
+      resta_parcial:num(r.resta_parcial,0,60)||base.resta_parcial,
+      dias_perdido:num(r.dias_perdido,7,365)||base.dias_perdido,
+      pesos:pe, desc:String(r.desc||base.desc||"").slice(0,160)};
+  });
+}
+function ritmoDe(params,id){
+  const l=ritmosDe(params);
+  return l.find(r=>r.id===String(id||"activa"))||l[0];
+}
+// Cortes en ciclos, no en días. Los niveles 1 a 6 son proporcionales al ciclo;
+// el 7 y el 8 son de calendario (dias_perdido), porque perder un cliente es un
+// hecho de tiempo real, no de ciclos: nadie espera 10 ciclos de una semanal.
+const CORTES_CICLO=[0.35,0.75,1.0,1.45,1.9,3.4];
+function nivelDe(d,ritmo){
+  const c=Number(ritmo&&ritmo.ciclo_dias)||3, dd=Math.max(0,Number(d)||0), r=dd/c;
+  for(let i=0;i<CORTES_CICLO.length;i++) if(r<=CORTES_CICLO[i]+1e-9) return i+1;
+  return (dd < (Number(ritmo&&ritmo.dias_perdido)||30)) ? 7 : 8;
+}
+const NIVEL_TXT=["","Reci\u00e9n surtida","Con mercader\u00eda","Por terminar","Reponer imprescindible",
+  "Posible desabastecimiento","Visitar necesariamente","Posible cliente perdido","Cliente perdido"];
+function puntajeDe(d,ritmo,vip,pedidoHoy){
+  const n=nivelDe(d,ritmo);
+  if(n>=7)return {sc:0,nivel:n,why:NIVEL_TXT[n]+" \u2014 alerta admin, no entra a ruta"};
+  let b=(ritmo&&ritmo.pesos&&ritmo.pesos[n-1])!=null?Number(ritmo.pesos[n-1]):0;
+  const w=[NIVEL_TXT[n]+" ("+d+"d)"];
+  if(vip&&n>=4){b=Math.round(b*1.5);w.push("\u2605 VIP potencia (desde nivel 4)");}
+  else if(vip){w.push("VIP sin efecto (nivel <4)");}
+  if(pedidoHoy){b+=100;w.push("\u{1F4E9} Pedido de hoy \u2014 garantizado");}
+  return {sc:b,nivel:n,why:w.join(" \u00b7 ")};
+}
+// Días desde la última compra buena, con el descuento por compras chicas.
+// Una sola definición: la usan igual la app del conductor y el panel.
+function diasRepo(ventasDeLaTienda,ritmo,drAjuste,drBase){
+  const UMB=Number(ritmo&&ritmo.umbral_repo)||40, RESTA=Number(ritmo&&ritmo.resta_parcial)||2;
+  const CIC=Number(ritmo&&ritmo.ciclo_dias)||3;
+  const vs=ventasDeLaTienda||[];
+  const iBig=vs.findIndex(v=>Number(v.total||0)>=UMB);
+  const baseV=iBig>=0?vs[iBig]:(vs.length?vs[vs.length-1]:null);
+  const nBajas=iBig>=0?iBig:vs.length;
+  const diasBase=baseV?Math.round((Date.now()-new Date(baseV.creado).getTime())/86400000)
+                      :(drBase==null?3:drBase);
+  /* El crédito por compras chicas no puede pasar de UN ciclo entero.
+     Sin este tope, una tienda con muchas compras chicas y ninguna buena
+     restaba tantos días que salía "Recién surtida" llevando semanas sin
+     comprar de verdad: 13 compras chicas × 2 días = 26 días de descuento.
+     Todas las compras chicas juntas valen, como mucho, una reposición. */
+  const credito=Math.min(RESTA*nBajas,CIC);
+  return Math.max(0,diasBase-credito-(Number(drAjuste)||0));
+}
+
 function pipSrv(lat,lon,poly){let d=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const yi=poly[i][0],xi=poly[i][1],yj=poly[j][0],xj=poly[j][1];if(((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi)+xi))d=!d;}return d;}
 let ZONAS_CACHE={t:0,z:[]};
 async function zonasVivas(){if(Date.now()-ZONAS_CACHE.t<60000)return ZONAS_CACHE.z;const p=await getParams();ZONAS_CACHE={t:Date.now(),z:(p.zonas||[])};return ZONAS_CACHE.z;}
@@ -121,8 +196,10 @@ app.get(["/panel","/panel.html","/admin"],sirve("admin-dashboard.html"));
 app.get("/",(req,res)=>res.type("html").send('<meta charset="utf-8"><div style="font-family:system-ui;padding:40px;line-height:2"><h3>Distribuidora — sistema</h3><a href="/app">📱 App del conductor</a><br><a href="/panel">🖥️ Panel del dueño</a></div>'));
 app.get("/version",(req,res)=>{
   const marcas={
-    "app-conductor.html":["v5no304","v5origen","v5notipos","v5stockp","cpGetPrecio(cat.id,p.id)"],
-    "admin-dashboard.html":["v5sinprestamo","v5pdprecios","v5dupids","v5catipo"]
+    "app-conductor.html":["v5no304","v5origen","v5notipos","v5stockp","cpGetPrecio(cat.id,p.id)",
+      "onclick=\"abrirMerma()\"","v5botones","v5ritmo","window.repoT","window.nivelApp"],
+    "admin-dashboard.html":["v5sinprestamo","v5pdprecios","v5dupids","v5catipo",
+      "v5almmover","window.pkTipo","pkEtiqueta(p)","v5ritmo2","v5ritmocfg","window.repTP","window.nivelP"]
   };
   const out={servidor:{etag_desactivado:app.get("etag")===false,consultas_en_paralelo:true,hora:new Date().toISOString()},archivos:{}};
   Object.keys(marcas).forEach(f=>{
@@ -516,11 +593,23 @@ app.get("/admin/primera-venta",authA,async(req,res)=>{
 });
 app.get("/admin/params",authA,async(req,res)=>{
   res.set("Cache-Control","no-store");
-  res.json({ok:true,params:await getParams()});
+  const _p=await getParams();
+  res.json({ok:true,params:_p,ritmos:ritmosDe(_p),cortes:CORTES_CICLO,niveles:NIVEL_TXT});
 });
 app.post("/admin/params",authA,async(req,res)=>{
   const b=req.body||{},kv=await getParams();
   const txt=(v,n)=>limpia(v,n||60);
+  // ── 0. Ritmos de reposición de las tiendas ──
+  if(Array.isArray(b.ritmos)){
+    const vistos={};
+    const lista=b.ritmos.map(r=>({id:limpia(r.id,20),nombre:limpia(r.nombre,30),emoji:limpia(r.emoji,4),
+      ciclo_dias:num(r.ciclo_dias,1,120,3),umbral_repo:num(r.umbral_repo,1,100000,40),
+      resta_parcial:num(r.resta_parcial,0,60,2),dias_perdido:num(r.dias_perdido,7,365,30),
+      pesos:(Array.isArray(r.pesos)&&r.pesos.length===6)?r.pesos.map(x=>num(x,0,999,0)):[5,12,22,45,65,80],
+      desc:limpia(r.desc,160)}))
+      .filter(r=>{ if(!r.id||vistos[r.id])return false; vistos[r.id]=1; return true; });
+    if(lista.length)kv.ritmos=lista;
+  }
   // ── 1. Negocio ──
   if(b.negocio)kv.negocio={nombre:txt(b.negocio.nombre,60),
     tel:String(b.negocio.tel||"").replace(/\D/g,"").slice(0,15),moneda:txt(b.negocio.moneda,6)||"S/"};
@@ -652,13 +741,9 @@ app.get("/conductor/datos",authC,async(req,res)=>{
   const params=await getParams();await zonasVivas();
           const tiendas=(tds||[]).map(t=>{
     const vs=(ultV||[]).filter(v=>v.tienda_id===t.id).slice(0,5);
-    const UMB=num(params.umbral_repo,1,100000)||40, RESTA=num(params.repo_resta_parcial,0,30)||2;
+    const RIT=ritmoDe(params,t.ritmo), UMB=RIT.umbral_repo;
     const vsAll=(ultV||[]).filter(v=>v.tienda_id===t.id);
-    const iBig=vsAll.findIndex(v=>Number(v.total||0)>=UMB);
-    const baseV=iBig>=0?vsAll[iBig]:(vsAll.length?vsAll[vsAll.length-1]:null);
-    const nBajas=iBig>=0?iBig:vsAll.length;   // compras bajas posteriores a la última compra "buena"
-    const diasBase=baseV?Math.round((Date.now()-new Date(baseV.creado).getTime())/86400000):(t.dr??3);
-    const dr=Math.max(0,diasBase-RESTA*nBajas-(t.dr_ajuste||0));
+    const dr=diasRepo(vsAll,RIT,t.dr_ajuste,RIT.ciclo_dias);
     const ultBaja=(vsAll.length&&Number(vsAll[0].total||0)<UMB)?Number(vsAll[0].total||0):null;
     const vo=(vHoy||[]).find(v=>v.tienda_id===t.id&&v.conductor!==u&&v.tipo==="venta");
     const pd=(peds||[]).find(p=>(p.tienda_id&&p.tienda_id===t.id)||(p.tienda&&String(p.tienda).toLowerCase().trim()===String(t.nombre).toLowerCase().trim()));
@@ -666,6 +751,8 @@ app.get("/conductor/datos",authC,async(req,res)=>{
       e:vs.length&&vs[0].creado.slice(0,10)===hoy()?"completada":"pendiente",
       cr:!!t.cr,sa:Number(t.sa||0),li:Number(t.li||params.limite_credito||230),di:"—",
       no:t.notas||"",ab:true,lat:t.lat,lon:t.lon,dr,vip:!!t.vip,act:true,
+      ritmo:RIT.id,ciclo:RIT.ciclo_dias,nivel:nivelDe(dr,RIT),
+      ritmo_nom:RIT.nombre,ritmo_emo:RIT.emoji,umbral:RIT.umbral_repo,
       nueva:!!t.nueva,verificada:!!t.verificada,foto:t.foto||null,id:t.id,
       h:vs.map(v=>({f:new Date(v.creado).toLocaleDateString("es-PE"),p:v.resumen||"",m:Number(v.total)})),
       ultima_compra:(vs[0]&&Array.isArray(vs[0].items))?vs[0].items.filter(x=>x&&x.id).map(x=>({id:x.id,n:x.n,c:num(x.c,0,9999)})):[],
@@ -685,7 +772,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     const fiadoHoy=(movHoy||[]).filter(m=>m.tipo==="cargo").reduce((s,m)=>s+Number(m.monto||0),0);
   const cobradoHoy=(movHoy||[]).filter(m=>m.tipo==="abono").reduce((s,m)=>s+Number(m.monto||0),0);
         console.log(`datos->${u}: categorias=${(cats||[]).length} productos=${(cat||[]).length} tiendas=${tiendas.length}`);
-  res.json({ok:true,params,turno_ini:(yo&&yo.turno_ini)||null,en_turno:!!(yo&&yo.en_turno),catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
+  res.json({ok:true,params,ritmos:ritmosDe(params),turno_ini:(yo&&yo.turno_ini)||null,en_turno:!!(yo&&yo.en_turno),catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
     dia:{fiado:fiadoHoy,cobrado:cobradoHoy},
     gps_camion:(function(){
       const minResp=num(params.operacion&&params.operacion.min_gps_respaldo,1,120,10);
@@ -768,15 +855,21 @@ app.post("/visitas",authC,async(req,res)=>{
   await db.from("visitas").insert({tienda_id:t?t.id:null,tienda:req.body.tienda,conductor:req.cond.u,tipo:(["venta","fallida","no_quiso","registro"].includes(req.body.tipo)?req.body.tipo:"fallida"),fecha:hoy(),hora:horaPE()});
   if((req.body.tipo||"")==="fallida")await evento("visita","🚫 Visita fallida — "+req.body.tienda,req.cond.u+" la encontró cerrada. Reprogramada para mañana con prioridad; la reposición sigue contando.",t?t.id:"");
   if((req.body.tipo||"")==="no_quiso"&&t){
-    await db.from("tiendas").update({dr_ajuste:num((t.dr_ajuste||0)+2,0,60)}).eq("id",t.id);
-    await evento("visita","🙅 No quiso comprar — "+req.body.tienda,req.cond.u+" ofreció y el dueño decidió no llevar. Se le restan 2 días al contador de reposición.",t.id);
+    /* Restar 2 días fijos castigaba igual a una tienda de ciclo 3 que a una de
+       ciclo 7. Ahora el descuento es proporcional: ~0,7 ciclos. Para la activa
+       siguen siendo 2 días; para la semanal son 5. */
+    const _R=ritmoDe(await getParams(),t.ritmo);
+    const _d=Math.max(1,Math.round(_R.ciclo_dias*0.7));
+    await db.from("tiendas").update({dr_ajuste:num((t.dr_ajuste||0)+_d,0,120)}).eq("id",t.id);
+    await evento("visita","🙅 No quiso comprar — "+req.body.tienda,req.cond.u+" ofreció y el dueño decidió no llevar. Se le restan "+_d+" días al contador de reposición ("+_R.nombre+").",t.id);
   }
   if((req.body.tipo||"")==="venta_fuera_zona"){await evento("zona","📍 Venta fuera de zona — "+req.body.tienda,req.cond.u+" registró una venta fuera de las zonas dibujadas ("+(req.body.lat||"?")+", "+(req.body.lon||"?")+").",t?t.id:"");avisarAdmin("📍 Venta fuera de zona: "+req.body.tienda+" por "+req.cond.u);}
   res.json({ok:true});
 });
 app.post("/tiendas",authC,async(req,res)=>{
   const b=req.body;
-  const{data:t,error}=await db.from("tiendas").insert({nombre:b.n,zona:b.z,tipo:b.tp,dueno:b.d,tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),foto:fotoOK(b.foto)?b.foto:null,cr:false,sa:0,li:0,vip:false,act:true,nueva:true,verificada:false,conductor_reg:req.cond.u}).select().single();
+  const _pmsC=await getParams();
+  const{data:t,error}=await db.from("tiendas").insert({nombre:b.n,zona:b.z,tipo:b.tp,ritmo:ritmoDe(_pmsC,b.ritmo).id,dueno:b.d,tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),foto:fotoOK(b.foto)?b.foto:null,cr:false,sa:0,li:0,vip:false,act:true,nueva:true,verificada:false,conductor_reg:req.cond.u}).select().single();
   if(error)return res.status(500).json({ok:false,error:error.message});
   await evento("tienda_nueva","🆕 Tienda nueva por verificar — "+b.n,"Registrada por "+req.cond.u+" en "+(b.z||"—")+". Contado habilitado; crédito bloqueado hasta que la verifiques.",t.id);
   avisarAdmin("🆕 Tienda nueva por verificar: "+b.n+" ("+(b.z||"—")+") — registrada por "+req.cond.u);
@@ -1045,9 +1138,15 @@ app.get("/admin/datos",authA,async(req,res)=>{
   const{data:evs}=await db.from("eventos").select("*").eq("visto",false).order("id",{ascending:false}).limit(50);
   const{data:tds}=await db.from("tiendas").select("*").order("id");
   const{data:pds}=await db.from("pedidos").select("*").eq("fecha",hoy()).order("id",{ascending:false});
-  const{data:vAd}=await db.from("ventas").select("tienda_id,creado").order("creado",{ascending:false}).limit(600);
-  const _ult={};(vAd||[]).forEach(v=>{if(v.tienda_id&&!( v.tienda_id in _ult))_ult[v.tienda_id]=v.creado;});
-  const _diasT=(id,aj)=>Math.max(0,(_ult[id]?Math.round((Date.now()-new Date(_ult[id]).getTime())/86400000):3)-(aj||0));
+  const{data:vAd}=await db.from("ventas").select("tienda_id,creado,total").order("creado",{ascending:false}).limit(1200);
+  const _pms=await getParams();
+  const _vpt={};(vAd||[]).forEach(v=>{if(v.tienda_id)(_vpt[v.tienda_id]=_vpt[v.tienda_id]||[]).push(v);});
+  /* Misma fórmula que la app del conductor: días desde la última compra buena,
+     con el descuento por compras chicas y el umbral del ritmo de esa tienda.
+     Antes el panel contaba días desde CUALQUIER venta, así que mostraba un
+     número distinto al que veía el conductor para la misma tienda. */
+  const _ritT=(t)=>ritmoDe(_pms,t.ritmo);
+  const _diasT=(t)=>{const R=_ritT(t);return diasRepo(_vpt[t.id]||[],R,t.dr_ajuste,R.ciclo_dias);};
   res.json({ok:true,
     resumen:{tiendas:(tds||[]).length,conductores:(us||[]).length,
       en_turno:(us||[]).filter(x=>(x.en_turno!==undefined&&x.en_turno!==null)?x.en_turno:turnoDe[x.usuario]).length,
@@ -1055,7 +1154,10 @@ app.get("/admin/datos",authA,async(req,res)=>{
       pedidos_pendientes:(pds||[]).filter(p=>p.estado!=="entregado").length},
     usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:u.tipo,camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||"",en_turno:(u.en_turno!==undefined&&u.en_turno!==null)?!!u.en_turno:!!turnoDe[u.usuario]})),
     eventos:(evs||[]).map(e=>({tipo:e.tipo,titulo:e.titulo,desc:e.descripcion,ref:e.tipo==="tienda_nueva"||e.tipo==="correccion"?e.ref:String(e.id)})),
-    tiendas:(tds||[]).map(t=>({id:t.id,n:t.nombre,z:t.zona,d:_diasT(t.id,t.dr_ajuste),sa:Number(t.sa||0),cr:!!t.cr,li:Number(t.li||0),vip:!!t.vip,act:t.act,nueva:!!t.nueva,verificada:!!t.verificada,conductor:t.conductor_reg,lat:t.lat,lon:t.lon,tel:t.tel,due:t.dueno,falta:[],mov:[]})),
+    tiendas:(tds||[]).map(t=>{const R=_ritT(t),d=_diasT(t);return {id:t.id,n:t.nombre,z:t.zona,d,sa:Number(t.sa||0),cr:!!t.cr,li:Number(t.li||0),vip:!!t.vip,act:t.act,nueva:!!t.nueva,verificada:!!t.verificada,conductor:t.conductor_reg,lat:t.lat,lon:t.lon,tel:t.tel,due:t.dueno,
+      ritmo:R.id,ciclo:R.ciclo_dias,nivel:nivelDe(d,R),ritmo_nom:R.nombre,ritmo_emo:R.emoji,
+      tp:t.tipo||"bodega",falta:[],mov:[]};}),
+    ritmos:ritmosDe(_pms),
     pedidos_hoy:(pds||[]).map(p=>({tienda:p.tienda,conductor:p.conductor,items:p.items,nota:p.nota,hora:p.hora})),
     params:await getParams()});
 });
@@ -1198,7 +1300,7 @@ app.get("/liquidaciones/sugerencia",authA,async(req,res)=>{
 app.post("/admin/tiendas/:id/editar",authA,async(req,res)=>{
   const{data:ant}=await db.from("tiendas").select("*").eq("id",req.params.id).maybeSingle();
   if(!ant)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
-  const campos={nombre:60,zona:40,tipo:20,dueno:60,tel:15,notas:200,hora_ini:5,hora_fin:5,dias_no:30};
+  const campos={nombre:60,zona:40,tipo:20,dueno:60,tel:15,notas:200,hora_ini:5,hora_fin:5,dias_no:30,ritmo:20};
   const upd={},cambios=[];
   Object.keys(campos).forEach(k=>{
     if(req.body[k]==null)return;
@@ -1225,12 +1327,31 @@ app.post("/tiendas/:id/credito",authA,async(req,res)=>{await db.from("tiendas").
 app.post("/admin/tiendas",authA,async(req,res)=>{
   const b=req.body;
   if(!b.n)return res.status(400).json({ok:false,error:"Falta el nombre"});
-  const fila={nombre:b.n,zona:b.z||"",tipo:b.tp||"bodega",dueno:b.d||"",tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),cr:!!b.cr,sa:0,li:Number(b.li)||0,vip:false,act:true,nueva:false,verificada:true,conductor_reg:"admin"};
+  const _pmsN=await getParams();
+  const fila={nombre:b.n,zona:b.z||"",tipo:b.tp||"bodega",ritmo:ritmoDe(_pmsN,b.ritmo).id,dueno:b.d||"",tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),cr:!!b.cr,sa:0,li:Number(b.li)||0,vip:false,act:true,nueva:false,verificada:true,conductor_reg:"admin"};
   if(b.conductor){fila.conductor_asig=b.conductor;fila.asig_fecha=hoy();} // reservada: no vence
   const{data:t,error}=await db.from("tiendas").insert(fila).select().single();
   if(error)return res.status(500).json({ok:false,error:error.message});
   if(b.conductor)await avisoA(b.conductor,"🏪 Te asigné la tienda "+b.n+(b.z?" ("+b.z+")":"")+" — entra en tu ruta de HOY.");
   res.json({ok:true,id:t.id});
+});
+app.post("/admin/tiendas/ritmo",authA,async(req,res)=>{
+  /* Clasificar 100 tiendas una por una no es viable: esto asigna el ritmo a
+     toda una zona, o a una lista de tiendas, de una sola vez. */
+  const _p=await getParams(), R=ritmoDe(_p,req.body.ritmo);
+  if(!req.body.ritmo||R.id!==String(req.body.ritmo))
+    return res.status(400).json({ok:false,error:"Ese ritmo no existe en Configuración"});
+  let q=db.from("tiendas").update({ritmo:R.id});
+  if(Array.isArray(req.body.ids)&&req.body.ids.length){
+    q=q.in("id",req.body.ids.slice(0,500).map(x=>Number(x)||0).filter(Boolean));
+  }else if(req.body.zona){
+    q=q.eq("zona",limpia(req.body.zona,40));
+  }else return res.status(400).json({ok:false,error:"Indica una zona o una lista de tiendas"});
+  const{data,error}=await q.select("id");
+  if(error)return res.status(500).json({ok:false,error:error.message});
+  const n=(data||[]).length;
+  await db.from("logs").insert({tipo:"tienda",detalle:"Ritmo → "+R.nombre+" en "+n+" tienda(s)"+(req.body.zona?" de la zona "+req.body.zona:"")});
+  res.json({ok:true,cambiadas:n,ritmo:R.id});
 });
 app.post("/admin/tiendas/:id/asignar",authA,async(req,res)=>{
   const{data:t}=await db.from("tiendas").select("nombre,zona").eq("id",req.params.id).maybeSingle();
