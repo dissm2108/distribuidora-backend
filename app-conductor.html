@@ -744,13 +744,8 @@ html,body{height:100%;background:#0F172A;font-family:-apple-system,BlinkMacSyste
   <!-- PASO 3 -->
   <div class="step" id="tr3"><div class="scroll" style="padding:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:100%">
     <div style="font-size:44px;margin-bottom:14px;animation:spin 2s linear infinite">⏳</div>
-    <div style="font-size:16px;font-weight:800;color:var(--tx)">Esperando respuesta</div>
-    <div style="font-size:12px;color:var(--mu);margin-top:4px;margin-bottom:20px">Hace <span id="seg">0</span> seg · Límite 5 min</div>
-    <div style="background:var(--bl-l);border-radius:10px;padding:12px;text-align:left;width:100%;margin-bottom:12px;font-size:12px">
-      <div style="font-weight:700;color:var(--bl);margin-bottom:5px">📍 GPS validando proximidad</div>
-      <div style="color:var(--mu)">Tu posición · <span id="tr-fuente2">Conductor</span></div>
-      <div style="color:var(--gr);font-weight:700;margin-top:4px">✓ Distancia: ~120m — válida</div>
-    </div>
+    <div style="font-size:16px;font-weight:800;color:var(--tx)" id="tr3-tit">Enviando la solicitud…</div>
+    <div style="font-size:12px;color:var(--mu);margin:6px 0 16px;line-height:1.6;max-width:320px" id="tr3-est"></div><span id="tr-fuente2" style="display:none"></span>
     <div style="background:var(--bg);border-radius:9px;padding:10px;text-align:left;width:100%;font-size:12px;margin-bottom:14px" id="tr-det"></div>
     <button class="btn btn-s" onclick="trCancelar()">Cancelar solicitud</button>
   </div></div>
@@ -1109,7 +1104,7 @@ const DIA={vEf:0,vYape:0,abonos:0,roboOk:0,entregas:0};
 let PERDIDAS=[],KX=[],BANDEJA=[],OFFLINE=false,COLA=[],FIO=0,COBRO=0;
 function repoInfo(d){if(d<=1)return{i:1,l:'Hoy',c:'#2F7D4F'};if(d===2)return{i:2,l:'Reciente',c:'#63A05E'};if(d===3)return{i:3,l:'Reponer no necesario',c:'#A9AE45'};if(d===4)return{i:4,l:'Reponer imprescindible',c:'#D9A32F'};if(d===5)return{i:5,l:'Posible desabastecimiento',c:'#DF7A2B'};if(d<=10)return{i:6,l:'Visitar necesariamente',c:'#C74E2C'};if(d<30)return{i:7,l:'Posible cliente perdido',c:'#8E3040'};return{i:8,l:'Cliente perdido',c:'#54222E'};}
 function kpush(tipo,det,val){KX.unshift({h:new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'}),tipo,det,val});}
-function bpush(tipo,titulo,desc,acciones,color){BANDEJA.unshift({id:Date.now()+Math.random(),tipo,titulo,desc,acciones:acciones||[],color:color||''});if(typeof renderDash==='function')renderDash();}
+function bpush(tipo,titulo,desc,acciones,color){BANDEJA.unshift({id:Date.now()+Math.random(),tipo,titulo,desc,acciones:acciones||[],color:color||''});}
 function catById(id){return CATS.find(c=>c.id===id)}
 function prodCat(prodId){return CATS.find(c=>c.prods.some(p=>p.id===prodId))}
 
@@ -1531,12 +1526,12 @@ function renderPerfil(){
 }
 
 // ══════════ EFICIENCIA ══════════
-function renderEf(){document.getElementById('ef-rows').innerHTML=EF.map(e=>`<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:6px;color:var(--tx)"><span>${e.n}</span><span class="bx ${e.p>=80?'bg':e.p>=60?'by':'br'}">${e.p}%</span></div>${e.rows.map(r=>`<div class="efr"><span class="efl">${r[0]}</span><div class="efbw"><div class="efbf" style="width:${r[1]};background:${r[2]}"></div></div><span style="font-size:10px;color:var(--mu);width:28px;flex-shrink:0">${r[3]}</span></div>`).join('')}</div>`).join('');}
+function renderEf(){if(!document.getElementById('ef-rows'))return; /* 171 */document.getElementById('ef-rows').innerHTML=EF.map(e=>`<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:6px;color:var(--tx)"><span>${e.n}</span><span class="bx ${e.p>=80?'bg':e.p>=60?'by':'br'}">${e.p}%</span></div>${e.rows.map(r=>`<div class="efr"><span class="efl">${r[0]}</span><div class="efbw"><div class="efbf" style="width:${r[1]};background:${r[2]}"></div></div><span style="font-size:10px;color:var(--mu);width:28px;flex-shrink:0">${r[3]}</span></div>`).join('')}</div>`).join('');}
 
 // ══════════ LIQUIDACIÓN ══════════
 function calcLiq(){
   const real=Number(document.getElementById('liq-inp').value)||0;
-  const esp=582;const el=document.getElementById('liq-res');el.style.display='block';
+  const esp=Number((window._RESV&&_RESV.efectivo_esperado)||0);const el=document.getElementById('liq-res'); /* 174 · antes 582 fijo */el.style.display='block';
   const diff=real-esp,ok=Math.abs(diff)<2,sobre=diff>0;
   document.getElementById('liq-ico').textContent=ok?'✅':sobre?'🔼':'🔽';
   document.getElementById('liq-estado').textContent=ok?'¡Cuadra perfecto!':sobre?'Sobrante':'Diferencia por cubrir';
@@ -1886,7 +1881,7 @@ function cpIrAPago(){
   cpMostrarPaso(3);
   const items=cpItemsList();
   const total=cpTotal(),gravado=total/1.18,igv=total-gravado;
-  document.getElementById('cp-bol-num').textContent='B001-'+(cpSerie+1);
+  document.getElementById('cp-bol-num').textContent='N.º al registrar'; /* 174 · lo asigna el servidor */
   document.getElementById('cp-bol-cliente').textContent='Cliente: '+cpTienda.nombre;
   document.getElementById('cp-bol-items').innerHTML=items.map(it=>`<div class="cp-bol-item"><span>${it.c} x ${it.n}<br><small>S/ ${it.pu.toFixed(2)} c/u</small></span><span>S/ ${(it.c*it.pu).toFixed(2)}</span></div>`).join('');
   document.getElementById('cp-bol-gravado').textContent='S/ '+gravado.toFixed(2);
@@ -1971,7 +1966,7 @@ function cpConfirmarCobro(){
   else if(cpMetodo==='credito')cr=total;
   else{ef=Math.min(Number(document.getElementById('cp-mix-ef').value)||0,total);cr=total-ef;}
   const abono=cpTienda.deuda>0?(Number(document.getElementById('cp-abono').value)||0):0;
-  window._vMet=cpMetodo;window._vEf=ef;window._vCr=cr;window._vAbono=abono;window._vItems=items;
+  window._vMet=cpMetodo;window._vEf=ef;window._vCr=cr;window._vAbono=abono;window._vItems=cpItemsList();
   cpSerie++;
   const CONDUCTOR_ACTUAL=(window.SES&&SES.nombre)||'—';
   // Registro de responsables (regla del negocio):
@@ -2128,9 +2123,7 @@ function toast(msg,t=''){const e=document.getElementById('toast');e.textContent=
 window.onload=()=>{
   applyTheme();renderEf();renderModalidadDisplay();
   initBattery();initOffline();
-  document.getElementById('fab').style.display='flex';
-  
-  setInterval(()=>{const la=(-14.793+(Math.random()-.5)*.0003).toFixed(4),lo=(-71.420+(Math.random()-.5)*.0003).toFixed(4);const c=document.getElementById('coord');if(c)c.textContent=`${la}, ${lo}`;},4000);
+  /* 171 · el botón ⚡ lo maneja irA(); y ya no se inventan coordenadas al azar en la barra de GPS */
 };
 </script>
 
@@ -2166,6 +2159,7 @@ window.onload=()=>{
 var $=function(id){return document.getElementById(id)};
 function money(v){return 'S/ '+Number(v||0).toFixed(2)}
 function hora(){return new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'})}
+window.money=money;window.hora=hora; /* 170 · las usan devolución, merma y resumen */
 window.nada=function(){};
 
 /* panel yape para que el toggle por-método nunca falle */
@@ -2194,7 +2188,7 @@ if(typeof cpConfirmarCobro==='function'){var _cc=cpConfirmarCobro;window.cpConfi
  var yape=(metodo==='yape');
  if(yape)cpMetodo='efectivo';
  try{_cc()}catch(e){console.warn('cobro',e)}
- if(yape)cpMetodo='yape';
+ if(yape){cpMetodo='yape';window._vMet='yape';window._vEf=0;}
  var ef=0,ya=0,cr=0,me=0;
  if(metodo==='efectivo')ef=total;else if(metodo==='yape')ya=total;else if(metodo==='credito')cr=total;
  else if(metodo==='mixto'){try{me=Number(($('cp-mix-ef')||{}).value)||0}catch(e){};ef=Math.min(me,total);cr=Math.max(0,total-ef);}
@@ -2206,11 +2200,11 @@ if(typeof cpConfirmarCobro==='function'){var _cc=cpConfirmarCobro;window.cpConfi
     toast('Compra < S/'+_rr.umbral_repo+' ('+_rr.nombre+'): reposición parcial, −'+_rr.resta_parcial+'d');}}
  if(cr>0)FIO+=cr;if(abono>0)COBRO+=abono;
  var kx={h:hora(),tipo:'Venta'+(yape?' · Yape':metodo==='credito'?' · crédito':metodo==='mixto'?' · mixto':''),det:(t?t.n:'—'),val:total};
- if(OFFLINE){COLA.push({dia:{ef:ef,ya:ya,ab:abono},kx:kx});window._choquePend=true;toast('⛔ Guardada en el celular — se envía al recuperar señal');}
- else{DIA.vEf+=ef;DIA.vYape+=ya;DIA.abonos+=abono;KX.unshift(kx);}
+ DIA.vEf+=ef;DIA.vYape+=ya;DIA.abonos+=abono;KX.unshift(kx);
+ if(OFFLINE)toast('⛔ Guardada en el celular — se envía al recuperar señal');
  window._ultCorr={t:t,items:items,cr:cr};
  setTimeout(function(){var comp=$('cp-comp');if(comp&&!$('btn-corr')){var b=document.createElement('button');b.id='btn-corr';b.className='btn btn-s';b.style.cssText='width:100%;margin-top:8px';b.textContent='✏️ Proponer corrección de esta venta';b.onclick=window.proponerCorr;comp.appendChild(b);}},100);
- if(typeof renderDash==='function')renderDash();
+ 
 };}
 
 /* ── Venta rápida: contado, descuenta camión, NO toca la tienda ── */
@@ -2223,13 +2217,14 @@ if(typeof vrConfirmar==='function'){var _vr=vrConfirmar;window.vrConfirmar=funct
   if(OFFLINE){COLA.push({dia:{ef:tot},kx:kx});window._choquePend=true;}
   else{DIA.vEf+=tot;KX.unshift(kx);}
   toast('⚡ Venta rápida '+money(tot)+' — tu lista de la tienda sigue intacta','g');
-  if(typeof renderDash==='function')renderDash();}
+  }
 };}
 
 /* ── Sin señal ── */
-function setOffline(v){OFFLINE=v;var ch=$('off-chip');if(ch)ch.style.display=v?'inline-block':'none';
+function setOffline(v){OFFLINE=v;var ch=$('off-chip');if(ch)ch.style.display=v?'inline-block':'none';try{window.pintaSinSenal&&pintaSinSenal()}catch(e){}
  if(v){toast('⛔ Sin conexión — todo se guarda en el celular');}
  else{flushCola();}}
+window.setOffline=setOffline; /* 171 · la usa sync() de otro bloque */
 window.addEventListener('offline',function(){setOffline(true)});
 window.addEventListener('online',function(){setOffline(false)});
 if(!navigator.onLine)OFFLINE=true;
@@ -2242,7 +2237,7 @@ window.devolHongo=function(cat,nom){var pu=0;try{pu=cpGetPrecio(cat)||0}catch(e)
  PERDIDAS.push({motivo:'Hongo (devolución)',tienda:tn,val:pu*2,det:nom+' ×2'});
  KX.unshift({h:hora(),tipo:'Reemplazo (devolución)',det:tn,val:pu*2});
  toast('Reemplazo entregado. Lo hongueado quedó como pérdida: '+money(pu*2),'e');cov('ov-devol');
- if(typeof renderDash==='function')renderDash();};
+ };
 /* merma real: ver bloque v5merma */
 window.enviarRobo=function(){var tx=($('robo-txt')||{}).value||'';var ev=($('robo-ev')||{}).checked;
  bpush('robo','🚨 Robo reportado — '+((window.SES&&SES.nombre)||'conductor'),'"'+tx+'" '+(ev?'· 📎 con evidencia':'· sin evidencia')+'. El faltante sigue existiendo hasta que TÚ decidas.',[{l:'✓ Aceptar (descontar del faltante)',fn:'roboAceptar',cl:'v'},{l:'✗ No aceptar (queda a su nombre)',fn:'roboRechazar',cl:'r'}],'ro');
@@ -2256,7 +2251,7 @@ window.corrAprobar=function(){var u=window._ultCorr;if(!u)return;var it=u.items[
  try{var c=prodCat(it.id);if(c&&CARGA[c.id]!=null)CARGA[c.id]+=dev;}catch(e){}
  if(u.t&&u.cr>0){u.t.sa=Math.max(0,u.t.sa-dev*it.pu);}
  KX.unshift({h:hora(),tipo:'Corrección aprobada',det:'rastro guardado: antes '+it.c+', ahora '+(it.c-dev),val:dev*it.pu});
- toast('Aplicada: stock devuelto, deuda ajustada, rastro guardado','g');if(typeof renderDash==='function')renderDash();};
+ toast('Aplicada: stock devuelto, deuda ajustada, rastro guardado','g');};
 
 /* ── Inyectores por pantalla ── */
 if(typeof irA==='function'){var _ir=irA;window.irA=function(sc){_ir(sc);try{inyectar(sc)}catch(e){console.warn('iny',e)}};}
@@ -2310,7 +2305,7 @@ window.liquidarViaje=function(){var deb=deberiaTener();var cont=Number(($('liq-c
  if(Math.abs(dif)<=MARGEN_EJ){bpush('liq','✓ Cierre de viaje — '+((window.SES&&SES.nombre)||'conductor'),'Entregó '+money(cont)+'. Diferencia '+money(Math.abs(dif))+' '+(dif<0?'(faltó)':'(sobró)')+' dentro del margen: se PERDONA, no es deuda suya, pero queda en el historial. Gastos listos para tu revisión.',[{l:'Aceptar todos los gastos',fn:'nada',cl:'v'},{l:'Conversar un gasto',fn:'nada'}],'ve');toast('Liquidado. Diferencia dentro del margen: perdonada y registrada','g');}
  else if(dif<0){bpush('liq','⚠️ Faltante en cierre — '+((window.SES&&SES.nombre)||'conductor'),'Entregó '+money(cont)+', faltan '+money(-dif)+' (fuera del margen). Queda a su nombre + alerta.',[{l:'Registrar faltante a su nombre',fn:'nada',cl:'r'}],'ro');toast('Faltante fuera del margen: registrado a su nombre','e');}
  else{bpush('liq','Sobrante en cierre — '+((window.SES&&SES.nombre)||'conductor'),'Entregó '+money(cont)+', sobran '+money(dif)+'. También se registra.',[{l:'Visto',fn:'nada'}],'ve');toast('Sobrante registrado','g');}
- KX.unshift({h:hora(),tipo:'Retorno a almacén',det:'sobrante ~5–10% — conserva vida útil',val:0});if(typeof renderDash==='function')renderDash();
+ KX.unshift({h:hora(),tipo:'Retorno a almacén',det:'sobrante ~5–10% — conserva vida útil',val:0});
 };
 
 window.puntosT=function(t){var d=t.dr||3;if(d>10)return{sc:0,why:repoInfo(d).l+' — alerta admin, no entra a ruta'};
@@ -2516,20 +2511,33 @@ window.api=async function(ruta,datos,metodo){
   var r=await fetch(CFG.API+ruta,{method:metodo||(datos?'POST':'GET'),headers:{'Content-Type':'application/json','x-token':(SES&&SES.token)||''},body:datos?JSON.stringify(datos):undefined,signal:ctl.signal});
   clearTimeout(to);
   if(r.status===401){toast('Sesión expirada — vuelve a entrar','w');cerrarSesion();return{auth:false};}
-  return await r.json();
+  /* 171 · 5xx = el servidor está caído o reiniciando: se guarda y se reintenta (las ventas llevan identificador, no se duplican) */
+  if(r.status>=500)return{offline:true,status:r.status};
+  var _tx=await r.text();
+  try{return JSON.parse(_tx);}catch(_e){
+   return{ok:false,status:r.status,error:(r.status===404?'Esta función no existe en el servidor (404). Actualiza la app o avisa al dueño.':'El servidor respondió '+r.status)};}
  }catch(e){return{offline:true};}
 };
 window.sync=function(ruta,datos,etq){
  if(!CFG.API)return;
- if(OFFLINE||!navigator.onLine){COLA.push({ruta,datos,etq:etq||ruta,ts:Date.now()});saveCola();return;}
- api(ruta,datos).then(function(r){if(r&&r.offline){COLA.push({ruta,datos,etq:etq||ruta,ts:Date.now()});saveCola();setOffline(true);}});
+ var it={ruta:ruta,datos:datos,etq:etq||ruta,ts:Date.now(),u:(window.SES&&SES.usuario)||null};
+ if(OFFLINE||!navigator.onLine){COLA.push(it);saveCola();return;}
+ return api(ruta,datos).then(function(r){
+  if(r&&(r.offline||r.auth===false)){COLA.push(it);saveCola();if(r.offline)try{setOffline(true)}catch(e){}return r;}
+  if(r&&r.ok===false&&window.anotaRechazo)anotaRechazo(it,r);   /* 171 · antes se perdía en silencio */
+  return r;});
 };
 window.flushCola=async function(){
  updateSyncChip();
  if(!CFG.API){if(COLA.length)toast('Configura el servidor (⚙️ en el login) para sincronizar','w');return;}
  if(!COLA.length)return;
  var pend=COLA.slice();COLA=[];saveCola();var fall=[];
- for(var i=0;i<pend.length;i++){var r=await api(pend[i].ruta,pend[i].datos);if(r&&r.offline)fall.push(pend[i]);}
+ for(var i=0;i<pend.length;i++){var it=pend[i];
+  if(!it||!it.ruta||it.ruta==='/conductor/posicion')continue;   /* 171 · restos de versiones viejas que nunca se podían entregar */
+  if(it.u&&window.SES&&SES.usuario&&it.u!==SES.usuario){fall.push(it);continue;}   /* de otro conductor: no se manda con esta sesión */
+  var r=await api(it.ruta,it.datos);
+  if(r&&(r.offline||r.auth===false)){fall.push(it);continue;}
+  if(r&&r.ok===false&&window.anotaRechazo)anotaRechazo(it,r);}
  COLA=fall.concat(COLA);saveCola();
  toast(fall.length?('⏳ Quedan '+fall.length+' por sincronizar'):'📡 Todo sincronizado ✓',fall.length?'w':'g');
  pintaSync();
@@ -2734,6 +2742,7 @@ window.abrirRegT=function(){
  setTimeout(function(){
   var c0=[T[0]?T[0].lat:-14.7924,T[0]?T[0].lon:-71.4198];
   if(!_rtm&&typeof L!=='undefined'){_rtm=L.map('rt-mapa',{zoomControl:false,attributionControl:false}).setView(c0,16);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(_rtm);_rtMk=L.marker(c0,{draggable:true}).addTo(_rtm);}
+  if(_rtm){window._rtm=_rtm;window._rtMk=_rtMk;} /* 172 · el centrado de otro bloque no podía verlos */
   if(_rtm){_rtm.invalidateSize();rtMiUbic();}
  },180);
 };
@@ -2825,7 +2834,7 @@ if(typeof cpConfirmarCobro==='function'){var _cc5=cpConfirmarCobro;window.cpConf
  _cc5();
  if(total>0){
   window._ultV={t:t.n,tel:t.tel,items:items,total:total,met:met,f:new Date()};
-  sync('/ventas',{tienda:t.n,tienda_id:t.id,items:items,total:total,metodo:(window._vMet||met),efectivo:(window._vEf||0),credito:(window._vCr||0),abono:(window._vAbono||0),conductor:SES&&SES.usuario},'Venta '+t.n+' S/'+total.toFixed(2));
+  sync('/ventas',{uid:(window._uidVenta||null),tienda:t.n,tienda_id:t.id,items:items,total:total,metodo:(window._vMet||met),efectivo:(window._vEf||0),credito:(window._vCr||0),abono:(window._vAbono||0),conductor:SES&&SES.usuario},'Venta '+t.n+' S/'+total.toFixed(2));
   var cr=$('comp-res');if(cr)cr.textContent=t.n+' · S/'+total.toFixed(2)+' · '+({efectivo:'Efectivo',credito:'Crédito',mixto:'Mixto'}[window._vMet||met]||met);
   setTimeout(function(){aov('ov-comp')},450);
  }
@@ -2872,7 +2881,7 @@ var _ir5=irA;window.irA=function(sc){_ir5(sc);
 
 /* ═══ BOOT ═══ */
 try{
-$('cfg-api').value=CFG.API;$('cfg-adm').value=CFG.ADM;
+var _cfa=$('cfg-api');if(_cfa)_cfa.value=CFG.API;var _cfm=$('cfg-adm');if(_cfm)_cfm.value=CFG.ADM; /* 171 · antes cortaba todo el arranque */
 try{if(CFG.API){var bc=$('btn-conn');if(bc)bc.style.display='none';}}catch(e){}
 if(CFG.API)$('lg-estado').textContent='✓ Conectado al sistema';
 if(SES){$('login').style.display='none';var hn=$('hdr-nom');if(hn)hn.textContent=SES.nombre;var hc=$('hdr-cam');if(hc)hc.textContent=SES.camion||'—';var pn=$('pf-nom');if(pn)pn.textContent=SES.nombre;var pi=$('pf-ini');if(pi)pi.textContent=(SES.nombre||'C').split(' ').map(function(x){return x[0]}).join('').slice(0,2).toUpperCase();var pt=$('pf-tipo');if(pt)pt.textContent='Conductor '+(SES.tipo||'')+' · '+(SES.camion||'');
@@ -2895,6 +2904,7 @@ window.zonaDe=function(lat,lon){if(lat==null||lon==null)return null;for(var i=0;
 window._POS=null;
 window.actualizarPos=function(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(function(p){window._POS={lat:p.coords.latitude,lon:p.coords.longitude,ts:Date.now()};},function(){},{maximumAge:60000,timeout:6000});};
 function posFresca(){return _POS&&(Date.now()-_POS.ts)<10*60*1000?_POS:null;}
+window.posFresca=posFresca; /* 174 · la usa «Centrar» del mapa de tiendas cuando el camión no reporta */
 window.pintarZonasEn=function(m){
  if(!m||typeof L==='undefined'||!ZONAS.length)return;
  if(m._zlg){try{m._zlg.clearLayers()}catch(e){}}else{m._zlg=L.layerGroup().addTo(m);}
@@ -2982,7 +2992,7 @@ function enviar(){
  if(!navigator.geolocation||!window.SES||!window.CFG||!CFG.API)return;
  navigator.geolocation.getCurrentPosition(function(p){
    window._POS={lat:p.coords.latitude,lon:p.coords.longitude,ts:Date.now()};
-   sync('/conductor/posicion',{lat:p.coords.latitude,lon:p.coords.longitude,vel:Math.round((p.coords.speed||0)*3.6)},'Posición');
+   /* 173 · la posición ya la manda mandarPosicion() a /conductor/ubicacion; una posición vieja no se encola */
  },function(){},{enableHighAccuracy:false,timeout:9000,maximumAge:60000});
 }
 window.gpsTurno=function(on){
@@ -3592,9 +3602,9 @@ if(typeof toggleVista==='function'){var _tv=toggleVista;window.toggleVista=funct
 /* ══ El chip de conexión se corrige tras cada envío exitoso ══ */
 if(typeof flushCola==='function'){var _fc=flushCola;window.flushCola=async function(){
  var r=await _fc.apply(this,arguments);
- if(!COLA.length){window.OFFLINE=false;try{pintaCola&&pintaCola()}catch(e){};try{pintaEstado&&pintaEstado()}catch(e){}}
+ if(!COLA.length&&OFFLINE){try{setOffline(false)}catch(e){OFFLINE=false;}} /* 171 · antes escribía otra variable */
  return r;};}
-window.addEventListener('online',function(){window.OFFLINE=false;try{flushCola()}catch(e){}});
+/* 171 · el evento 'online' ya lo atiende setOffline(false), que también vacía la cola */
 })();
 </script>
 <script id="v5fio">
@@ -3620,23 +3630,7 @@ try{
   navigator.geolocation.watchPosition(function(p){window._miPos={lat:p.coords.latitude,lon:p.coords.longitude};},
    function(){},{enableHighAccuracy:false,maximumAge:60000,timeout:10000});
 }catch(e){}
-['abrirRegT','abrirRegistroTienda'].forEach(function(fn){
- if(typeof window[fn]==='function'){var _o=window[fn];window[fn]=function(){
-  var r=_o.apply(this,arguments);
-  setTimeout(function(){
-   var p=puntoInicial();if(!p)return;
-   var la=document.getElementById('rt-lat'),lo=document.getElementById('rt-lon');
-   if(la&&!la.value)la.value=p.lat.toFixed(6);
-   if(lo&&!lo.value)lo.value=p.lon.toFixed(6);
-   if(window._rtMap&&typeof L!=='undefined'){try{
-    _rtMap.setView([p.lat,p.lon],17);
-    if(window._rtMark)_rtMark.setLatLng([p.lat,p.lon]);
-   }catch(e){}}
-   toast('📍 Punto inicial: '+p.fuente+'. Ajústalo si hace falta.','g');
-  },400);
-  return r;
- };}
-});
+/* 172 · el centrado del registro vive solo en v5dias (centrarRegT); aquí solo se sigue la posición del celular */
 })();
 </script>
 <script id="v5cat4">
@@ -3772,10 +3766,7 @@ if(typeof cargaOK==='function'){var _ok=cargaOK;window.cargaOK=function(){
   }
  }catch(e){}
  pintaStockRuta();return r;};}
-/* lo que se recibe del almacén suma */
-if(typeof almEnviar==='function'){var _ae=almEnviar;window.almEnviar=function(){
- try{var aq=(typeof almQty!=='undefined')?almQty:{};Object.keys(aq).forEach(function(id){var q=Number(aq[id]||0);if(q>0)mueveStock(id,q)})}catch(e){}
- return _ae.apply(this,arguments);};}
+/* 174 · se quitó un envoltorio de almEnviar, función que no existe en esta app */
 var _ir=window.irA;window.irA=function(s){_ir(s);setTimeout(pintaStockRuta,90)};
 setTimeout(pintaStockRuta,600);
 })();
@@ -3853,32 +3844,7 @@ window.pintaSaludo=function(){
 };
 pintaSaludo();setInterval(pintaSaludo,60000);
 
-/* ═══ Registrar tienda: el mapa nace donde está el camión ═══ */
-if(typeof abrirRegT==='function'){var _ar=abrirRegT;window.abrirRegT=function(){
- var r=_ar.apply(this,arguments);
- setTimeout(function(){
-  try{
-   var p=(typeof puntoInicial==='function')?puntoInicial():null;
-   if(!p||!window._rtm||!window._rtMk)return;
-   var ll=[p.lat,p.lon];
-   _rtMk.setLatLng(ll);_rtm.setView(ll,18);_rtm.invalidateSize();
-   /* referencia visual del camión, como en Google Maps */
-   if(window._rtCam){try{_rtm.removeLayer(_rtCam)}catch(e){}}
-   if(typeof L!=='undefined'){
-    _rtCam=L.circleMarker(ll,{radius:7,color:'#1D4ED8',fillColor:'#1D4ED8',fillOpacity:.9,weight:2}).addTo(_rtm);
-    _rtCam.bindTooltip('🛰️ '+(p.fuente||'tu posición'),{permanent:false});
-    L.circle(ll,{radius:40,color:'#1D4ED8',opacity:.25,fillOpacity:.06,weight:1}).addTo(_rtm);
-   }
-   var av=document.getElementById('rt-fuente');
-   if(!av){av=document.createElement('div');av.id='rt-fuente';
-    av.style.cssText='font-size:11px;color:var(--mu);margin:-2px 0 8px';
-    var mp=document.getElementById('rt-mapa');if(mp&&mp.parentNode)mp.parentNode.insertBefore(av,mp.nextSibling);}
-   av.innerHTML='📍 Centrado en <b>'+(p.fuente||'tu posición')+'</b> — toca el mapa o arrastra el pin sobre la tienda';
-   /* tocar el mapa mueve el pin, como en Google Maps */
-   if(!_rtm._tocar){_rtm._tocar=true;_rtm.on('click',function(ev){_rtMk.setLatLng(ev.latlng)});}
-  }catch(e){}
- },320);
- return r;};}
+/* 172 · el centrado del registro vive solo en v5dias (centrarRegT) */
 })();
 </script>
 <script id="v5cargafix">
@@ -4059,7 +4025,7 @@ if(typeof api==='function'){var _api=api;window.api=async function(ruta,body,met
 <script id="v5build">
 (function(){
 /* ═══ Sello de versión: detecta si el teléfono corre una copia vieja ═══ */
-window.BUILD='2026-09-21-C';
+window.BUILD='2026-09-22-B';
 window.comprobarVersion=async function(){
  try{
   var base=(window.CFG&&CFG.API)||'';if(!base)return;
@@ -4146,28 +4112,31 @@ window.pintaDevol=function(){
  box.innerHTML=h;
 };
 window.devolConfirmar=function(){
- var cs=compras(),det=[],tot=0,uni=0;
+ /* 170 · antes: fallaba en money(), movía el stock ANTES de confirmar, y el servidor
+    rechazaba el envío porque exige los productos (prods). */
+ var cs=compras(),det=[],tot=0,uni=0,prods={},mov=[];
  Object.keys(DEVQ).forEach(function(k){
   var p=k.split('|'),v=cs.find(function(x){return String(x.id)===p[0]});
   var it=v&&(v.items||[]).find(function(x){return x.id===p[1]});
   if(!it)return;
   var q=DEVQ[k];
   var pu=Number(it.pu||0)||(typeof cpGetPrecio==='function'?cpGetPrecio((prodCat(it.id)||{}).id,it.id):0);
-  det.push(it.n+' ×'+q);tot+=pu*q;uni+=q;
-  var cat=prodCat(it.id);
-  if(cat&&window.CARGA&&CARGA[cat.id]!=null)CARGA[cat.id]=Math.max(0,CARGA[cat.id]-q);
-  if(typeof mueveStock==='function')mueveStock(it.id,-q);
+  det.push(it.n+' ×'+q);tot+=pu*q;uni+=q;prods[it.id]=(prods[it.id]||0)+q;mov.push([it.id,q]);
  });
  if(!uni)return;
  var t=tienda(),tn=t?t.n:'—';
  if(!confirm('Devolución de '+uni+' unidades ('+money(tot)+') en '+tn+'.\n\n'+det.join(', ')+'\n\nSe repone la misma cantidad y se registra como pérdida. ¿Confirmas?'))return;
+ mov.forEach(function(m){
+  var cat=prodCat(m[0]);
+  if(cat&&window.CARGA&&CARGA[cat.id]!=null)CARGA[cat.id]=Math.max(0,CARGA[cat.id]-m[1]);
+  if(typeof mueveStock==='function')mueveStock(m[0],-m[1]);
+ });
  PERDIDAS.push({motivo:'Devolución',tienda:tn,val:tot,det:det.join(', ')});
  KX.unshift({h:hora(),tipo:'Devolución',det:tn+' · '+det.join(', '),val:tot});
- try{sync('/perdidas',{motivo:'Devolución',tienda:tn,valor:tot,detalle:det.join(', ')})}catch(e){}
+ try{sync('/perdidas',{motivo:'Devolución',tienda:tn,prods:prods,nota:'reposición en '+tn},'Devolución '+tn)}catch(e){}
  DEVQ={};
  toast('Devolución registrada: '+money(tot),'e');
  cov('ov-devol');
- if(typeof renderDash==='function')renderDash();
  if(typeof pintaStockRuta==='function')pintaStockRuta();
 };
 /* al abrir el menú, cargar las compras de esa tienda */
@@ -4767,7 +4736,7 @@ window.mermaConfirmar=async function(){
  toast((TIPO==='ajuste'?'Ajuste registrado':'Merma registrada')+': '+uni+' unidades','e');
  MQ={};MOT='';
  cov('ov-merma');
- if(typeof renderDash==='function')renderDash();
+ 
  if(typeof pintaStockRuta==='function')pintaStockRuta();
 };
 setTimeout(function(){
@@ -4798,12 +4767,7 @@ window.veloFuera=function(){
  v.style.transition='opacity .25s';v.style.opacity='0';
  setTimeout(function(){v.style.display='none';v.style.opacity='1'},260);
 };
-/* al entrar (login o sesión guardada) */
-if(typeof entrarSesion==='function'){var _es=entrarSesion;window.entrarSesion=function(s){
- var r=_es.apply(this,arguments);
- velo(true,'Cargando tus datos…');
- setTimeout(veloFuera,6000);
- return r;};}
+/* 174 · el velo al entrar con usuario y contraseña lo pone el bloque 171 (entrarSesion era privada) */
 document.addEventListener('DOMContentLoaded',function(){
  try{if(window.SES&&SES.token){velo(true,'Cargando tus datos…');setTimeout(veloFuera,6000);}}catch(e){}
 });
@@ -5097,6 +5061,7 @@ if(typeof irA==='function'){var _ir=irA;window.irA=function(sc){
 window.mandarPosicion=function(){
  try{
   if(!SES||!SES.token||!navigator.geolocation||!navigator.onLine)return;
+  if(window._ultDatos&&_ultDatos.en_turno===false)return;   /* 173 · solo con turno */
   navigator.geolocation.getCurrentPosition(function(p){
    api('/conductor/ubicacion',{lat:p.coords.latitude,lon:p.coords.longitude});
   },function(){},{enableHighAccuracy:false,timeout:8000,maximumAge:60000});
@@ -5615,7 +5580,7 @@ window.centrarRegT=function(avisar){
    +(min!=null?(' · hace '+min+' min'):'')
    +(p.nota?('<br><span style="color:#8A6410">'+p.nota+'</span>'):'')
    +'<br>Toca el mapa o arrastra el pin sobre la tienda';
-  if(!_rtm._tocar){_rtm._tocar=true;_rtm.on('click',function(ev){_rtMk.setLatLng(ev.latlng)});}
+  if(!_rtm._tocar){_rtm._tocar=true;_rtm.on('click',function(ev){_rtMk.setLatLng(ev.latlng);_rtMk._movidoAMano=true});}
   if(avisar&&typeof toast==='function')toast('📍 Centrado en '+(p.fuente==='celular'?'tu celular':'el camión'),'g');
   return true;
  }catch(e){return false}
@@ -5637,7 +5602,8 @@ if(typeof abrirRegT==='function'){var _ar=abrirRegT;window.abrirRegT=function(){
  window.RT_DIAS='1111111';
  [150,500,1300,2400].forEach(function(t){setTimeout(montaRtDias,t)});
  /* se centra varias veces por si la posición llega tarde */
- [420,1200,2600].forEach(function(t){setTimeout(function(){centrarRegT(false)},t)});
+ setTimeout(function(){try{if(window._rtMk){_rtMk._movidoAMano=false;if(!_rtMk._dragOk){_rtMk._dragOk=true;_rtMk.on('dragend',function(){_rtMk._movidoAMano=true});}}}catch(e){}},250);
+ [420,1200,2600].forEach(function(t){setTimeout(function(){if(!(window._rtMk&&_rtMk._movidoAMano))centrarRegT(false)},t)});
  return r;};}
 /* si el GPS llega mientras el formulario está abierto, se recentra solo */
 if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async function(){
@@ -5648,7 +5614,7 @@ if(typeof cargarDatos==='function'){var _cd=cargarDatos;window.cargarDatos=async
  }catch(e){}
  return r;};}
 /* si el conductor mueve el pin, ya no se le recentra encima */
-setTimeout(function(){try{if(window._rtMk)_rtMk.on('dragend',function(){_rtMk._movidoAMano=true});}catch(e){}},2000);
+/* 172 · el aviso de 'pin movido a mano' se engancha al abrir el formulario (arriba) */
 
 /* ── 4. El puntaje de ruta baja si hoy no atiende ─────────────────── */
 if(typeof puntosT==='function'){var _pt=puntosT;window.puntosT=function(t){
@@ -5756,6 +5722,466 @@ if(typeof anotarTiendas==='function'){var _at=anotarTiendas;window.anotarTiendas
    slot.appendChild(c);
   });
  }catch(e){}
+ return r;};}
+})();
+</script>
+<script id="v5salida">
+(function(){
+/* ═══ 168 · De todo menú se puede salir ═══
+   Los 18 overlays del HTML sí cerraban tocando fuera o deslizando, porque
+   ese manejador se enganchó a cada uno al cargar la página. Pero los que se
+   crean después con JavaScript (resumen del viaje, stock por producto,
+   habituales, ciclo, días) nacían sin él: solo se podían cerrar con la ✕.
+   Ahora el manejador es delegado: vale para todos, incluidos los que se
+   creen mañana. */
+
+function abiertas(){
+ try{return Array.prototype.filter.call(document.querySelectorAll('.ov'),
+   function(o){return o.classList&&o.classList.contains('on')});}catch(e){return []}
+}
+function cerrarUltima(){
+ var a=abiertas();
+ if(!a.length)return false;
+ var ov=a[a.length-1];
+ try{
+  if(ov.id&&typeof cov==='function')cov(ov.id);
+  else ov.classList.remove('on');
+ }catch(e){try{ov.classList.remove('on')}catch(e2){}}
+ return true;
+}
+window.cerrarMenuAbierto=cerrarUltima;
+
+/* tocar el fondo oscuro cierra — delegado, no por overlay */
+document.addEventListener('click',function(ev){
+ try{
+  var t=ev.target;
+  if(t&&t.classList&&t.classList.contains('ov')&&t.classList.contains('on')){
+   if(t.id&&typeof cov==='function')cov(t.id); else t.classList.remove('on');
+  }
+ }catch(e){}
+},true);
+
+/* deslizar hacia abajo cierra — también delegado */
+(function(){
+ var y0=null,dentro=false;
+ document.addEventListener('touchstart',function(ev){
+  try{
+   var t=ev.target;dentro=false;
+   while(t&&t!==document.body){ if(t.classList&&t.classList.contains('sh')){dentro=true;break;} t=t.parentElement; }
+   y0=dentro?ev.touches[0].clientY:null;
+  }catch(e){y0=null}
+ },{passive:true});
+ document.addEventListener('touchend',function(ev){
+  try{
+   if(y0==null)return;
+   var dy=ev.changedTouches[0].clientY-y0;y0=null;
+   if(dy>70)cerrarUltima();
+  }catch(e){}
+ },{passive:true});
+})();
+
+/* la tecla Escape, para cuando se usa desde una computadora */
+document.addEventListener('keydown',function(ev){
+ if(ev.key==='Escape'||ev.keyCode===27){
+  if(cerrarUltima())return;
+  try{var n=document.getElementById('notif');if(n&&n.classList.contains('on')){n.classList.remove('on');return;}}catch(e){}
+ }
+});
+
+/* el botón "atrás" del teléfono cierra el menú abierto en vez de salir
+   de la app. Si no hay ninguno abierto, se comporta como siempre. */
+if(typeof aov==='function'){var _aov=aov;window.aov=function(id){
+ var r=_aov.apply(this,arguments);
+ try{history.pushState({ov:id||'x'},'');}catch(e){}
+ return r;};}
+window.addEventListener('popstate',function(){
+ try{
+  if(cerrarUltima()&&abiertas().length)history.pushState({ov:'x'},'');
+ }catch(e){}
+});
+})();
+</script>
+<script id="v5arreglos169">
+(function(){
+/* ═══ 169 · Cobro: una venta por toque, y el comprobante siempre aparece ═══ */
+function huella(){try{return (T[tiendaActualIdx]||{}).n+'|'+cpItemsList().map(function(i){return i.id+':'+i.c}).join(',')+'|'+cpTotal()}catch(e){return ''}}
+if(typeof cpConfirmarCobro==='function'){var _cc=cpConfirmarCobro;window.cpConfirmarCobro=function(){
+ if(window._cobrando)return;
+ var h=huella(),u=window._ultCobro;
+ if(u&&h&&u.h===h&&(Date.now()-u.ts)<120000){
+  if(!confirm('Esta misma venta ya se registró hace '+Math.max(1,Math.round((Date.now()-u.ts)/1000))+' segundos.\n\n¿Registrar OTRA venta igual?'))return;
+ }
+ window._cobrando=true;
+ var b=document.getElementById('cp-cobrar');if(b)b.disabled=true;
+ window._uidVenta='v'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+ var r;try{r=_cc.apply(this,arguments);}finally{window._cobrando=false;}
+ window._ultCobro={h:h,ts:Date.now()};
+ try{var c4=document.getElementById('cp4');if(c4&&!c4.classList.contains('on'))cpMostrarPaso(4);}catch(e){}
+ return r;};}
+if(typeof abrirEntrega==='function'){var _ae=abrirEntrega;window.abrirEntrega=function(){
+ var r=_ae.apply(this,arguments);var b=document.getElementById('cp-cobrar');if(b)b.disabled=false;return r;};}
+
+/* ═══ 171 · Operaciones que el servidor rechaza: se avisan y quedan a la vista ═══ */
+var RK='v5_rech';
+window.RECHAZOS=(function(){try{return JSON.parse(localStorage.getItem(RK)||'[]')}catch(e){return []}})();
+window.anotaRechazo=function(it,r){
+ try{
+  RECHAZOS.unshift({etq:it.etq||it.ruta,ruta:it.ruta,error:(r&&r.error)||'El servidor lo rechazó',ts:Date.now()});
+  RECHAZOS=RECHAZOS.slice(0,30);localStorage.setItem(RK,JSON.stringify(RECHAZOS));
+  toast('⚠️ No se registró: '+(it.etq||it.ruta)+' — '+((r&&r.error)||'el servidor lo rechazó'),'e');
+  pintaRechazos();
+ }catch(e){}
+};
+window.pintaRechazos=function(){
+ try{
+  var l=document.getElementById('sync-lista');if(!l||!l.parentNode)return;
+  var d=document.getElementById('sync-rech');
+  if(!RECHAZOS.length){if(d)d.remove();return;}
+  if(!d){d=document.createElement('div');d.id='sync-rech';l.parentNode.insertBefore(d,l.nextSibling);}
+  d.innerHTML='<div style="font-size:11px;font-weight:800;color:#B23B2E;margin:12px 0 4px">NO REGISTRADAS (el servidor las rechazó)</div>'
+   +RECHAZOS.slice(0,10).map(function(x){return '<div style="padding:7px 0;border-bottom:1px solid var(--bd);font-size:11.5px;color:var(--tx)"><b>'+x.etq+'</b><br><span style="color:#B23B2E">'+x.error+'</span> · '+new Date(x.ts).toLocaleString('es-PE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'</div>'}).join('')
+   +'<button class="bt2" style="width:100%;margin-top:8px" onclick="RECHAZOS=[];localStorage.setItem(\'v5_rech\',\'[]\');pintaRechazos()">Ya lo revisé — limpiar lista</button>';
+ }catch(e){}
+};
+if(typeof pintaSync==='function'){var _ps=pintaSync;window.pintaSync=function(){var r=_ps.apply(this,arguments);pintaRechazos();return r;};}
+
+/* ═══ 171 · Sin señal: aviso visible, y se sale solo cuando el servidor vuelve ═══ */
+try{var _lim=COLA.filter(function(x){return x&&x.ruta&&x.ruta!=='/conductor/posicion'});if(_lim.length!==COLA.length){COLA=_lim;localStorage.setItem('v5_cola',JSON.stringify(COLA));}}catch(e){}
+window.pintaSinSenal=function(){
+ try{var off=OFFLINE||!navigator.onLine;var el=document.getElementById('bann-off');if(el)el.classList.toggle('show',off);
+  var c=document.getElementById('cola-cnt');if(c)c.textContent=COLA.length;}catch(e){}
+};
+if(typeof updateSyncChip==='function'){var _us=updateSyncChip;window.updateSyncChip=function(){var r=_us.apply(this,arguments);pintaSinSenal();return r;};}
+setInterval(pintaSinSenal,2000);
+setInterval(async function(){
+ try{
+  if(!OFFLINE||!navigator.onLine||!window.CFG||!CFG.API)return;
+  var r=await api('/health');
+  if(r&&!r.offline)setOffline(false);    /* setOffline(false) también envía la cola */
+ }catch(e){}
+},30000);
+
+/* ═══ 171 · Al entrar con usuario y contraseña: velo de carga y envío de lo pendiente ═══ */
+['loginGo','primeraVez'].forEach(function(fn){
+ if(typeof window[fn]!=='function')return;var _o=window[fn];
+ window[fn]=async function(){
+  var r=await _o.apply(this,arguments);
+  try{
+   if(window.SES&&SES.token){
+    if(typeof velo==='function'){velo(true,'Cargando tus datos…');setTimeout(function(){try{veloFuera()}catch(e){}},6000);}
+    if(COLA.length&&navigator.onLine)setTimeout(function(){try{flushCola()}catch(e){}},1500);
+   }
+  }catch(e){}
+  return r;};
+});
+})();
+</script>
+<script id="v5fingidas">
+(function(){
+var $=function(id){return document.getElementById(id)};
+/* ═══ 174 · Funciones que mostraban "✓ registrado" sin mandar nada al servidor ═══ */
+function nuevoId(p){return p+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
+function nomDe(id){var n=id;(CATS||[]).forEach(function(c){(c.prods||[]).forEach(function(x){if(x.id===id)n=x.n})});return n;}
+function guardaCola(){try{localStorage.setItem('v5_cola',JSON.stringify(COLA))}catch(e){}try{updateSyncChip()}catch(e){}}
+function quitaDeCola(f){var n0=COLA.length;COLA=COLA.filter(function(it){return !f(it)});if(COLA.length!==n0)guardaCola();return n0-COLA.length;}
+/* envío con resultado claro: ok · cola (sin señal, se guarda en el celular) · rechazo (el servidor dijo que no) */
+window.enviarOp=function(ruta,datos,etq){
+ var p=sync(ruta,datos,etq);
+ if(!p||typeof p.then!=='function')return Promise.resolve({estado:'cola'});
+ return p.then(function(r){
+  if(!r||r.offline||r.auth===false)return {estado:'cola',r:r};
+  if(r.ok===false)return {estado:'rechazo',r:r};
+  return {estado:'ok',r:r};
+ });
+};
+/* foto comprimida: el servidor acepta hasta ~150 KB */
+window.comprimeFoto=function(src,cb){
+ if(!src)return cb(null);
+ var img=new Image();
+ img.onload=function(){
+  var intento=function(lado,q){var cv=document.createElement('canvas'),k=Math.min(1,lado/Math.max(img.width,img.height));
+   cv.width=Math.round(img.width*k);cv.height=Math.round(img.height*k);cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+   return cv.toDataURL('image/jpeg',q);};
+  var d=intento(800,.6);if(d.length>150000)d=intento(560,.5);if(d.length>150000)d=intento(400,.45);
+  cb(d.length<=150000?d:null);
+ };
+ img.onerror=function(){cb(null)};img.src=src;
+};
+
+/* ── 1. Venta rápida ⚡: ahora sí se registra en el servidor ── */
+window.vrConfirmar=function(){
+ if(window._vrEnviando)return;
+ var items=[];
+ Object.keys(vrQty||{}).forEach(function(id){var q=Number(vrQty[id]||0);if(q<=0)return;var c=prodCat(id);
+  var pu=0;try{pu=(vrPrecios&&vrPrecios[id]!==undefined)?Number(vrPrecios[id]):(c?Number(cpGetPrecio(c.id,id)||0):0)}catch(e){}
+  items.push({id:id,n:nomDe(id),c:q,pu:pu});});
+ if(!items.length)return;
+ var tot=Math.round(items.reduce(function(s,i){return s+i.c*i.pu},0)*100)/100;
+ window._vrEnviando=true;var b=$('vr-ok');if(b){b.disabled=true;b.textContent='…';}
+ var mov=function(sg){items.forEach(function(i){var c=prodCat(i.id);if(c&&window.CARGA&&CARGA[c.id]!=null)CARGA[c.id]=Math.max(0,CARGA[c.id]-sg*i.c);if(typeof mueveStock==='function')mueveStock(i.id,-sg*i.c);});};
+ mov(1);DIA.vEf+=tot;var kx={h:hora(),tipo:'Venta rápida',det:'transeúnte (contado)',val:tot};KX.unshift(kx);
+ enviarOp('/ventas',{uid:nuevoId('r'),rapida:true,items:items,total:tot,metodo:'efectivo',efectivo:tot,credito:0,abono:0,conductor:SES&&SES.usuario},'Venta rápida S/'+tot.toFixed(2)).then(function(x){
+  if(x.estado==='ok')toast('⚡ Venta rápida registrada: '+money(tot)+(x.r&&x.r.boleta?' · '+x.r.boleta:''),'g');
+  else if(x.estado==='cola')toast('⚡ Venta rápida guardada en el celular ('+money(tot)+'): se envía al recuperar señal','w');
+  else{mov(-1);DIA.vEf-=tot;var k=KX.indexOf(kx);if(k>=0)KX.splice(k,1);}   /* rechazada: se deshace en el celular */
+ });
+ vrQty={};vrPrecios={};vrPrecioCat={};window._vrEnviando=false;if(b)b.textContent='Registrar venta';
+ irA((typeof volverDe!=='undefined'&&volverDe)||'inicio');
+};
+
+/* ── 2. Depositar al almacén: sale de tu camión y entra al stock del almacén ── */
+window.confirmarAlm=function(){
+ if(window._almEnviando)return;
+ var prods={},t=0;Object.keys(almQty||{}).forEach(function(id){var q=Number(almQty[id]||0);if(q>0){prods[id]=q;t+=q;}});
+ if(!t)return;
+ var falta=Object.keys(prods).filter(function(id){return window.SP&&SP[id]!=null&&Number(SP[id])<prods[id]});
+ if(falta.length)return toast('No tienes tanto en el camión: '+falta.map(function(id){return nomDe(id)+' (tienes '+Number(SP[id]||0)+')'}).join(', '),'e');
+ if(!confirm('¿Dejas '+t+' unidades en el almacén?\n\nSalen de tu camión y pasan al stock del almacén.'))return;
+ window._almEnviando=true;var btn=$('alm-ok');if(btn){btn.disabled=true;btn.textContent='…';}
+ enviarOp('/almacen',{prods:prods},'Depósito al almacén ('+t+' und.)').then(function(x){
+  window._almEnviando=false;if(btn)btn.textContent='Confirmar →';
+  if(x.estado==='rechazo'){if(btn)btn.disabled=false;return;}
+  Object.keys(prods).forEach(function(id){if(typeof mueveStock==='function')mueveStock(id,-prods[id]);});
+  toast(x.estado==='ok'?('✓ '+t+' unidades dejadas en el almacén'):'Guardado en el celular: se envía al recuperar señal',x.estado==='ok'?'g':'w');
+  almQty={};irA('perfil');
+  if(x.estado==='ok'&&typeof traerStock==='function')setTimeout(function(){try{traerStock(true)}catch(e){}},600);
+ });
+};
+
+/* ── 3. "No pude visitar": el motivo llega al dueño ── */
+window.selNPI=function(m){
+ cov('ov-npi');
+ var t=T[(typeof tiendaActualIdx!=='undefined')?tiendaActualIdx:-1];
+ if(!t)return toast('No identifiqué la tienda','e');
+ t.noEstaba=true;t.npiMotivo=m;if(t.enRuta)t.enRuta=false;
+ try{renderListaT()}catch(e){}try{if(typeof pintaRutaArmada==='function')pintaRutaArmada()}catch(e){}
+ enviarOp('/visitas',{tienda:t.n,tienda_id:t.id,tipo:'fallida',motivo:m,conductor:SES&&SES.usuario},'No pude visitar: '+t.n).then(function(x){
+  if(x.estado==='ok')toast('Enviado al dueño: "'+m+'"','w');
+  else if(x.estado==='cola')toast('Guardado en el celular: "'+m+'" — se envía al recuperar señal','w');
+ });
+};
+
+/* ── 4. Robo o incidente: llega a la Bandeja del dueño ── */
+window.enviarRobo=function(){
+ var tx=(($('robo-txt')||{}).value||'').trim(),ev=!!($('robo-ev')||{}).checked;
+ if(tx.length<5)return toast('Cuenta qué pasó (al menos unas palabras)','e');
+ enviarOp('/conductor/incidente',{texto:tx,evidencia:ev},'Reporte de robo o incidente').then(function(x){
+  if(x.estado==='rechazo')return;
+  cov('ov-robo');var a=$('robo-txt');if(a)a.value='';
+  toast(x.estado==='ok'?'🚨 Enviado a la Bandeja del dueño':'🚨 Guardado en el celular: se envía al recuperar señal',x.estado==='ok'?'g':'w');
+ });
+};
+
+/* ── 5. Traspaso: queda PENDIENTE hasta que el otro acepte (antes marcaba "¡Completado!" a los 5 s) ── */
+function pintaTr3(est,extra){
+ var tit=$('tr3-tit'),tx=$('tr3-est'),nom=(typeof trFuenteNom!=='undefined'&&trFuenteNom)||'el otro conductor';
+ var T3={enviando:['Enviando la solicitud…',''],
+  pendiente:['Solicitud enviada ✓','Queda <b>pendiente</b> hasta que '+nom+' la acepte desde su app. La mercadería se mueve cuando los dos confirmen la entrega (lo ves en Inicio → Avisos). Puedes salir de esta pantalla.'],
+  cola:['Guardada en el celular','Sin señal: la solicitud se envía sola al recuperarla. Después queda pendiente hasta que '+nom+' la acepte.'],
+  rechazo:['No se pudo enviar','⚠️ '+(extra||'El servidor rechazó la solicitud.')]};
+ var v=T3[est]||T3.enviando;if(tit)tit.textContent=v[0];if(tx)tx.innerHTML=v[1];
+ var sp=document.querySelector('#tr3 .scroll > div');if(sp&&sp.textContent==='⏳')sp.style.animation=(est==='enviando')?'':'none';
+ var bc=document.querySelector('#tr3 [onclick="trCancelar()"]');if(bc)bc.textContent=(est==='rechazo')?'Volver':'Anular la solicitud';
+ var ti=$('tr-tit');if(ti)ti.textContent=(est==='pendiente')?'Solicitud pendiente':(est==='cola'?'Guardada':'Solicitar traspaso');
+}
+window.trEnviar=function(){
+ var prods={};Object.keys(trQty||{}).forEach(function(k){if(trQty[k]>0)prods[k]=trQty[k]});
+ if(!Object.keys(prods).length)return;
+ var det=Object.keys(prods).map(function(id){return '<div style="padding:3px 0;border-bottom:1px solid var(--bd)">'+nomDe(id)+': <strong>'+prods[id]+' und.</strong></div>'}).join('');
+ var d=$('tr-det');if(d)d.innerHTML='<div style="font-weight:700;margin-bottom:6px;color:var(--tx)">Solicitas a '+trFuenteNom+':</div>'+det;
+ var rc=$('tr-rec');if(rc)rc.innerHTML=det;
+ try{if(typeof timer!=='undefined'&&timer)clearInterval(timer)}catch(e){}
+ trPaso=3;showTrPaso();pintaTr3('enviando');
+ var loc='tr'+Date.now();window._trLocal=loc;window._trServ=null;
+ enviarOp('/traspasos',{id:loc,de:trFuente,de_nombre:trFuenteNom,para:SES&&SES.usuario,prods:prods,items:prods},'Solicitud de traspaso a '+trFuenteNom).then(function(x){
+  if(x.estado==='ok'){window._trServ=x.r&&x.r.id;pintaTr3('pendiente');}
+  else if(x.estado==='cola')pintaTr3('cola');
+  else pintaTr3('rechazo',x.r&&x.r.error);
+ });
+};
+window.trCancelar=async function(){
+ try{if(typeof timer!=='undefined'&&timer)clearInterval(timer)}catch(e){}
+ var nom=(typeof trFuenteNom!=='undefined'&&trFuenteNom)||'';
+ if(window._trServ){
+  if(!confirm('¿Anular la solicitud de traspaso a '+nom+'?'))return;
+  var r=await api('/traspasos/estado',{id:window._trServ,accion:'rechazar'});
+  if(!(r&&r.ok))return toast('No se pudo anular: '+((r&&r.error)||'sin señal, inténtalo de nuevo'),'e');
+  toast('Solicitud anulada','w');
+ }else if(window._trLocal){
+  if(quitaDeCola(function(it){return it.ruta==='/traspasos'&&it.datos&&it.datos.id===window._trLocal}))toast('Solicitud anulada (no se llegó a enviar)','w');
+ }
+ window._trServ=null;window._trLocal=null;irA('perfil');
+};
+
+/* ── 6. Entrega parcial de efectivo al dueño: queda por confirmar en su Bandeja ── */
+window.entregaParcial=function(){
+ var v=prompt('¿Cuánto efectivo le entregaste al dueño? (S/)','');if(v===null)return;
+ var m=Math.round((parseFloat(String(v).replace(',','.'))||0)*100)/100;
+ if(!(m>0))return toast('Escribe un monto válido','e');
+ var nota=prompt('¿Alguna nota? (opcional: dónde, a quién)','')||'';
+ enviarOp('/conductor/entrega',{monto:m,nota:nota},'Entrega parcial S/'+m.toFixed(2)).then(function(x){
+  if(x.estado==='rechazo')return;
+  DIA.entregas+=m;KX.unshift({h:hora(),tipo:'Entrega parcial al dueño',det:'S/'+m.toFixed(2)+' — por confirmar',val:m});
+  toast(x.estado==='ok'?('💵 Entrega de '+money(m)+' registrada: el dueño debe confirmarla'):'💵 Guardada en el celular: se envía al recuperar señal',x.estado==='ok'?'g':'w');
+  if(document.getElementById('liq-srv'))liqLive();
+ });
+};
+
+/* ── 7. Gastos: se guardan en el servidor, se recuperan al volver y se anulan de verdad ── */
+var MAPA_G={combustible:'combustible',comida:'comida',peaje:'peaje',mecanico:'mecanico',hospedaje:'hospedaje',otro:'otros'};
+window.guardarGasto=function(){
+ var monto=Math.round((Number(($('gasto-monto')||{}).value)||0)*100)/100;
+ var desc=(($('gasto-desc')||{}).value||'').trim();
+ var tipo=(typeof gastoTipoActual!=='undefined'&&gastoTipoActual)||'otro',info=GASTO_INFO[tipo]||GASTO_INFO.otro;
+ if(monto<=0)return toast('Ingresa un monto válido','e');
+ if(info.foto&&!gastoFotoData)return toast('La foto del comprobante es obligatoria','e');
+ var g={tipo:GASTO_INFO[tipo]?tipo:'otro',monto:monto,desc:desc,foto:gastoFotoData,hora:new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'}),pend:true,uid:nuevoId('g')};
+ GASTOS.push(g);cov('ov-gasto');renderGastos();
+ comprimeFoto(gastoFotoData,function(f){
+  enviarOp('/gastos',{uid:g.uid,categoria:MAPA_G[tipo]||'otros',monto:monto,nota:desc,foto:f},'Gasto '+(MAPA_G[tipo]||'otros')+' S/'+monto.toFixed(2)).then(function(x){
+   if(x.estado==='ok'){g.id=x.r&&x.r.id;g.pend=false;toast('✓ Gasto de S/'+monto.toFixed(2)+' registrado','g');
+    if(x.r&&x.r.tope&&x.r.acumulado_no_combustible>x.r.tope)toast('Ojo: pasaste el tope de gastos (sin combustible) del viaje. El dueño lo revisará.','w');}
+   else if(x.estado==='cola')toast('Gasto guardado en el celular: se envía al recuperar señal','w');
+   else{var k=GASTOS.indexOf(g);if(k>=0)GASTOS.splice(k,1);}
+   renderGastos();
+  });
+ });
+};
+window.borrarGasto=async function(i){
+ var g=GASTOS[i];if(!g)return;
+ if(!confirm('¿Anular el gasto de S/'+Number(g.monto).toFixed(2)+'?\n\nYa no se descontará en tu liquidación.'))return;
+ if(g.id){
+  var r=await api('/gastos/'+g.id+'/anular',{});
+  if(!(r&&r.ok))return toast('No se pudo anular: '+((r&&r.error)||'sin señal, inténtalo de nuevo'),'e');
+ }else if(g.uid&&!quitaDeCola(function(it){return it.ruta==='/gastos'&&it.datos&&it.datos.uid===g.uid})&&g.pend){
+  return toast('Ese gasto se está enviando: espera un momento e inténtalo de nuevo','w');
+ }
+ var k=GASTOS.indexOf(g);if(k>=0)GASTOS.splice(k,1);renderGastos();toast('Gasto anulado','w');
+};
+window.cargarGastos=async function(){
+ if(!window.CFG||!CFG.API||!window.SES||!SES.token)return;
+ var r=await api('/conductor/resumen');if(!(r&&r.ok&&r.resumen))return;
+ var inv={combustible:'combustible',comida:'comida'};
+ var srv=((r.resumen.gastos||{}).detalle||[]).map(function(x){return {id:x.id,tipo:inv[x.categoria]||'otro',monto:Number(x.monto||0),desc:x.detalle||(x.categoria!=='otros'?x.categoria:''),foto:null,
+  hora:x.creado?new Date(x.creado).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'}):''}});
+ var pend=GASTOS.filter(function(g){return !g.id});
+ GASTOS.length=0;srv.concat(pend).forEach(function(g){GASTOS.push(g)});renderGastos();
+};
+if(typeof irA==='function'){var _irG=irA;window.irA=function(sc){var r=_irG.apply(this,arguments);if(sc==='gastos')setTimeout(function(){try{cargarGastos()}catch(e){}},50);return r;};}
+
+/* ── 8. Boleta: el número lo pone el servidor ── */
+function marcaBoleta(uid,est,info){
+ if(uid!==window._uidVenta)return;
+ var sub=$('cp-comp-sub'),f=document.querySelector('#cp-comp-detalle .cp-fila span:last-child');
+ var TX={enviando:['Registrando…','Registrando la venta en el servidor…'],
+  ok:[info,'Boleta '+info+' · venta registrada'],
+  cola:['Al enviarse','Sin señal: la venta quedó guardada en el celular. El N.º de boleta se asigna al enviarla.'],
+  rechazo:['NO registrada','⚠️ El servidor NO registró esta venta: '+(info||'')]};
+ var v=TX[est];if(!v)return;
+ if(f)f.textContent=v[0];if(sub)sub.textContent=v[1];
+ if(est==='ok')try{if(typeof cpUltimaBoleta!=='undefined'&&cpUltimaBoleta)cpUltimaBoleta.num=info}catch(e){}
+}
+if(typeof sync==='function'){var _sy=sync;window.sync=function(ruta,datos,etq){
+ var p=_sy.apply(this,arguments);
+ try{
+  if(ruta==='/ventas'&&datos&&datos.uid&&!datos.rapida){
+   if(!p||typeof p.then!=='function')marcaBoleta(datos.uid,'cola');
+   else{marcaBoleta(datos.uid,'enviando');p.then(function(r){
+    if(r&&r.ok!==false&&r.boleta)marcaBoleta(datos.uid,'ok',r.boleta);
+    else if(!r||r.offline||r.auth===false)marcaBoleta(datos.uid,'cola');
+    else if(r.ok===false)marcaBoleta(datos.uid,'rechazo',r.error);});}
+  }
+ }catch(e){}
+ return p;};}
+
+/* ── 9. Liquidación con los números del servidor (antes: 582 fijo, "8 entregas", un "−3" de ejemplo) ── */
+window._RESV=null;
+function fila(a,b,col,neg){return '<div class="ir"><span class="irl">'+a+'</span><span class="irv" style="'+(col?'color:'+col+';':'')+'font-weight:800">'+(neg?'− ':'')+b+'</span></div>';}
+window.liqLive=async function(){
+ var host=document.querySelector('#sc-liquidacion .pad');if(!host)return;
+ if(!document.getElementById('liq-srv'))host.innerHTML='<div id="liq-srv"></div>';
+ var box=document.getElementById('liq-srv');
+ box.innerHTML='<div class="c"><div style="font-size:12.5px;color:var(--mu)">Calculando con los datos del servidor…</div></div>';
+ var r=null;try{r=await api('/conductor/resumen')}catch(e){}
+ if(!(r&&r.ok&&r.resumen)){box.innerHTML='<div class="c"><div class="ct">Liquidación</div><div style="font-size:12.5px;color:var(--mu);line-height:1.7">No se pudo calcular. Necesitas señal: los números salen del servidor, no del celular.</div><button class="btn btn-s" style="margin-top:10px" onclick="liqLive()">Reintentar</button></div>';return;}
+ var s=window._RESV=r.resumen,v=s.ventas||{},m=s.mercaderia||{},g=s.gastos||{},en=s.entregas||{total:0,n:0};
+ var desde=s.inicio?new Date(s.inicio).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—';
+ var h='<div class="c" style="border-left:4px solid var(--gr)"><div class="ct">Tu viaje · desde '+desde+'</div>'
+  +fila('Ventas ('+(v.n||0)+')',money(v.total))
+  +fila('Efectivo cobrado',money(v.efectivo),'var(--gr)')
+  +fila('Cobrado de deudas',money(v.abonos),'var(--gr)')
+  +fila('Gastos'+(g.detalle&&g.detalle.length?' ('+g.detalle.length+')':''),money(g.total),'var(--or)',true)
+  +(en.total?fila('Ya entregado al dueño ('+en.n+')',money(en.total),'var(--or)',true):'')
+  +'<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 4px"><b style="font-size:13px">Efectivo que debes entregar</b><b style="font-size:20px;color:var(--gr);font-family:monospace">'+money(s.efectivo_esperado)+'</b></div>'
+  +'<div style="font-size:11px;color:var(--mu);line-height:1.6">No cuentan aquí: Yape '+money(v.yape)+' (ya está en la cuenta) y lo fiado '+money(v.fiado)+' (se cobra después).</div></div>';
+ h+='<div class="c"><div class="ct">Mercadería</div>'
+  +fila('Cargaste',(m.cargado||0)+' und.')+fila('Recibiste en ruta',(m.recibido_en_ruta||0)+' und.')+fila('Vendiste',(m.vendido||0)+' und.')+fila('Dejaste en el almacén',(m.devuelto||0)+' und.')
+  +fila('Queda en el camión',(m.queda||0)+' und.',m.queda?'#B23B2E':'var(--gr)')
+  +(m.queda?'<div style="background:#FDEBE9;color:#B23B2E;border-radius:10px;padding:10px 12px;font-size:12px;margin-top:8px;line-height:1.5">Para liquidar, el camión debe quedar vacío. Deja lo que sobra en el almacén.</div><button class="btn btn-s" style="margin-top:8px" onclick="irA(\'almacen\')">🏪 Depositar al almacén</button>':'')+'</div>';
+ h+='<div class="c"><div class="ct">¿Cuánto efectivo tienes en mano?</div>'
+  +'<div style="font-size:12px;color:var(--mu);margin-bottom:10px">Cuenta el dinero ahora (solo efectivo, sin Yape).</div>'
+  +'<input id="liq-inp" type="number" inputmode="decimal" placeholder="S/ 0.00" step="0.10" oninput="liqComparar()" style="width:100%;padding:14px;border:1.5px solid var(--bd);border-radius:10px;font-size:22px;font-weight:700;text-align:center;font-family:monospace;background:var(--wh);color:var(--tx)">'
+  +'<div id="liq-cmp" style="display:none;border-radius:10px;padding:12px;text-align:center;margin-top:10px"></div>'
+  +'<textarea id="liq-nota" rows="2" placeholder="Observación del viaje (opcional)" style="width:100%;margin-top:10px;border:1.5px solid var(--bd);border-radius:10px;padding:10px;font-size:13px;background:var(--wh);color:var(--tx)"></textarea>'
+  +'<label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-top:10px;cursor:pointer"><input type="file" id="liq-foto" accept="image/*" capture="environment" onchange="liqFoto(this)" style="display:none"><span class="btn btn-s" style="flex:1;text-align:center" id="liq-foto-b">📷 Foto del efectivo (opcional)</span></label></div>';
+ h+='<div style="display:flex;gap:8px;margin-bottom:10px"><button class="btn btn-s" style="flex:1" onclick="entregaParcial()">💵 Entrega parcial</button><button class="btn btn-s" style="flex:1" onclick="liqLive()">↻ Actualizar</button></div>'
+  +'<button class="btn btn-g" onclick="liquidarViaje()">✓ Liquidar viaje y rendir cuentas</button>';
+ box.innerHTML=h;window._liqFoto=null;
+};
+window.liqComparar=function(){
+ var s=window._RESV,el=$('liq-cmp'),inp=$('liq-inp');if(!s||!el||!inp)return;
+ if(inp.value===''){el.style.display='none';return;}
+ var real=Number(inp.value)||0,esp=Number(s.efectivo_esperado||0),dif=Math.round((real-esp)*100)/100,mg=Number(typeof MARGEN_EJ!=='undefined'?MARGEN_EJ:5);
+ var ok=Math.abs(dif)<=mg,col=ok?'var(--gr)':(dif>0?'var(--bl)':'#B23B2E');
+ el.style.display='block';el.style.background=ok?'var(--gr-l)':(dif>0?'var(--bl-l)':'#FDEBE9');
+ el.innerHTML='<div style="font-size:14px;font-weight:800;color:'+col+'">'+(dif===0?'Cuadra exacto ✓':ok?'Dentro del margen (S/'+mg+')':(dif>0?'Sobra':'Falta'))+'</div>'
+  +'<div style="font-size:22px;font-weight:900;color:'+col+'">'+(dif>0?'+':'')+'S/'+dif.toFixed(2)+'</div>'
+  +'<div style="font-size:11px;color:var(--mu);margin-top:3px">'+(ok?'La diferencia se perdona, pero queda registrada.':'Revisa ventas, gastos o cobros antes de liquidar. El dueño verá esta diferencia.')+'</div>';
+};
+window.liqFoto=function(inp){var f=inp.files&&inp.files[0];if(!f)return;var rd=new FileReader();
+ rd.onload=function(){comprimeFoto(rd.result,function(d){window._liqFoto=d;var b=$('liq-foto-b');if(b)b.textContent=d?'📷 Foto lista ✓ (toca para cambiarla)':'📷 La foto es muy pesada, prueba otra';});};rd.readAsDataURL(f);};
+window.liquidarViaje=async function(){
+ if(!CFG.API)return toast('Necesitas conexión para liquidar','w');
+ var inp=$('liq-inp');
+ if(!inp){irA('liquidacion');return toast('Revisa el resumen y escribe cuánto efectivo tienes','w');}
+ var monto=parseFloat(String(inp.value).replace(',','.'));
+ if(isNaN(monto)||monto<0){inp.focus();return toast('Escribe primero cuánto efectivo tienes en mano','e');}
+ var s=window._RESV||{};
+ if(!confirm('¿Liquidar el viaje entregando '+money(monto)+'?\n\nSe cierra tu viaje y el dueño lo revisará. Después de liquidar no deberías registrar más ventas de este viaje.'))return;
+ var nota=(($('liq-nota')||{}).value||'').trim();
+ var r=await api('/liquidaciones',{efectivo_declarado:monto,nota:nota,foto:window._liqFoto||null,dia:(typeof DIA!=='undefined')?DIA:{},kx:(typeof KX!=='undefined')?KX.slice(0,120):[]});
+ if(r&&r.motivo==='camion_con_stock'){alert(r.error);return liqLive();}
+ if(!(r&&r.ok))return alert('No se pudo liquidar: '+((r&&r.error)||'sin respuesta del servidor. Inténtalo con señal.'));
+ var dif=Number(r.diferencia||0),box=$('liq-srv');
+ if(box)box.innerHTML='<div class="c" style="border-left:4px solid var(--gr);text-align:center"><div style="font-size:38px">✅</div><div style="font-size:16px;font-weight:800;margin:6px 0">Liquidación enviada</div>'
+  +'<div style="font-size:12.5px;color:var(--mu);line-height:1.7">Esperado '+money((r.resumen||s).efectivo_esperado)+' · entregaste '+money(monto)+'<br>'+(dif?('<b style="color:'+(dif<0?'#B23B2E':'var(--bl)')+'">Diferencia S/'+dif.toFixed(2)+'</b>'):'<b style="color:var(--gr)">Cuadra ✓</b>')
+  +'<br>Queda pendiente de que el dueño la confirme.</div><button class="btn btn-s" style="margin-top:12px" onclick="irA(\'inicio\')">Ir a Inicio</button></div>';
+ try{if(typeof cargarDatos==='function')await cargarDatos();}catch(e){}
+ toast('Liquidación enviada','g');
+};
+})();
+</script>
+<script id="v5precioamano">
+(function(){
+/* ═══ 174 · Configuración → «El conductor puede cambiar precios a mano en la venta»
+   Antes se guardaba pero la app no lo leía. Apagado: se cobra el precio del catálogo. ═══ */
+window.puedeCambiarPrecio=function(){
+ try{var c=(window._ultDatos&&_ultDatos.params&&_ultDatos.params.catalogo_cfg)||{};return c.conductor_cambia_precio!==false;}catch(e){return true}
+};
+function aviso(){toast('El dueño desactivó el cambio de precios a mano: se cobra el precio del catálogo','w');}
+function precioCat(id){try{var c=prodCat(id);return c?Number(cpGetPrecio(c.id,id)||0):0}catch(e){return 0}}
+if(typeof vrSetPrecio==='function'){var _vp=vrSetPrecio;window.vrSetPrecio=function(id,val){
+ if(puedeCambiarPrecio())return _vp.apply(this,arguments);
+ aviso();var inp=document.getElementById('vr-pr-'+id);if(inp)inp.value=precioCat(id).toFixed(2);
+ try{delete vrPrecios[id]}catch(e){}try{updVR()}catch(e){}};}
+if(typeof vrSetPrecioCat==='function'){var _vc=vrSetPrecioCat;window.vrSetPrecioCat=function(catId,val){
+ if(puedeCambiarPrecio())return _vc.apply(this,arguments);
+ aviso();try{var c=catById(catId);(c.prods||[]).forEach(function(p){var inp=document.getElementById('vr-pr-'+p.id);if(inp)inp.value=precioCat(p.id).toFixed(2);try{delete vrPrecios[p.id]}catch(e){}});delete vrPrecioCat[catId];updVR();}catch(e){}};}
+if(typeof cpAbrirCustom==='function'){var _cu=cpAbrirCustom;window.cpAbrirCustom=function(){
+ if(puedeCambiarPrecio())return _cu.apply(this,arguments);aviso();};}
+/* los campos de precio de la venta rápida quedan de solo lectura */
+if(typeof renderVR==='function'){var _rv=renderVR;window.renderVR=function(){var r=_rv.apply(this,arguments);
+ try{if(!puedeCambiarPrecio())document.querySelectorAll('[id^="vr-pr-"],[id^="vr-prc-"]').forEach(function(i){i.readOnly=true;i.title='Precio del catálogo'});}catch(e){}
  return r;};}
 })();
 </script>

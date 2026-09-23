@@ -13,6 +13,15 @@ const OBLIG=["SUPABASE_URL","SUPABASE_SERVICE_KEY","JWT_SECRET","ADMIN_PASS"];
 OBLIG.forEach(v=>{if(!process.env[v]){console.error("FALTA variable: "+v);process.exit(1);}});
 
 const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_KEY);
+/* 175 · 116 de 128 escrituras no revisaban si la base las rechazó. Sin tocar cada
+   una, toda escritura con error queda registrada en los logs de Railway. */
+(function(){const _from=db.from.bind(db);
+  db.from=function(t){const q=_from(t);
+    ["insert","update","upsert","delete"].forEach(m=>{const f=q[m];if(typeof f!=="function")return;
+      q[m]=function(...a){const b=f.apply(q,a);
+        try{const th=b.then.bind(b);b.then=(ok,ko)=>th(r=>{if(r&&r.error)console.error("[BD] "+m+" "+t+": "+r.error.message);return r;}).then(ok,ko);}catch(e){}
+        return b;};});
+    return q;};})();
 // ── GPS ──
 const GPS_PLAT=String(process.env.GPS_PLATFORM||"").toLowerCase().trim();
 const GPS_MIN=Number(process.env.GPS_TIMEOUT_MIN)||15;   // minutos sin señal para dar por inactivo un camión
@@ -25,6 +34,21 @@ let anthropic=null;if(process.env.ANTHROPIC_API_KEY){try{const A=require("@anthr
 const MODELO_IA="claude-sonnet-4-6";
 
 const app=express();
+/* 175 · Express 4 no atrapa los errores de las rutas async: la petición quedaba
+   colgada y el proceso podía caerse (Railway lo reinicia). Ahora responden 500 en JSON. */
+["get","post","put","patch","delete","all"].forEach(m=>{
+  const orig=app[m].bind(app);
+  app[m]=function(ruta,...fns){
+    if(m==="get"&&fns.length===0)return orig(ruta);
+    return orig(ruta,...fns.map(f=>(typeof f==="function"&&f.length<4)?function(req,res,next){
+      try{const r=f(req,res,next);
+        if(r&&typeof r.catch==="function")r.catch(e=>{console.error("ERROR "+req.method+" "+req.path+":",e&&e.stack||e);
+          if(!res.headersSent)res.status(500).json({ok:false,error:"Error interno del servidor: "+((e&&e.message)||e)});});
+      }catch(e){next(e);}
+    }:f));
+  };
+});
+process.on("unhandledRejection",e=>console.error("unhandledRejection:",e&&e.stack||e));
 // Sin ETag: Express respondía 304 "sin cambios" a la app, con cuerpo VACÍO.
 // La app intentaba leer ese cuerpo, fallaba y se quedaba con el catálogo viejo.
 app.set("etag",false);
@@ -41,10 +65,10 @@ app.use(cors({origin:(o,cb)=>{
 }}));
 app.use(rateLimit({windowMs:15*60*1000,max:400}));
 const NO_TOCAR=new Set(["pass","actual","nueva","clave","foto"]);
-function sanea(o,prof){if(prof>4)return null;
+function sanea(o,prof){if(prof>7)return null;   /* 175 · antes 4: los puntos de las zonas llegaban vacíos */
  if(typeof o==="string")return limpia(o,300);
  if(Array.isArray(o))return o.slice(0,300).map(x=>sanea(x,prof+1));
- if(o&&typeof o==="object"){const r={};let n=0;for(const k of Object.keys(o)){if(++n>60)break;const kk=String(k).slice(0,40);r[kk]=NO_TOCAR.has(kk)?o[k]:sanea(o[k],prof+1);}return r;}
+ if(o&&typeof o==="object"){const r={};let n=0;for(const k of Object.keys(o)){if(++n>400)break;   /* 175 · antes 60: una carga con más de 60 productos se cortaba */const kk=String(k).slice(0,40);r[kk]=NO_TOCAR.has(kk)?o[k]:sanea(o[k],prof+1);}return r;}
  return o;}
 app.use((req,res,next)=>{try{if(req.body&&typeof req.body==="object")req.body=sanea(req.body,0);}catch(e){}next();});
 const authLimiter=rateLimit({windowMs:5*60*1000,max:25});
@@ -56,7 +80,10 @@ const USR_RE=/^[a-z0-9_]{3,20}$/;
 const limpia=(s,max)=>String(s??"").replace(/[<>`]/g,"").replace(/[\u0000-\u001f\u007f]/g," ").trim().slice(0,max||300);
 const num=(v,min,max,def)=>{if((v===undefined||v===null||v==="")&&def!==undefined)return def;v=Number(v);if(!isFinite(v))v=(def!==undefined?def:0);if(min!=null&&v<min)v=min;if(max!=null&&v>max)v=max;return v;};
 const fotoOK=f=>typeof f==="string"&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(f)&&f.length<160000;
-const CATS_OK=["sm","bianka","panes","molde","especiales","chifones","tortas","queques"];
+const CATS_BASE=["sm","bianka","panes","molde","especiales","chifones","tortas","queques"];
+let CATS_OK=CATS_BASE.slice();   /* 175 · se completa con las categorías reales de la base */
+async function refrescarCats(){try{const{data}=await db.from("categorias").select("id");if(data&&data.length)CATS_OK=[...new Set([...CATS_BASE,...data.map(c=>c.id)])];}catch(e){}}
+setTimeout(refrescarCats,500);setInterval(refrescarCats,5*60*1000);
 const catsOK=o=>{if(!o||typeof o!=="object")return null;const r={};CATS_OK.forEach(k=>{if(o[k]!=null)r[k]=num(o[k],0,99999)});return Object.keys(r).length?r:null;};
 // Intentos fallidos por IP+usuario (además del rate limit)
 const FALLOS=new Map();
@@ -67,11 +94,42 @@ const limpiaFallo=k=>FALLOS.delete(k);
 setInterval(()=>{const lim=Date.now()-30*60*1000;for(const[k,f]of FALLOS)if(f.ts<lim)FALLOS.delete(k);},10*60*1000);
 
 // ── helpers ──
-const hoy=()=>new Date().toISOString().slice(0,10);
+// 175 · "hoy" es el día de Perú (UTC−5, sin horario de verano). Antes usaba UTC:
+// a partir de las 19:00 de Lima el servidor ya creía que era mañana, y el informe
+// de las 22:00 solo contaba las ventas de las últimas 3 horas.
+const hoy=()=>new Date(Date.now()-5*3600000).toISOString().slice(0,10);
+const fechaPE=v=>{try{return new Date(new Date(v).getTime()-5*3600000).toISOString().slice(0,10)}catch(e){return ""}};
+const iniDia=d=>d+"T00:00:00-05:00", finDia=d=>d+"T23:59:59.999-05:00";
 const horaPE=()=>new Date().toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit",timeZone:"America/Lima"});
-async function avisarAdmin(msg){
-  if(twilioC&&ADMIN_TEL){try{await twilioC.messages.create({from:process.env.TWILIO_WHATSAPP_FROM||"whatsapp:+14155238886",to:"whatsapp:+"+ADMIN_TEL,body:msg});}catch(e){console.log("Twilio:",e.message);}}
+/* 175 · tipo = el interruptor de Configuración → "Qué avisos me llegan por WhatsApp".
+   Si el aviso no tiene su propio evento, también se deja en la Bandeja (antes, sin
+   Twilio, esas alertas solo quedaban en los logs del servidor y nadie las veía). */
+async function avisarAdmin(msg,tipo,bandeja){
+  let p={};try{p=await getParams();}catch(e){}
+  const tel=String((p.negocio&&p.negocio.tel)||ADMIN_TEL||"").replace(/\D/g,"");
+  const activo=!tipo||!(p.avisos_cfg&&p.avisos_cfg[tipo]===false);
+  if(bandeja){try{const l=String(msg).split("\n");await evento("alerta",l[0].slice(0,120),l.slice(1).join("\n")||l[0],"");}catch(e){}}
+  if(!activo)return;
+  if(twilioC&&tel){try{await twilioC.messages.create({from:process.env.TWILIO_WHATSAPP_FROM||"whatsapp:+14155238886",to:"whatsapp:+"+tel,body:msg});}catch(e){console.log("Twilio:",e.message);}}
   else console.log("[ALERTA ADMIN]",msg);
+}
+/* 175 · La deuda de cada tienda sale de su historial (cargos − abonos). Antes cada
+   cambio leía el saldo, sumaba o restaba y lo escribía (dos cambios a la vez se
+   pisaban), y los abonos NO quedaban en el historial: la base solo aceptaba "cargo"
+   y "pago" y el servidor escribía "abono" (así se perdió el abono de TIENDA4). */
+async function saldoHistorial(tid){
+  const{data}=await db.from("creditos_mov").select("tipo,monto").eq("tienda_id",tid);
+  return Math.max(0,Math.round((data||[]).reduce((s,m)=>s+(m.tipo==="cargo"?1:-1)*Number(m.monto||0),0)*100)/100);
+}
+async function moverDeuda(tid,tipo,monto,detalle,por){
+  monto=Math.round(num(monto,0,999999)*100)/100;
+  if(!tid||!monto)return {sa:null,monto:0};
+  if(tipo==="abono"){const s0=await saldoHistorial(tid);if(monto>s0)monto=s0;if(!monto)return {sa:s0,monto:0};}
+  const{error}=await db.from("creditos_mov").insert({tienda_id:tid,tipo,monto,detalle:limpia(detalle,160),por});
+  if(error)throw new Error("No se pudo registrar el "+tipo+" en el historial: "+error.message);
+  const sa=await saldoHistorial(tid);
+  await db.from("tiendas").update({sa}).eq("id",tid);
+  return {sa,monto};
 }
 async function evento(tipo,titulo,desc,ref){await db.from("eventos").insert({tipo,titulo,descripcion:desc,ref:String(ref||""),visto:false});}
 async function avisoA(para,txt){await db.from("avisos").insert({para,txt,hora:horaPE()});}
@@ -229,7 +287,7 @@ function diasAbiertosTras(desdeMs,nCal,dias){
 
 function pipSrv(lat,lon,poly){let d=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const yi=poly[i][0],xi=poly[i][1],yj=poly[j][0],xj=poly[j][1];if(((yi>lat)!==(yj>lat))&&(lon<(xj-xi)*(lat-yi)/(yj-yi)+xi))d=!d;}return d;}
 let ZONAS_CACHE={t:0,z:[]};
-async function zonasVivas(){if(Date.now()-ZONAS_CACHE.t<60000)return ZONAS_CACHE.z;const p=await getParams();ZONAS_CACHE={t:Date.now(),z:(p.zonas||[])};return ZONAS_CACHE.z;}
+async function zonasVivas(){if(Date.now()-ZONAS_CACHE.t<60000)return ZONAS_CACHE.z;const p=await getParams();ZONAS_CACHE={t:Date.now(),z:(p.zonas||[]).filter(z=>Array.isArray(z.poligono)&&z.poligono.filter(q=>q&&q[0]&&q[1]).length>=3)};return ZONAS_CACHE.z;}
 function zonaDeCond(lat,lon,u){if(lat==null||lon==null)return undefined;for(const z of (ZONAS_CACHE.z||[]))if(z.poligono&&pipSrv(lat,lon,z.poligono))return z.conductor?(z.conductor===u?"mia":"otra"):undefined;return undefined;}
 
 // ── auth middlewares ──
@@ -267,11 +325,16 @@ app.get("/version",(req,res)=>{
     "app-conductor.html":["v5no304","v5origen","v5notipos","v5stockp","cpGetPrecio(cat.id,p.id)",
       "onclick=\"abrirMerma()\"","v5botones","v5ritmo","window.repoT","window.nivelApp",
       "v5ciclo","abrirPropCiclo","window.RT_RITMO",
-      "v5botones2","v5dias","window.centrarRegT","window.RT_DIAS","en-tiendas"],
+      "v5botones2","v5dias","window.centrarRegT","window.RT_DIAS","en-tiendas",
+      "v5salida","cerrarMenuAbierto",
+      "v5arreglos169","window.anotaRechazo","v5fingidas","window.enviarOp","id=\"tr3-est\"",
+      "v5precioamano","window.posFresca=posFresca","window.BUILD='2026-09-22-B'"],
     "admin-dashboard.html":["v5sinprestamo","v5pdprecios","v5dupids","v5catipo",
       "v5almmover","window.pkTipo","pkEtiqueta(p)","v5ritmo2","v5ritmocfg","window.repTP","window.nivelP",
       "v5ciclofiltro","window.TDS","window.EVENTOS=r.eventos","ritmo_sugerido",
-      "v5diasP","v5diascfg","window.AT_DIAS","dias_sugeridos"]
+      "v5diasP","v5diascfg","window.AT_DIAS","dias_sugeridos",
+      "v5salidaP","salirDeTodo","function stDe(p)","cerrarEdicion()\" style=\"background:none\">Cerrar sin guardar",
+      "v5arreglos176","window.pintaWA","window.ALM={stock:{},prods:[],movimientos:[]}","var _ir=window.ir;"]
   };
   const out={servidor:{etag_desactivado:app.get("etag")===false,consultas_en_paralelo:true,hora:new Date().toISOString()},archivos:{}};
   Object.keys(marcas).forEach(f=>{
@@ -355,14 +418,7 @@ app.get("/conductor/stock",authC,async(req,res)=>{
   const s=await leerStock(req.cond.u);
   res.json({ok:true,prods:s.prods,base:s.base,por_categoria:await porCategoria(s.prods)});
 });
-app.post("/conductor/stock/ajuste",authC,async(req,res)=>{
-  const p=req.body.prods;
-  if(!p||typeof p!=="object")return res.status(400).json({ok:false,error:"Faltan datos"});
-  const cambios={};Object.keys(p).slice(0,300).forEach(id=>{cambios[id]=num(p[id],-9999,9999)});
-  await moverStock(req.cond.u,cambios,limpia(req.body.motivo,20)||"ajuste",null);
-  const s=await leerStock(req.cond.u);
-  res.json({ok:true,prods:s.prods});
-});
+/* 175 · se quitó POST /conductor/stock/ajuste: ninguna app lo usaba y dejaba al conductor cambiar su propio stock sin rastro */
 app.get("/admin/stock",authA,async(req,res)=>{
   res.set("Cache-Control","no-store");
   const{data:us}=await db.from("conductores").select("usuario,nombre,activo,en_turno");
@@ -403,13 +459,17 @@ app.post("/admin/cerrar-viaje",authA,async(req,res)=>{
 
   const inicio=yo.turno_ini||new Date(Date.now()-7*86400000).toISOString();
   const fin=new Date().toISOString();
-  const [vts,mov,trs,gas,perd]=await Promise.all([
+  const [vts0,mov,trs,gas0,perd,ent0]=await Promise.all([
     db.from("ventas").select("*").eq("conductor",u).gte("creado",inicio).lte("creado",fin),
     db.from("stock_mov").select("motivo,delta").eq("conductor",u).gte("creado",inicio),
     db.from("traspasos").select("*").or("de.eq."+u+",para.eq."+u).gte("creado",inicio),
-    db.from("gastos").select("categoria,monto,detalle").eq("conductor",u).gte("creado",inicio),
-    db.from("perdidas").select("motivo,valor,costo,detalle,tienda,tipo,creado").eq("conductor",u).gte("creado",inicio)
+    db.from("gastos").select("id,categoria,monto,detalle,rechazado,creado").eq("conductor",u).gte("creado",inicio),
+    db.from("perdidas").select("motivo,valor,costo,detalle,tienda,tipo,creado").eq("conductor",u).gte("creado",inicio),
+    db.from("entregas").select("id,monto,estado,nota,creado").eq("conductor",u).gte("creado",inicio)
   ]).then(r=>r.map(x=>x.data||[]));
+  /* 175 · fuera: ventas anuladas y gastos rechazados; se descuenta el efectivo ya entregado al dueño */
+  const vts=vts0.filter(v=>!v.anulada),gas=gas0.filter(g=>!g.rechazado),ent=ent0.filter(e=>e.estado!=="rechazada");
+  const entregas=Math.round(ent.reduce((s,e)=>s+Number(e.monto||0),0)*100)/100;
   const sum=(a,f)=>a.reduce((s,x)=>s+Number(f(x)||0),0);
   const efectivo=sum(vts,v=>v.metodo==="yape"?0:v.efectivo);
   const yape=sum(vts.filter(v=>v.metodo==="yape"),v=>v.total);
@@ -430,10 +490,11 @@ app.post("/admin/cerrar-viaje",authA,async(req,res)=>{
     conductor:u,nombre:yo.nombre||u,inicio,fin,
     dias:Math.max(1,Math.round((new Date(fin)-new Date(inicio))/86400000)),
     ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
-    efectivo_esperado:Math.round((efectivo+abonos-gastos)*100)/100,
+    efectivo_esperado:Math.round((efectivo+abonos-gastos-entregas)*100)/100,
+    entregas:{total:entregas,n:ent.length,detalle:ent},
     gastos:{total:gastos,detalle:gas},
     perdidas:(function(){
-      const m=perd.filter(p=>p.tipo!=="ajuste"),a=perd.filter(p=>p.tipo==="ajuste");
+      const m=perd.filter(p=>!/^ajuste/.test(p.tipo||"")),a=perd.filter(p=>p.tipo==="ajuste");   /* 177 · pendientes y rechazados fuera */
       return{total:m.reduce((s,p)=>s+Number(p.valor||0),0),
         costo:m.reduce((s,p)=>s+Number(p.costo||0),0),
         n:m.length,detalle:m,
@@ -448,6 +509,7 @@ app.post("/admin/cerrar-viaje",authA,async(req,res)=>{
   };
   const decl=num(req.body.efectivo_declarado,0,999999);
   const dif=Math.round((decl-resumen.efectivo_esperado)*100)/100;
+  const MARG=num((await getParams()).margen_liq,0,1000,5);resumen.margen=MARG;resumen.dentro_margen=Math.abs(dif)<=MARG;
   const{data:l}=await db.from("liquidaciones").insert({
     conductor:u,dia:{},kx:[],inicio,fin,estado:"cerrada_por_dueno",
     efectivo_declarado:decl,diferencia:dif,resumen,
@@ -491,6 +553,7 @@ async function obtenerGPS(){
   }catch(e){GPS_ULTIMO_ERROR=e.message;console.error("GPS("+GPS_PLAT+"):",e.message);return [];}
 }
 // Refresco cada minuto: guarda la posición de cada conductor y su recorrido
+const ULT_POS=new Map();
 async function refrescarGPS(){
   if(!GPS_PLAT)return;
   const pos=await obtenerGPS();
@@ -502,7 +565,11 @@ async function refrescarGPS(){
     if(!p)continue;
     await db.from("conductores").update({lat:p.lat,lon:p.lon,gps_fuente:GPS_PLAT,
       gps_hora:p.ts?new Date(p.ts).toISOString():ahora}).eq("usuario",c.usuario);
-    await db.from("posiciones").insert({conductor:c.usuario,lat:p.lat,lon:p.lon,vel:p.vel||0});
+    /* 175 · con el camión parado se guardaba un punto por minuto (105 mil en un mes) */
+    const u0=ULT_POS.get(c.usuario);
+    const mov=!u0||Math.hypot((p.lat-u0.lat)*111000,(p.lon-u0.lon)*107000)>15;
+    if(mov||(Date.now()-u0.t)>10*60000){ULT_POS.set(c.usuario,{lat:p.lat,lon:p.lon,t:Date.now()});
+      await db.from("posiciones").insert({conductor:c.usuario,lat:p.lat,lon:p.lon,vel:p.vel||0});}
   }
 }
 if(GPS_PLAT){
@@ -517,26 +584,31 @@ async function resumenViaje(u){
   const fin=new Date().toISOString();
   const st=await leerStock(u);
   const quedan=Object.keys(st.prods).reduce((s,k)=>s+Number(st.prods[k]||0),0);
-  const [vts,mov,trs,gas,perd,tds]=await Promise.all([
+  const [vts0,mov,trs,gas0,perd,tds,ent0]=await Promise.all([
     db.from("ventas").select("*").eq("conductor",u).gte("creado",inicio).lte("creado",fin),
     db.from("stock_mov").select("motivo,delta").eq("conductor",u).gte("creado",inicio),
     db.from("traspasos").select("*").or("de.eq."+u+",para.eq."+u).gte("creado",inicio),
-    db.from("gastos").select("categoria,monto,detalle").eq("conductor",u).gte("creado",inicio),
+    db.from("gastos").select("id,categoria,monto,detalle,rechazado,creado").eq("conductor",u).gte("creado",inicio),
     db.from("perdidas").select("motivo,valor,costo,detalle,tipo").eq("conductor",u).gte("creado",inicio),
-    db.from("ventas").select("tienda").eq("conductor",u).gte("creado",inicio)
+    db.from("ventas").select("tienda").eq("conductor",u).gte("creado",inicio),
+    db.from("entregas").select("id,monto,estado,nota,creado").eq("conductor",u).gte("creado",inicio)
   ]).then(r=>r.map(x=>x.data||[]));
+  /* 175 · fuera: ventas anuladas y gastos rechazados; se descuenta el efectivo ya entregado al dueño */
+  const vts=vts0.filter(v=>!v.anulada),gas=gas0.filter(g=>!g.rechazado),ent=ent0.filter(e=>e.estado!=="rechazada");
+  const entregas=Math.round(ent.reduce((s,e)=>s+Number(e.monto||0),0)*100)/100;
   const sum=(a,f)=>a.reduce((s,x)=>s+Number(f(x)||0),0);
   const efectivo=sum(vts,v=>v.metodo==="yape"?0:v.efectivo);
   const yape=sum(vts.filter(v=>v.metodo==="yape"),v=>v.total);
   const fiado=sum(vts,v=>v.credito), abonos=sum(vts,v=>v.abono);
   const gastos=sum(gas,g=>g.monto);
-  const merm=perd.filter(p=>p.tipo!=="ajuste");
+  const merm=perd.filter(p=>!/^ajuste/.test(p.tipo||""));   /* 177 */
   const mSum=(m)=>mov.filter(x=>x.motivo===m).reduce((s,x)=>s+Math.abs(Number(x.delta||0)),0);
   return{
     conductor:u,nombre:(yo&&yo.nombre)||u,en_turno:!!(yo&&yo.en_turno),inicio,fin,
     dias:Math.max(1,Math.round((new Date(fin)-new Date(inicio))/86400000)),
     ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
-    efectivo_esperado:Math.round((efectivo+abonos-gastos)*100)/100,
+    efectivo_esperado:Math.round((efectivo+abonos-gastos-entregas)*100)/100,
+    entregas:{total:entregas,n:ent.length,detalle:ent},
     gastos:{total:gastos,detalle:gas},
     perdidas:{total:sum(merm,p=>p.valor),costo:sum(merm,p=>p.costo),n:merm.length,detalle:merm,
       ajustes:{n:perd.length-merm.length}},
@@ -557,8 +629,8 @@ app.get("/admin/comprobantes",authA,async(req,res)=>{
   const d=String(req.query.desde||"").slice(0,10),h=String(req.query.hasta||"").slice(0,10);
   const q=String(req.query.q||"").trim().slice(0,40);
   let s=db.from("ventas").select("id,boleta,tienda,conductor,total,metodo,efectivo,credito,abono,anulada,nota_boleta,creado,items,editada_en").order("id",{ascending:false}).limit(300);
-  if(/^\d{4}-\d{2}-\d{2}$/.test(d))s=s.gte("creado",d+"T00:00:00");
-  if(/^\d{4}-\d{2}-\d{2}$/.test(h))s=s.lte("creado",h+"T23:59:59");
+  if(/^\d{4}-\d{2}-\d{2}$/.test(d))s=s.gte("creado",iniDia(d));
+  if(/^\d{4}-\d{2}-\d{2}$/.test(h))s=s.lte("creado",finDia(h));
   const{data}=await s;
   let rows=data||[];
   const cond=limpia(req.query.conductor,20),est=limpia(req.query.estado,12),met=limpia(req.query.metodo,12);
@@ -588,10 +660,7 @@ app.post("/admin/comprobantes/:id/anular",authA,async(req,res)=>{
   if(v.anulada)return res.status(409).json({ok:false,error:"Ya estaba anulada"});
   await db.from("ventas").update({anulada:true,nota_boleta:"ANULADA: "+motivo,editada_en:new Date().toISOString()}).eq("id",v.id);
   if(Number(v.credito||0)>0&&v.tienda_id){
-    const{data:t}=await db.from("tiendas").select("sa").eq("id",v.tienda_id).maybeSingle();
-    await db.from("tiendas").update({sa:Math.max(0,Number((t&&t.sa)||0)-Number(v.credito))}).eq("id",v.tienda_id);
-    await db.from("creditos_mov").insert({tienda_id:v.tienda_id,tipo:"abono",monto:Number(v.credito),
-      detalle:"Anulación de "+(v.boleta||("venta #"+v.id)),por:"admin"});
+    await moverDeuda(v.tienda_id,"abono",Number(v.credito),"Anulación de "+(v.boleta||("venta #"+v.id)),"admin");
   }
   try{
     const dev={};
@@ -613,7 +682,8 @@ app.post("/admin/eventos/:id/accion",authA,async(req,res)=>{
         await db.from("tiendas").update({verificada:true,nueva:false}).eq("id",ref);
         hecho="Tienda verificada: ya no aparece como nueva y entra en la ruta normal.";
       }else if(accion==="rechazar"){
-        await db.from("tiendas").update({activa:false}).eq("id",ref);
+        const{error:eR}=await db.from("tiendas").update({act:false}).eq("id",ref);   /* 175 · antes "activa": columna inexistente, no desactivaba */
+        if(eR)throw new Error(eR.message);
         hecho="Tienda desactivada: deja de aparecerle al conductor.";
       }
     }else if(ev.tipo==="boleta"){
@@ -640,6 +710,25 @@ app.post("/admin/eventos/:id/accion",authA,async(req,res)=>{
         hecho="Crédito autorizado para esa tienda.";
       }else if(accion==="rechazar"){
         hecho="Marcado para revisar: anula la venta desde Comprobantes si corresponde.";
+      }
+    }else if(ev.tipo==="entrega"){
+      if(accion==="aceptar"){
+        await db.from("entregas").update({estado:"confirmada",confirmada_en:new Date().toISOString()}).eq("id",ref);
+        hecho="Entrega confirmada: se descuenta de lo que debe rendir en la liquidación.";
+      }else if(accion==="rechazar"){
+        await db.from("entregas").update({estado:"rechazada",confirmada_en:new Date().toISOString()}).eq("id",ref);
+        hecho="Entrega rechazada: NO se descuenta de su liquidación.";
+      }
+    }else if(ev.tipo==="ajuste"){
+      const{data:pf}=await db.from("perdidas").select("*").eq("id",ref).maybeSingle();
+      if(pf&&pf.tipo==="ajuste_pendiente"&&accion==="aceptar"){
+        const pr=pf.prods||{};
+        await moverStock(pf.conductor,Object.fromEntries(Object.keys(pr).map(id=>[id,-Number(pr[id]||0)])),"ajuste",null);
+        await db.from("perdidas").update({tipo:"ajuste"}).eq("id",pf.id);
+        hecho="Ajuste aceptado: se descontó de su stock.";
+      }else if(pf&&pf.tipo==="ajuste_pendiente"&&accion==="rechazar"){
+        await db.from("perdidas").update({tipo:"ajuste_rechazado"}).eq("id",pf.id);
+        hecho="Ajuste rechazado: su stock queda como estaba.";
       }
     }else if(ev.tipo==="carga"){
       hecho=(accion==="aceptar")?"Diferencias aceptadas.":"Marcado para revisar con el conductor.";
@@ -690,6 +779,21 @@ app.get("/admin/params",authA,async(req,res)=>{
 app.post("/admin/params",authA,async(req,res)=>{
   const b=req.body||{},kv=await getParams();
   const txt=(v,n)=>limpia(v,n||60);
+  /* 175 · "Parámetros del sistema" (formato plano): antes el servidor los ignoraba y aun
+     así respondía ok. Se guardan y se espejan con su equivalente de Configuración. */
+  const PLANOS={limite_credito:[0,100000],umbral_repo:[1,100000],repo_resta_parcial:[0,60],margen_liq:[0,1000],
+    vida_util:[1,60],deuda_dias:[1,365],yape_umbral:[0,100000],dup_radio_m:[1,500],tope_gastos:[0,100000],inactiva_dias:[1,365]};
+  Object.keys(PLANOS).forEach(k=>{if(b[k]!==undefined&&b[k]!==null&&b[k]!=="")kv[k]=num(b[k],PLANOS[k][0],PLANOS[k][1]);});
+  ["precio_tipo","precio_conductor"].forEach(k=>{if(b[k]&&typeof b[k]==="object"){kv[k]={};
+    Object.keys(b[k]).slice(0,40).forEach(x=>{const kk=limpia(x,25);if(kk)kv[k][kk]=num(b[k][x],-90,300,0);});}});
+  if(Array.isArray(b.gasto_cats))kv.gasto_cats=b.gasto_cats.slice(0,20).map(x=>limpia(x,20)).filter(Boolean);
+  if(Array.isArray(b.zonas)){
+    kv.zonas=b.zonas.slice(0,40).map(z=>({id:num(z&&z.id,0,1e15,Date.now()),nombre:txt(z&&z.nombre,40),ajuste:num(z&&z.ajuste,-90,300,0),
+      conductor:(z&&z.conductor)?limpia(z.conductor,20):null,color:/^#[0-9a-f]{6}$/i.test(String(z&&z.color))?z.color:"#B97A1F",
+      poligono:(Array.isArray(z&&z.poligono)?z.poligono:[]).slice(0,300).map(q=>[num(q&&q[0],-90,90),num(q&&q[1],-180,180)]).filter(q=>q[0]&&q[1])}))
+      .filter(z=>z.nombre&&z.poligono.length>=3);
+    ZONAS_CACHE={t:0,z:[]};
+  }
   // ── 0. Ritmos de reposición de las tiendas ──
   if(Array.isArray(b.ritmos)){
     const vistos={};
@@ -760,6 +864,16 @@ app.post("/admin/params",authA,async(req,res)=>{
     Object.keys(b.futuras).slice(0,20).forEach(k=>{kv.futuras[limpia(k,25)]=!!b.futuras[k]});}
   if(b.almacen)kv.almacen={nombre:txt(b.almacen.nombre,60),ref:txt(b.almacen.ref,120),
     lat:(b.almacen.lat!=null)?num(b.almacen.lat,-90,90):null,lon:(b.almacen.lon!=null)?num(b.almacen.lon,-180,180):null};
+  /* 175 · un mismo dato, un solo valor: lo que se cambió en cualquiera de las dos pantallas */
+  const esp=[["limite_credito","credito_cfg","limite"],["deuda_dias","credito_cfg","dias_vencida"],
+    ["tope_gastos","operacion","tope_gasto"],["dup_radio_m","operacion","radio_dup_m"]];
+  esp.forEach(([plano,grupo,clave])=>{
+    const vinoPlano=b[plano]!==undefined&&b[plano]!==null&&b[plano]!=="";
+    const vinoGrupo=b[grupo]&&b[grupo][clave]!==undefined;
+    kv[grupo]=kv[grupo]||{};
+    if(vinoGrupo)kv[plano]=kv[grupo][clave];
+    else if(vinoPlano)kv[grupo][clave]=kv[plano];
+  });
   const{error}=await db.from("params").upsert({id:1,kv});
   if(error)return res.status(500).json({ok:false,error:error.message});
   await db.from("logs").insert({tipo:"admin",detalle:"Cambió la configuración del sistema"});
@@ -825,7 +939,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     db.from("conductores").select("usuario,nombre,tipo").eq("activo",true).neq("usuario",u),
     db.from("avisos").select("*").or(`para.eq.${u},para.eq.todos`).order("id",{ascending:false}).limit(20),
     db.from("avisos_leidos").select("aviso_id").eq("usuario",u),
-    db.from("creditos_mov").select("tipo,monto,por,creado").eq("por",u).gte("creado",hoy()+"T00:00:00"),
+    db.from("creditos_mov").select("tipo,monto,por,creado").eq("por",u).gte("creado",iniDia(hoy())),
     db.from("conductores").select("lat,lon,gps_fuente,gps_hora,en_turno,turno_ini,lat_cel,lon_cel,cel_hora,modalidad").eq("usuario",u).maybeSingle(),
     db.from("cargas").select("*").eq("conductor",u).eq("estado","pendiente").order("id",{ascending:false}).limit(1).maybeSingle(),
     db.from("traspasos").select("*").eq("para",u).in("estado",["pendiente","parcial"]),
@@ -845,7 +959,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     const vo=(vHoy||[]).find(v=>v.tienda_id===t.id&&v.conductor!==u&&v.tipo==="venta");
     const pd=(peds||[]).find(p=>(p.tienda_id&&p.tienda_id===t.id)||(p.tienda&&String(p.tienda).toLowerCase().trim()===String(t.nombre).toLowerCase().trim()));
     return {n:t.nombre,z:t.zona||"—",tp:t.tipo||"bodega",d:t.dueno||"—",tel:t.tel||"—",
-      e:vs.length&&vs[0].creado.slice(0,10)===hoy()?"completada":"pendiente",
+      e:vs.length&&fechaPE(vs[0].creado)===hoy()?"completada":"pendiente",
       cr:!!t.cr,sa:Number(t.sa||0),li:Number(t.li||params.limite_credito||230),di:"—",
       no:t.notas||"",ab:true,lat:t.lat,lon:t.lon,dr,vip:!!t.vip,act:true,
       ritmo:RIT.id,ciclo:RIT.ciclo_dias,nivel:nivelDe(dr,RIT),
@@ -890,21 +1004,41 @@ app.get("/conductor/datos",authC,async(req,res)=>{
 // ════════ OPERACIÓN DEL CONDUCTOR ════════
 app.post("/ventas",authC,async(req,res)=>{
   const{tienda,items,total,metodo}=req.body;
+  /* 175 · cada venta trae un identificador: si llega dos veces (reintento de la cola,
+     doble toque), se responde con la primera en vez de registrarla otra vez */
+  const uid=limpia(req.body.uid,40)||null;
+  if(uid){const{data:ya}=await db.from("ventas").select("id,boleta").eq("uid",uid).maybeSingle();if(ya)return res.json({ok:true,id:ya.id,boleta:ya.boleta,repetida:true});}
+  /* 175 · venta rápida (⚡): a un transeúnte, sin tienda, solo al contado. Antes no llegaba al servidor */
+  const rapida=req.body.rapida===true;
   let t=null;
-  if(req.body.tienda_id){const{data:x}=await db.from("tiendas").select("*").eq("id",req.body.tienda_id).maybeSingle();t=x||null;}
-  if(!t){const{data:x}=await db.from("tiendas").select("*").ilike("nombre",String(tienda||"").trim()).maybeSingle();t=x||null;}
-  if(!t)return res.status(400).json({ok:false,error:"No identifiqué la tienda: "+tienda});
+  if(!rapida){
+    if(req.body.tienda_id){const{data:x}=await db.from("tiendas").select("*").eq("id",req.body.tienda_id).maybeSingle();t=x||null;}
+    if(!t){const{data:x}=await db.from("tiendas").select("*").ilike("nombre",String(tienda||"").trim()).maybeSingle();t=x||null;}
+    if(!t)return res.status(400).json({ok:false,error:"No identifiqué la tienda: "+tienda});
+  }
+  if(rapida&&(metodo==="credito"||metodo==="mixto"||num(req.body.credito,0,999999)>0))
+    return res.status(400).json({ok:false,error:"La venta rápida es solo al contado (efectivo o Yape)"});
+  const _pv=await getParams();
+  if(_pv.catalogo_cfg&&_pv.catalogo_cfg.vender_sin_precio===false&&(Array.isArray(items)?items:[]).some(x=>!(Number(x&&x.pu)>0)))
+    return res.status(400).json({ok:false,error:"Hay productos sin precio en la venta. Ponles precio en el catálogo o activa «Permitir vender productos sin precio»."});
   const resumen=(items||[]).map(x=>`${x.n} x${x.c}`).join(", ");
-  const{data:v}=await db.from("ventas").insert({efectivo:num(req.body.efectivo,0,999999),credito:num(req.body.credito,0,999999),abono:num(req.body.abono,0,999999),tienda_id:t?t.id:null,tienda:tienda,conductor:req.cond.u,items:items||[],total:num(total,0,999999),metodo:(["efectivo","yape","credito","mixto"].includes(metodo)?metodo:"efectivo"),resumen}).select().single();
+  const{data:v}=await db.from("ventas").insert({efectivo:num(req.body.efectivo,0,999999),credito:num(req.body.credito,0,999999),abono:num(req.body.abono,0,999999),tienda_id:t?t.id:null,tienda:rapida?"Venta rápida":tienda,conductor:req.cond.u,items:items||[],total:num(total,0,999999),metodo:(["efectivo","yape","credito","mixto"].includes(metodo)?metodo:"efectivo"),resumen,uid}).select().single();
+  if(!v){
+    if(uid){const{data:ya}=await db.from("ventas").select("id,boleta").eq("uid",uid).maybeSingle();if(ya)return res.json({ok:true,id:ya.id,boleta:ya.boleta,repetida:true});}
+    return res.status(500).json({ok:false,error:"No se pudo guardar la venta en la base. Queda en el celular para reintentar."});
+  }
   // número de comprobante correlativo, asignado por el servidor
   try{
-    if(v&&!v.boleta){
+    /* 177 · la base no acepta dos boletas iguales: si otra venta tomó el número, se pide el siguiente */
+    let probado=0;
+    for(let intento=0;intento<5&&v&&!v.boleta;intento++){
       const{data:ult}=await db.from("ventas").select("boleta").not("boleta","is",null).order("id",{ascending:false}).limit(1).maybeSingle();
       let n=1;
       if(ult&&ult.boleta){const m=String(ult.boleta).match(/(\d+)$/);if(m)n=parseInt(m[1],10)+1;}
+      if(n<=probado)n=probado+1;probado=n;
       const numB="B001-"+String(n).padStart(6,"0");
-      await db.from("ventas").update({boleta:numB}).eq("id",v.id);
-      v.boleta=numB;
+      const{error:eB}=await db.from("ventas").update({boleta:numB}).eq("id",v.id);
+      if(!eB)v.boleta=numB;
     }
   }catch(e){console.error("boleta:",e.message);}
   // ¿venta después de haber liquidado? (cola que llegó tarde, o venta real fuera de viaje)
@@ -918,7 +1052,7 @@ app.post("/ventas",authC,async(req,res)=>{
       await avisarAdmin("⚠️ Venta registrada FUERA DE VIAJE — "+req.cond.u
         +"\nTienda: "+(t&&t.nombre||"—")+" · S/"+Number(total||0).toFixed(2)+" ("+(metodo||"")+")"
         +"\nSe anota como ajuste de la liquidación #"+(ult?ult.id:"—")+", que no se modifica."
-        +"\nRevisa si corresponde cobrar aparte.");
+        +"\nRevisa si corresponde cobrar aparte.","venta_fuera_viaje",true);
       await db.from("logs").insert({tipo:"venta_post_liq",detalle:req.cond.u+" vendió S/"+Number(total||0).toFixed(2)+" fuera de turno"});
     }
   }catch(e){console.error("post_liq:",e.message);}
@@ -932,34 +1066,67 @@ app.post("/ventas",authC,async(req,res)=>{
   if(t&&t.dr_ajuste)await db.from("tiendas").update({dr_ajuste:0}).eq("id",t.id);
   const fiado=num(req.body.credito,0,999999)||((metodo==="credito")?num(total,0,999999):0);
   const abono=num(req.body.abono,0,999999);
-  if(abono>0){
-    await db.from("creditos_mov").insert({tienda_id:t.id,tipo:"abono",monto:abono,detalle:"Cobro en visita #"+v.id,por:req.cond.u});
-    await db.from("tiendas").update({sa:Math.max(0,Number(t.sa||0)-abono)}).eq("id",t.id);
+  if(abono>0&&t){
+    await moverDeuda(t.id,"abono",abono,"Cobro en visita #"+v.id,req.cond.u);
   }
-  if(fiado>0&&!t.cr)await evento("credito_sin_permiso","⚠️ Venta al crédito en tienda sin crédito habilitado",
+  if(fiado>0&&t&&!t.cr)await evento("credito_sin_permiso","⚠️ Venta al crédito en tienda sin crédito habilitado",
     t.nombre+" · S/"+fiado.toFixed(2)+" · conductor "+req.cond.u,String(t.id));
-  if(fiado>0){
-    const{data:t2}=await db.from("tiendas").select("sa").eq("id",t.id).maybeSingle();
-    await db.from("creditos_mov").insert({tienda_id:t.id,tipo:"cargo",monto:fiado,
-      detalle:"Venta "+(metodo==="mixto"?"mixta":"a crédito")+" #"+v.id,por:req.cond.u});
-    await db.from("tiendas").update({sa:Number((t2&&t2.sa)||t.sa||0)+fiado}).eq("id",t.id);
+  if(fiado>0&&t){
+    const antes=await saldoHistorial(t.id);
+    const r=await moverDeuda(t.id,"cargo",fiado,"Venta "+(metodo==="mixto"?"mixta":"a crédito")+" #"+v.id,req.cond.u);
+    /* 175 · Configuración → Crédito: aviso por cada venta fiada y aviso al pasar un monto */
+    const cc=_pv.credito_cfg||{};
+    if(cc.fiar_sin_permiso===false){
+      await evento("credito_aviso","💳 Venta al crédito — "+t.nombre,req.cond.u+" fió S/"+fiado.toFixed(2)+". Deuda de la tienda ahora: S/"+Number(r.sa||0).toFixed(2)+".",String(t.id));
+      avisarAdmin("💳 "+req.cond.u+" fió S/"+fiado.toFixed(2)+" a "+t.nombre+" (deuda S/"+Number(r.sa||0).toFixed(2)+")","credito_sin_permiso");
+    }
+    const umb=num(cc.aviso_desde,0,100000,0);
+    if(umb>0&&antes<umb&&Number(r.sa||0)>=umb){
+      await evento("credito_alto","💳 Deuda alta — "+t.nombre,"La deuda llegó a S/"+Number(r.sa).toFixed(2)+" (aviso desde S/"+umb+").",String(t.id));
+      avisarAdmin("💳 "+t.nombre+" ya debe S/"+Number(r.sa).toFixed(2),"credito_sin_permiso");
+    }
   }
+  /* 175 · Configuración → distancia máxima de una entrega: la venta se compara con la
+     posición del celular (o del camión) de ese momento */
+  try{
+    const mE=num(_pv.operacion&&_pv.operacion.metros_entrega,0,100000,0);
+    if(mE>0&&t&&t.lat&&t.lon){
+      const{data:yo2}=await db.from("conductores").select("lat,lon,gps_hora,lat_cel,lon_cel,cel_hora").eq("usuario",req.cond.u).maybeSingle();
+      const fresco=h=>h&&(Date.now()-new Date(h).getTime())<15*60000;
+      let pp=null;if(yo2&&fresco(yo2.cel_hora)&&yo2.lat_cel)pp=[Number(yo2.lat_cel),Number(yo2.lon_cel)];else if(yo2&&fresco(yo2.gps_hora)&&yo2.lat)pp=[Number(yo2.lat),Number(yo2.lon)];
+      if(pp){const d=Math.hypot((pp[0]-t.lat)*111000,(pp[1]-t.lon)*107000);
+        if(d>mE)await evento("entrega_lejos","📍 Venta lejos de la tienda — "+t.nombre,req.cond.u+" registró la venta a unos "+Math.round(d)+" m de la tienda (máximo configurado: "+mE+" m).",String(t.id));}
+    }
+  }catch(e){}
   try{await db.from("kardex").insert({conductor:req.cond.u,tipo:"venta_detalle",
-    detalle:t.nombre+" · S/"+Number(total||0).toFixed(2)+" ("+(metodo||"efectivo")+")"+(fiado>0?" · fiado S/"+fiado.toFixed(2):"")});}catch(e){}
-  res.json({ok:true,id:v.id});
+    detalle:(t?t.nombre:"Venta rápida")+" · S/"+Number(total||0).toFixed(2)+" ("+(metodo||"efectivo")+")"+(fiado>0?" · fiado S/"+fiado.toFixed(2):"")});}catch(e){}
+  res.json({ok:true,id:v.id,boleta:v.boleta||null});
+});
+/* 175 · Reportar robo o incidente: llega a la Bandeja del dueño */
+app.post("/conductor/incidente",authC,async(req,res)=>{
+  const txt=limpia(req.body.texto,400);
+  if(!txt||txt.length<5)return res.status(400).json({ok:false,error:"Cuenta qué pasó (al menos unas palabras)"});
+  const monto=num(req.body.monto,0,999999,0);
+  await evento("incidente","🚨 Robo o incidente — "+req.cond.u,txt+(monto?(" · Monto estimado S/"+monto.toFixed(2)):"")+(req.body.evidencia?" · el conductor dice tener evidencia (foto o denuncia)":"")+". El faltante sigue a su nombre hasta que lo resuelvas en su liquidación.","");
+  await db.from("logs").insert({tipo:"incidente",detalle:req.cond.u+": "+txt.slice(0,200)});
+  avisarAdmin("🚨 Robo o incidente reportado por "+req.cond.u+": "+txt.slice(0,200),"incidente");
+  res.json({ok:true});
 });
 app.post("/visitas",authC,async(req,res)=>{
   const t=await tiendaPorNombre(req.body.tienda||"");
-  await db.from("visitas").insert({tienda_id:t?t.id:null,tienda:req.body.tienda,conductor:req.cond.u,tipo:(["venta","fallida","no_quiso","registro"].includes(req.body.tipo)?req.body.tipo:"fallida"),fecha:hoy(),hora:horaPE()});
+  /* 175 · el motivo de "No pude visitar" (antes solo se mostraba en el celular) */
+  const motivoV=limpia(req.body.motivo,60)||null;
+  const esCerrada=!motivoV||/cerrad/i.test(motivoV);
+  await db.from("visitas").insert({tienda_id:t?t.id:null,tienda:req.body.tienda,conductor:req.cond.u,tipo:(["venta","fallida","no_quiso","registro"].includes(req.body.tipo)?req.body.tipo:"fallida"),fecha:hoy(),hora:horaPE(),motivo:motivoV});
   if((req.body.tipo||"")==="fallida"){
     const cerradaHoy=t&&!abreHoy(t.dias_atiende);
     await evento("visita","🚫 Visita fallida — "+req.body.tienda,
-      req.cond.u+" la encontró cerrada. Reprogramada para mañana con prioridad; la reposición sigue contando."
+      req.cond.u+(esCerrada?" la encontró cerrada.":" no pudo atenderla: "+motivoV+".")+" Reprogramada para mañana con prioridad; la reposición sigue contando."
       +(cerradaHoy?" (Según sus días, hoy "+DIA_NOM[diaIdx()]+" no atiende: era esperable.)":""),
       t?t.id:"");
     /* Si el sistema decía que hoy SÍ abre y estaba cerrada, el dato de días
        probablemente esté mal. Se avisa una vez para poder corregirlo. */
-    if(t&&!cerradaHoy){
+    if(t&&!cerradaHoy&&esCerrada){
       const hoyIdx=diaIdx(), prop=diasNorm(t.dias_atiende).split("");
       prop[hoyIdx]="0";
       await evento("dias_sugeridos","📅 ¿Esta tienda cierra los "+DIA_NOM[hoyIdx]+"? — "+t.nombre,
@@ -977,7 +1144,7 @@ app.post("/visitas",authC,async(req,res)=>{
     await db.from("tiendas").update({dr_ajuste:num((t.dr_ajuste||0)+_d,0,120)}).eq("id",t.id);
     await evento("visita","🙅 No quiso comprar — "+req.body.tienda,req.cond.u+" ofreció y el dueño decidió no llevar. Se le restan "+_d+" días al contador de reposición ("+_R.nombre+").",t.id);
   }
-  if((req.body.tipo||"")==="venta_fuera_zona"){await evento("zona","📍 Venta fuera de zona — "+req.body.tienda,req.cond.u+" registró una venta fuera de las zonas dibujadas ("+(req.body.lat||"?")+", "+(req.body.lon||"?")+").",t?t.id:"");avisarAdmin("📍 Venta fuera de zona: "+req.body.tienda+" por "+req.cond.u);}
+  if((req.body.tipo||"")==="venta_fuera_zona"){await evento("zona","📍 Venta fuera de zona — "+req.body.tienda,req.cond.u+" registró una venta fuera de las zonas dibujadas ("+(req.body.lat||"?")+", "+(req.body.lon||"?")+").",t?t.id:"");avisarAdmin("📍 Venta fuera de zona: "+req.body.tienda+" por "+req.cond.u,"zona");}
   res.json({ok:true});
 });
 app.post("/tiendas",authC,async(req,res)=>{
@@ -987,7 +1154,7 @@ app.post("/tiendas",authC,async(req,res)=>{
     dias_atiende:_diasC,dueno:b.d,tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),foto:fotoOK(b.foto)?b.foto:null,cr:false,sa:0,li:0,vip:false,act:true,nueva:true,verificada:false,conductor_reg:req.cond.u}).select().single();
   if(error)return res.status(500).json({ok:false,error:error.message});
   await evento("tienda_nueva","🆕 Tienda nueva por verificar — "+b.n,"Registrada por "+req.cond.u+" en "+(b.z||"—")+". Contado habilitado; crédito bloqueado hasta que la verifiques.",t.id);
-  avisarAdmin("🆕 Tienda nueva por verificar: "+b.n+" ("+(b.z||"—")+") — registrada por "+req.cond.u);
+  avisarAdmin("🆕 Tienda nueva por verificar: "+b.n+" ("+(b.z||"—")+") — registrada por "+req.cond.u,"tienda_nueva");
   res.json({ok:true,id:t.id});
 });
 app.post("/conductor/dias-sugeridos",authC,async(req,res)=>{
@@ -1097,7 +1264,7 @@ app.post("/cargas/confirmar",authC,async(req,res)=>{
     }
     if(!req.body.conforme){
       await evento("carga","📦 Carga con diferencias — "+req.cond.u,"Motivo: "+(req.body.motivo||"—"),c.id);
-      avisarAdmin("📦 Carga con diferencias ("+req.cond.u+"): "+(req.body.motivo||""));
+      avisarAdmin("📦 Carga con diferencias ("+req.cond.u+"): "+(req.body.motivo||""),"carga");
     }
   }
   res.json({ok:true});
@@ -1141,38 +1308,91 @@ app.post("/perdidas",authC,async(req,res)=>{
     valor+=pv*q;costo+=cu*q;
     detalle.push(p.nombre+" ×"+q);
   });
-  await moverStock(req.cond.u,Object.fromEntries(ids.map(id=>[id,-prods[id]])),tipo,null);
-  const fila={conductor:req.cond.u,motivo,tipo,
+  /* 175 · si el dueño pidió aprobar los ajustes de conteo, el stock se mueve recién al aceptar */
+  const esperaOK=tipo==="ajuste"&&!!(params.mermas_cfg&&params.mermas_cfg.ajuste_requiere_ok);
+  if(!esperaOK)await moverStock(req.cond.u,Object.fromEntries(ids.map(id=>[id,-prods[id]])),tipo,null);
+  const fila={conductor:req.cond.u,motivo,tipo:esperaOK?"ajuste_pendiente":tipo,
     valor:Math.round(valor*100)/100,costo:Math.round(costo*100)/100,
     detalle:detalle.join(", ")+(req.body.nota?(" · "+limpia(req.body.nota,120)):""),
     tienda:limpia(req.body.tienda,60)||null,prods};
-  const{error}=await db.from("perdidas").insert(fila);
-  if(error)console.error("perdidas:",error.message);
+  const{data:pf,error}=await db.from("perdidas").insert(fila).select().single();
+  if(error)return res.status(500).json({ok:false,error:"No se pudo registrar: "+error.message});
+  if(esperaOK){
+    await evento("ajuste","⚖️ Ajuste de conteo por aprobar — "+req.cond.u,unid+" unidades · "+fila.detalle+" · Motivo: "+motivo+". Si lo aceptas, se descuenta de su stock; si no, queda como estaba.",String(pf.id));
+    return res.json({ok:true,pendiente:true,valor:fila.valor,costo:fila.costo,unidades:unid});
+  }
   await db.from("kardex").insert({conductor:req.cond.u,tipo:tipo==="ajuste"?"ajuste":"perdida",
     detalle:motivo+" · "+unid+" unid · S/"+fila.valor.toFixed(2)+(fila.detalle?(" · "+fila.detalle):"")});
   // avisar al dueño solo cuando vale la pena
   if(tipo==="merma"&&fila.costo>=num(params.mermas_cfg&&params.mermas_cfg.aviso_desde,0,100000,30))
-    await avisarAdmin("📉 Merma de "+req.cond.u+"\n"+motivo+" · "+unid+" unidades\nValor S/"+fila.valor.toFixed(2)+" (costo S/"+fila.costo.toFixed(2)+")\n"+fila.detalle);
+    await avisarAdmin("📉 Merma de "+req.cond.u+"\n"+motivo+" · "+unid+" unidades\nValor S/"+fila.valor.toFixed(2)+" (costo S/"+fila.costo.toFixed(2)+")\n"+fila.detalle,"merma",true);
   if(tipo==="ajuste")
-    await avisarAdmin("⚖️ Ajuste de inventario de "+req.cond.u+"\n"+unid+" unidades · "+fila.detalle+"\nMotivo: "+motivo);
+    await avisarAdmin("⚖️ Ajuste de inventario de "+req.cond.u+"\n"+unid+" unidades · "+fila.detalle+"\nMotivo: "+motivo,"merma",true);
   res.json({ok:true,valor:fila.valor,costo:fila.costo,unidades:unid});
 });
 app.get("/admin/cierres",authA,async(req,res)=>{
-  const{data}=await db.from("liquidaciones").select("*").order("id",{ascending:false}).limit(60);
-  res.json({ok:true,cierres:data||[]});
+  /* 177 · sin la foto en la lista (pesa): solo se avisa si la tiene y se pide aparte */
+  const{data}=await db.from("liquidaciones").select("id,conductor,dia,kx,creado,inicio,fin,estado,efectivo_declarado,diferencia,resumen,nota,confirmada_en").order("id",{ascending:false}).limit(60);
+  const ids=(data||[]).map(l=>l.id);let conFoto=new Set();
+  if(ids.length){const{data:f}=await db.from("liquidaciones").select("id").in("id",ids).not("foto","is",null);conFoto=new Set((f||[]).map(x=>x.id));}
+  res.json({ok:true,cierres:(data||[]).map(l=>Object.assign(l,{tiene_foto:conFoto.has(l.id)}))});
+});
+app.get("/admin/alertas-estado",authA,async(req,res)=>{
+  let p={};try{p=await getParams();}catch(e){}
+  const tel=String((p.negocio&&p.negocio.tel)||ADMIN_TEL||"").replace(/\D/g,"");
+  const falta=[];
+  if(!process.env.TWILIO_ACCOUNT_SID)falta.push("TWILIO_ACCOUNT_SID");
+  if(!process.env.TWILIO_AUTH_TOKEN)falta.push("TWILIO_AUTH_TOKEN");
+  res.json({ok:true,whatsapp:!!(twilioC&&tel),twilio:!!twilioC,telefono:!!tel,falta_en_railway:falta,
+    remitente_propio:!!process.env.TWILIO_WHATSAPP_FROM});
+});
+app.get("/admin/cierres/:id/foto",authA,async(req,res)=>{
+  const{data}=await db.from("liquidaciones").select("id,foto").eq("id",req.params.id).maybeSingle();
+  if(!data||!data.foto)return res.status(404).json({ok:false,error:"Ese cierre no tiene foto"});
+  res.json({ok:true,foto:data.foto});
 });
 app.post("/gastos",authC,async(req,res)=>{
-  const cat=["combustible","comida","peaje","mecanico","hospedaje","otros"].includes(req.body.categoria)?req.body.categoria:"otros";
+  const p=await getParams();
+  const cats=(Array.isArray(p.gasto_cats)&&p.gasto_cats.length)?p.gasto_cats:["combustible","comida","peaje","mecanico","hospedaje","otros"];
+  const cat=cats.includes(req.body.categoria)?req.body.categoria:"otros";
   const monto=num(req.body.monto,0,99999);
-  await db.from("kardex").insert({conductor:req.cond.u,tipo:"gasto_"+cat,detalle:"S/"+monto.toFixed(2)+(req.body.nota?" — "+limpia(req.body.nota,120):"")});
-  const p=await getParams(),tope=num(p.tope_gastos,0,100000)||350;
-  const{data:gs}=await db.from("kardex").select("tipo,detalle").eq("conductor",req.cond.u).like("tipo","gasto_%").order("id",{ascending:false}).limit(120);
-  const sum=(gs||[]).filter(g=>g.tipo!=="gasto_combustible").reduce((s,g)=>s+(parseFloat(String(g.detalle).replace("S/",""))||0),0);
+  if(!monto)return res.status(400).json({ok:false,error:"Escribe el monto del gasto"});
+  const nota=limpia(req.body.nota,160);
+  /* 175 · antes el gasto solo iba al kardex, y la liquidación lee la tabla gastos:
+     el gasto NUNCA se descontaba del efectivo que el conductor debía entregar */
+  const{data:g,error}=await db.from("gastos").insert({conductor:req.cond.u,categoria:cat,monto,detalle:nota||null,foto:fotoOK(req.body.foto)?req.body.foto:null}).select().single();
+  if(error||!g)return res.status(500).json({ok:false,error:"No se pudo guardar el gasto: "+(error?error.message:"sin respuesta de la base")});
+  await db.from("kardex").insert({conductor:req.cond.u,tipo:"gasto_"+cat,detalle:"S/"+monto.toFixed(2)+(nota?" — "+nota:"")});
+  /* el tope se mide en el viaje en curso (antes sumaba los últimos 120 gastos de siempre) */
+  const{data:yo}=await db.from("conductores").select("turno_ini").eq("usuario",req.cond.u).maybeSingle();
+  const inicio=(yo&&yo.turno_ini)||new Date(Date.now()-7*86400000).toISOString();
+  const{data:gs}=await db.from("gastos").select("categoria,monto,rechazado").eq("conductor",req.cond.u).gte("creado",inicio);
+  const tope=num(p.tope_gastos,0,100000)||350;
+  const sum=(gs||[]).filter(x=>!x.rechazado&&x.categoria!=="combustible").reduce((s,x)=>s+Number(x.monto||0),0);
   if(sum>tope){
-    await evento("gastos","💸 Gastos altos — "+req.cond.u,"Lleva S/"+sum.toFixed(2)+" en gastos que NO son combustible (tope S/"+tope+").",req.cond.u);
-    avisarAdmin("💸 "+req.cond.u+" superó el tope de gastos no-combustible: S/"+sum.toFixed(2));
+    await evento("gastos","💸 Gastos altos — "+req.cond.u,"Lleva S/"+sum.toFixed(2)+" en gastos que NO son combustible en este viaje (tope S/"+tope+"). Último: "+cat+" S/"+monto.toFixed(2)+(nota?" ("+nota+")":"")+". Si lo rechazas, ese gasto no se descuenta en su liquidación.",String(g.id));
+    avisarAdmin("💸 "+req.cond.u+" superó el tope de gastos no-combustible: S/"+sum.toFixed(2),"gastos");
   }
-  res.json({ok:true,acumulado_no_combustible:sum,tope});
+  res.json({ok:true,id:g.id,acumulado_no_combustible:sum,tope});
+});
+/* 175 · el conductor puede anular un gasto que registró por error (solo del viaje en curso) */
+app.post("/gastos/:id/anular",authC,async(req,res)=>{
+  const{data:g}=await db.from("gastos").select("*").eq("id",req.params.id).eq("conductor",req.cond.u).maybeSingle();
+  if(!g)return res.status(404).json({ok:false,error:"Gasto no encontrado"});
+  const{data:yo}=await db.from("conductores").select("turno_ini").eq("usuario",req.cond.u).maybeSingle();
+  if(yo&&yo.turno_ini&&new Date(g.creado)<new Date(yo.turno_ini))return res.status(409).json({ok:false,error:"Ese gasto es de un viaje ya liquidado: pídele al dueño que lo corrija"});
+  await db.from("gastos").update({rechazado:true,nota:"Anulado por el conductor"}).eq("id",g.id);
+  await db.from("kardex").insert({conductor:req.cond.u,tipo:"gasto_anulado",detalle:"S/"+Number(g.monto).toFixed(2)+" "+g.categoria});
+  res.json({ok:true});
+});
+/* 175 · entrega parcial de efectivo al dueño durante el viaje (antes el botón no mandaba nada) */
+app.post("/conductor/entrega",authC,async(req,res)=>{
+  const monto=num(req.body.monto,0,999999);
+  if(!monto)return res.status(400).json({ok:false,error:"Escribe cuánto entregaste"});
+  const{data:e,error}=await db.from("entregas").insert({conductor:req.cond.u,monto,nota:limpia(req.body.nota,160)||null}).select().single();
+  if(error||!e)return res.status(500).json({ok:false,error:"No se pudo registrar la entrega: "+(error?error.message:"sin respuesta de la base")});
+  await evento("entrega","💵 Entrega de efectivo por confirmar — "+req.cond.u,req.cond.u+" dice que te entregó S/"+monto.toFixed(2)+(e.nota?" ("+e.nota+")":"")+". Confírmalo cuando lo tengas en la mano; si lo rechazas, no se descuenta de su liquidación.",String(e.id));
+  res.json({ok:true,id:e.id});
 });
 app.post("/liquidaciones",authC,async(req,res)=>{
   const u=req.cond.u;
@@ -1192,14 +1412,18 @@ app.post("/liquidaciones",authC,async(req,res)=>{
   const inicio=(yo&&yo.turno_ini)||new Date(Date.now()-7*86400000).toISOString();
   const fin=new Date().toISOString();
   // ── 3) todo lo que pasó en el viaje ──
-  const [vts,mov,trs,gas,perd,crd]=await Promise.all([
+  const [vts0,mov,trs,gas0,perd,crd,ent0]=await Promise.all([
     db.from("ventas").select("*").eq("conductor",u).gte("creado",inicio).lte("creado",fin),
     db.from("stock_mov").select("motivo,delta,prod_id").eq("conductor",u).gte("creado",inicio),
     db.from("traspasos").select("*").or("de.eq."+u+",para.eq."+u).gte("creado",inicio),
-    db.from("gastos").select("categoria,monto,detalle").eq("conductor",u).gte("creado",inicio),
+    db.from("gastos").select("id,categoria,monto,detalle,rechazado,creado").eq("conductor",u).gte("creado",inicio),
     db.from("perdidas").select("motivo,valor,costo,detalle,tienda,tipo,creado").eq("conductor",u).gte("creado",inicio),
-    db.from("creditos_mov").select("tipo,monto,tienda_id,detalle").eq("por",u).gte("creado",inicio)
+    db.from("creditos_mov").select("tipo,monto,tienda_id,detalle").eq("por",u).gte("creado",inicio),
+    db.from("entregas").select("id,monto,estado,nota,creado").eq("conductor",u).gte("creado",inicio)
   ]).then(r=>r.map(x=>x.data||[]));
+  /* 175 · fuera: ventas anuladas y gastos rechazados; se descuenta el efectivo ya entregado al dueño */
+  const vts=vts0.filter(v=>!v.anulada),gas=gas0.filter(g=>!g.rechazado),ent=ent0.filter(e=>e.estado!=="rechazada");
+  const entregas=Math.round(ent.reduce((s,e)=>s+Number(e.monto||0),0)*100)/100;
 
   const sum=(a,f)=>a.reduce((s,x)=>s+Number(f(x)||0),0);
   const efectivo=sum(vts,v=>v.metodo==="yape"?0:v.efectivo);
@@ -1217,10 +1441,11 @@ app.post("/liquidaciones",authC,async(req,res)=>{
     conductor:u,nombre:(yo&&yo.nombre)||u,inicio,fin,
     dias:Math.max(1,Math.round((new Date(fin)-new Date(inicio))/86400000)),
     ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
-    efectivo_esperado:Math.round((efectivo+abonos-gastos)*100)/100,
+    efectivo_esperado:Math.round((efectivo+abonos-gastos-entregas)*100)/100,
+    entregas:{total:entregas,n:ent.length,detalle:ent},
     gastos:{total:gastos,detalle:gas},
     perdidas:(function(){
-      const m=perd.filter(p=>p.tipo!=="ajuste"),a=perd.filter(p=>p.tipo==="ajuste");
+      const m=perd.filter(p=>!/^ajuste/.test(p.tipo||"")),a=perd.filter(p=>p.tipo==="ajuste");   /* 177 · pendientes y rechazados fuera */
       return{total:m.reduce((s,p)=>s+Number(p.valor||0),0),
         costo:m.reduce((s,p)=>s+Number(p.costo||0),0),
         n:m.length,detalle:m,
@@ -1235,10 +1460,11 @@ app.post("/liquidaciones",authC,async(req,res)=>{
   };
   const decl=num(req.body.efectivo_declarado,0,999999);
   const dif=Math.round((decl-resumen.efectivo_esperado)*100)/100;
+  const MARG=num((await getParams()).margen_liq,0,1000,5);resumen.margen=MARG;resumen.dentro_margen=Math.abs(dif)<=MARG;
 
   const{data:l}=await db.from("liquidaciones").insert({
     conductor:u,dia:req.body.dia||{},kx:req.body.kx||[],
-    inicio,fin,estado:"pendiente",efectivo_declarado:decl,diferencia:dif,
+    inicio,fin,estado:"pendiente",efectivo_declarado:decl,diferencia:dif,foto:fotoOK(req.body.foto)?req.body.foto:null,   /* 177 */
     resumen,nota:limpia(req.body.nota,300)||null
   }).select().single();
 
@@ -1249,11 +1475,11 @@ app.post("/liquidaciones",authC,async(req,res)=>{
     await db.from("logs").insert({tipo:"turno",detalle:u+" termina (liquidación #"+l.id+")"});
   }
   await evento("liquidacion","💰 Liquidación de viaje — "+u,
-    "Efectivo esperado S/"+resumen.efectivo_esperado.toFixed(2)+" · declarado S/"+decl.toFixed(2)+(dif?(" · diferencia S/"+dif.toFixed(2)):" · cuadra"),l&&l.id);
+    "Efectivo esperado S/"+resumen.efectivo_esperado.toFixed(2)+" · declarado S/"+decl.toFixed(2)+(dif?(" · diferencia S/"+dif.toFixed(2)+(Math.abs(dif)<=MARG?" (dentro del margen de S/"+MARG+")":" (fuera del margen de S/"+MARG+")")):" · cuadra")+(resumen.entregas.total?" · ya entregó S/"+resumen.entregas.total.toFixed(2)+" antes":""),l&&l.id);
   avisarAdmin("💰 Liquidación de "+u+"\nEsperado S/"+resumen.efectivo_esperado.toFixed(2)
     +"\nDeclarado S/"+decl.toFixed(2)+(dif?("\n⚠️ Diferencia S/"+dif.toFixed(2)):"\n✓ Cuadra")
     +"\nFiado en el viaje S/"+fiado.toFixed(2)+" · Cobrado S/"+abonos.toFixed(2)
-    +"\nConfírmala en el panel.");
+    +"\nConfírmala en el panel.","liquidacion");
   res.json({ok:true,id:l&&l.id,resumen,diferencia:dif});
 });
 app.get("/admin/cierres/:id/ajustes",authA,async(req,res)=>{
@@ -1300,7 +1526,7 @@ app.get("/admin/datos",authA,async(req,res)=>{
   res.json({ok:true,
     resumen:{tiendas:(tds||[]).length,conductores:(us||[]).length,
       en_turno:(us||[]).filter(x=>(x.en_turno!==undefined&&x.en_turno!==null)?x.en_turno:turnoDe[x.usuario]).length,
-      pedidos_hoy:(pds||[]).filter(p=>String(p.fecha||p.creado||"").slice(0,10)===hoy()).length,
+      pedidos_hoy:(pds||[]).filter(p=>(p.fecha?String(p.fecha).slice(0,10):fechaPE(p.creado))===hoy()).length,
       pedidos_pendientes:(pds||[]).filter(p=>p.estado!=="entregado").length},
     usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:u.tipo,camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||"",en_turno:(u.en_turno!==undefined&&u.en_turno!==null)?!!u.en_turno:!!turnoDe[u.usuario]})),
     /* La bandeja agrupada necesita id, creado y visto; antes solo llegaban
@@ -1542,12 +1768,7 @@ app.post("/admin/tiendas/:id/asignar",authA,async(req,res)=>{
   if(req.body.conductor)await avisoA(req.body.conductor,"🏪 Te asigné la tienda "+t.nombre+(t.zona?" ("+t.zona+")":"")+" — entra en tu ruta de HOY.");
   res.json({ok:true});
 });
-app.post("/creditos",authA,async(req,res)=>{ // abonos del dueño (bloque 38)
-  const{tienda_id,monto}=req.body;const{data:t}=await db.from("tiendas").select("sa").eq("id",tienda_id).single();
-  await db.from("creditos_mov").insert({tienda_id,tipo:"pago",monto:num(monto,0,999999),detalle:"Abono registrado por el dueño",por:"admin"});
-  await db.from("tiendas").update({sa:Math.max(0,Number(t.sa||0)-Number(monto||0))}).eq("id",tienda_id);
-  res.json({ok:true});
-});
+/* 175 · se quitó POST /creditos: duplicaba /admin/creditos/abono y ninguna app lo usaba */
 app.post("/correcciones/:id/resolver",authA,async(req,res)=>{
   const{data:c}=await db.from("correcciones").select("*").eq("id",req.params.id).maybeSingle();
   if(!c)return res.status(404).json({ok:false});
@@ -1563,10 +1784,15 @@ app.get("/admin/categorias",authA,async(req,res)=>{
 });
 app.post("/admin/categorias",authA,async(req,res)=>{
   const arr=Array.isArray(req.body.categorias)?req.body.categorias.slice(0,40):[];
+  /* 175 · Configuración → precio por defecto de una categoría nueva */
+  const _pc=await getParams(),PN=num(_pc.catalogo_cfg&&_pc.catalogo_cfg.precio_cat_nueva,0,10000,0);
+  if(PN>0){const{data:exis}=await db.from("categorias").select("id");const ya=new Set((exis||[]).map(c=>c.id));
+    arr.forEach(x=>{const id=limpia(x&&x.id,20).toLowerCase().replace(/[^a-z0-9_]/g,"");if(x&&id&&!ya.has(id)&&!(Number(x.precio)>0))x.precio=PN;});}
   const filas=arr.map((x,i)=>({id:limpia(x.id,20).toLowerCase().replace(/[^a-z0-9_]/g,""),nom:limpia(x.nom,50),
     emoji:limpia(x.emoji,4)||"📦",precio:num(x.precio,0,10000),orden:i,activa:x.activa!==false})).filter(x=>x.id&&x.nom);
   if(!filas.length)return res.status(400).json({ok:false,error:"Sin categorías"});
   const{error}=await db.from("categorias").upsert(filas);
+  await refrescarCats();
   // el panel manda la lista completa: lo que no está en ella se desactiva.
   // Antes, borrar una categoría en el panel no la desactivaba aquí y seguía
   // llegándole al conductor.
@@ -1632,7 +1858,7 @@ app.get("/admin/utilidad",authA,async(req,res)=>{
   const d=String(req.query.desde||"").slice(0,10)||hoy();
   const h=String(req.query.hasta||"").slice(0,10)||hoy();
   const cond=limpia(req.query.conductor,20);
-  let qv=db.from("ventas").select("items,total,creado,conductor").gte("creado",d+"T00:00:00").lte("creado",h+"T23:59:59");
+  let qv=db.from("ventas").select("items,total,creado,conductor").gte("creado",iniDia(d)).lte("creado",finDia(h));
   if(cond&&cond!=="todos")qv=qv.eq("conductor",cond);
   const [vts,prods,params]=await Promise.all([
     qv,
@@ -1716,7 +1942,7 @@ app.get("/admin/exportar",authA,async(req,res)=>{
   const tipo=String(req.query.tipo||"ventas"), cond=String(req.query.conductor||""), desde=String(req.query.desde||""), hasta=String(req.query.hasta||"");
   const csv=(cab,filas)=>[cab.join(";")].concat(filas.map(f=>f.map(v=>{
     const s=String(v==null?"":v).replace(/"/g,'""');return /[;\n"]/.test(s)?'"'+s+'"':s;}).join(";"))).join("\n");
-  const rango=q=>{if(desde)q=q.gte("creado",desde+"T00:00:00");if(hasta)q=q.lte("creado",hasta+"T23:59:59");return q;};
+  const rango=q=>{if(desde)q=q.gte("creado",iniDia(desde));if(hasta)q=q.lte("creado",finDia(hasta));return q;};
   let cab=[],filas=[],nombre=tipo;
   try{
     if(tipo==="ventas"){
@@ -1774,14 +2000,26 @@ app.get("/admin/diagnostico",authA,async(req,res)=>{
   const{data:cgs}=await db.from("cargas").select("id,conductor,estado,items,creado").order("id",{ascending:false}).limit(20);
   res.json({ok:true,conteos:out,ultimas_tiendas:ult||[],ultimos_pedidos:pds||[],ultimas_cargas:cgs||[],gps_error:GPS_ULTIMO_ERROR||null});
 });
+/* 175 · El conductor deja mercadería en el almacén: pasa de SU stock al del almacén,
+   producto por producto. Antes: la pantalla "Depositar al almacén" no mandaba nada, y
+   este envío (por categoría) solo anotaba un contador aparte que no era el stock real. */
 app.post("/almacen",authC,async(req,res)=>{
-  const items=catsOK(req.body.items);
-  if(!items)return res.status(400).json({ok:false,error:"Sin productos"});
-  const tipo=(req.body.tipo==="salida")?"salida":"retorno";
-  await db.from("kardex").insert({conductor:req.cond.u,tipo:"almacen_"+tipo,detalle:JSON.stringify(items)+(req.body.nota?" · "+limpia(req.body.nota,120):"")});
-  await evento("almacen","🏬 "+(tipo==="retorno"?"Sobrante al almacén":"Salida de almacén")+" — "+req.cond.u,
-    Object.keys(items).map(k=>k+" "+items[k]).join(", "),"");
-  res.json({ok:true});
+  const prods=limpiaProds(req.body.prods);
+  if(!Object.keys(prods).length)return res.status(400).json({ok:false,error:"Elige los productos que dejas (esta versión de la app es antigua: actualízala)"});
+  const st=await leerStock(req.cond.u);
+  const falta=Object.keys(prods).filter(id=>Number(st.prods[id]||0)<prods[id]);
+  if(falta.length){
+    const{data:cat}=await db.from("catalogo").select("id,nombre").in("id",falta);
+    const nom={};(cat||[]).forEach(p=>nom[p.id]=p.nombre);
+    return res.status(409).json({ok:false,error:"No tienes tanto en el camión: "+falta.map(id=>(nom[id]||id)+" (tienes "+Number(st.prods[id]||0)+")").join(", ")});
+  }
+  await moverStock(req.cond.u,Object.fromEntries(Object.keys(prods).map(id=>[id,-prods[id]])),"traspaso_envia","almacen");
+  await moverStock("almacen",prods,"traspaso_recibe",req.cond.u);
+  const cats=await porCategoria(prods);
+  const det=Object.keys(cats).map(k=>k+" "+cats[k]).join(", ");
+  await db.from("kardex").insert({conductor:req.cond.u,tipo:"almacen_retorno",detalle:JSON.stringify(cats)+" · dejado por "+req.cond.u+(req.body.nota?" · "+limpia(req.body.nota,120):"")});
+  await evento("almacen","🏬 "+req.cond.u+" dejó mercadería en el almacén",det+". Ya pasó al stock del almacén; si no coincide con lo que recibiste, corrígelo en Almacén → Ajuste.","");
+  res.json({ok:true,por_categoria:cats});
 });
 app.post("/admin/almacen/enviar",authA,async(req,res)=>{
   const para=String(req.body.conductor||"");
@@ -1807,7 +2045,18 @@ app.get("/admin/creditos",authA,async(req,res)=>{
   const map={};(tds||[]).forEach(t=>map[t.id]=t.nombre);
   res.json({ok:true,
     movimientos:(mov||[]).map(m=>({...m,tienda:map[m.tienda_id]||("#"+m.tienda_id)})),
-    saldos:(tds||[]).filter(t=>Number(t.sa||0)>0).sort((a,b)=>Number(b.sa)-Number(a.sa)),
+    saldos:await (async()=>{
+      /* 175 · antigüedad de cada deuda: días desde el cargo más antiguo que aún no se cubrió */
+      const p=await getParams();const DV=num((p.credito_cfg&&p.credito_cfg.dias_vencida)||p.deuda_dias,1,365,30);
+      const cons=(tds||[]).filter(t=>Number(t.sa||0)>0).sort((a,b)=>Number(b.sa)-Number(a.sa));
+      for(const t of cons){
+        const{data:ms}=await db.from("creditos_mov").select("tipo,monto,creado").eq("tienda_id",t.id).order("creado",{ascending:true});
+        let pag=(ms||[]).filter(m=>m.tipo!=="cargo").reduce((s,m)=>s+Number(m.monto||0),0),desde=null;
+        for(const m of (ms||[]).filter(m=>m.tipo==="cargo")){if(pag>=Number(m.monto||0)){pag-=Number(m.monto||0);continue;}desde=m.creado;break;}
+        t.dias=desde?Math.floor((Date.now()-new Date(desde).getTime())/86400000):0;
+        t.vencida=t.dias>=DV;t.dias_vencida=DV;
+      }
+      return cons;})(),
     total:(tds||[]).reduce((s,t)=>s+Number(t.sa||0),0)});
 });
 app.post("/admin/creditos/abono",authA,async(req,res)=>{
@@ -1815,26 +2064,39 @@ app.post("/admin/creditos/abono",authA,async(req,res)=>{
   if(!id||!monto)return res.status(400).json({ok:false,error:"Falta tienda o monto"});
   const{data:t}=await db.from("tiendas").select("nombre,sa").eq("id",id).maybeSingle();
   if(!t)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
-  await db.from("creditos_mov").insert({tienda_id:id,tipo:"abono",monto,detalle:limpia(req.body.detalle,120)||"Abono registrado por el dueño",por:"admin"});
-  await db.from("tiendas").update({sa:Math.max(0,Number(t.sa||0)-monto)}).eq("id",id);
-  await db.from("logs").insert({tipo:"admin",detalle:"Abono S/"+monto.toFixed(2)+" de "+t.nombre});
-  res.json({ok:true,nuevo_saldo:Math.max(0,Number(t.sa||0)-monto)});
+  const r=await moverDeuda(id,"abono",monto,limpia(req.body.detalle,120)||"Abono registrado por el dueño","admin");
+  if(!r.monto)return res.status(409).json({ok:false,error:"Esa tienda no tiene deuda que abonar"});
+  await db.from("logs").insert({tipo:"admin",detalle:"Abono S/"+r.monto.toFixed(2)+" de "+t.nombre});
+  res.json({ok:true,nuevo_saldo:r.sa,registrado:r.monto,
+    aviso:(r.monto<monto)?("Solo debía S/"+r.monto.toFixed(2)+": se registró eso."):undefined});
 });
+/* 175 · El almacén se lee del stock real por producto (antes: suma de los últimos 300
+   movimientos por categoría, un inventario aparte que no coincidía con los envíos) */
 app.get("/admin/almacen",authA,async(req,res)=>{
-  const{data}=await db.from("kardex").select("*").like("tipo","almacen_%").order("id",{ascending:false}).limit(300);
-  const stock={};
-  (data||[]).forEach(k=>{
-    let it={};try{it=JSON.parse(String(k.detalle).split(" · ")[0])}catch(e){}
-    const signo=(k.tipo==="almacen_retorno")?1:-1;
-    Object.keys(it).forEach(cat=>{stock[cat]=(stock[cat]||0)+signo*Number(it[cat]||0)});
-  });
-  res.json({ok:true,stock,movimientos:(data||[]).slice(0,60)});
+  res.set("Cache-Control","no-store");
+  const s=await leerStock("almacen");
+  const{data:cat}=await db.from("catalogo").select("id,nombre,cat");
+  const nom={},cDe={};(cat||[]).forEach(p=>{nom[p.id]=p.nombre;cDe[p.id]=p.cat});
+  const prods=Object.keys(s.prods).filter(id=>Number(s.prods[id])>0).map(id=>({id,n:nom[id]||id,cat:cDe[id]||"—",cant:Number(s.prods[id])}));
+  const stock={};prods.forEach(p=>{stock[p.cat]=(stock[p.cat]||0)+p.cant});
+  const{data:mv}=await db.from("stock_mov").select("prod_id,delta,motivo,ref,creado").eq("conductor","almacen").order("creado",{ascending:false}).limit(80);
+  const MOT={traspaso_recibe:"Recibido",traspaso_envia:"Enviado",ajuste_ingreso:"Ajuste: ingreso",ajuste_salida:"Ajuste: salida",cierre_recibe:"Cierre de viaje"};
+  res.json({ok:true,stock,prods,total:prods.reduce((a,p)=>a+p.cant,0),
+    movimientos:(mv||[]).map(m=>({prod:nom[m.prod_id]||m.prod_id,cant:Number(m.delta),motivo:MOT[m.motivo]||m.motivo,de:m.ref||"",creado:m.creado}))});
 });
 app.post("/admin/almacen/ajuste",authA,async(req,res)=>{
-  const items=catsOK(req.body.items);
-  if(!items)return res.status(400).json({ok:false,error:"Sin productos"});
-  const tipo=(req.body.tipo==="salida")?"salida":"retorno";
-  await db.from("kardex").insert({conductor:"admin",tipo:"almacen_"+tipo,detalle:JSON.stringify(items)+" · ajuste del dueño"+(req.body.nota?": "+limpia(req.body.nota,120):"")});
+  const prods=limpiaProds(req.body.prods);
+  if(!Object.keys(prods).length)return res.status(400).json({ok:false,error:"Elige los productos y cantidades del ajuste"});
+  const tipo=(req.body.tipo==="salida")?"salida":"ingreso";
+  if(tipo==="salida"){
+    const st=await leerStock("almacen");
+    const falta=Object.keys(prods).filter(id=>Number(st.prods[id]||0)<prods[id]);
+    if(falta.length)return res.status(409).json({ok:false,error:"El almacén no tiene tanto de: "+falta.join(", ")});
+  }
+  const nota=limpia(req.body.nota,120);
+  await moverStock("almacen",Object.fromEntries(Object.keys(prods).map(id=>[id,(tipo==="salida"?-1:1)*prods[id]])),"ajuste_"+tipo,nota||"dueño");
+  const cats=await porCategoria(prods);
+  await db.from("kardex").insert({conductor:"admin",tipo:tipo==="salida"?"almacen_salida":"almacen_retorno",detalle:JSON.stringify(cats)+" · ajuste del dueño"+(nota?": "+nota:"")});
   res.json({ok:true});
 });
 app.get("/admin/kardex",authA,async(req,res)=>{
@@ -1845,8 +2107,8 @@ app.get("/admin/kardex",authA,async(req,res)=>{
   let qk=db.from("kardex").select("*").order("id",{ascending:false});
   let qv=db.from("ventas").select("*").order("id",{ascending:false});
   if(rango){
-    qk=qk.gte("creado",d+"T00:00:00").lte("creado",h+"T23:59:59").limit(800);
-    qv=qv.gte("creado",d+"T00:00:00").lte("creado",h+"T23:59:59").limit(800);
+    qk=qk.gte("creado",iniDia(d)).lte("creado",finDia(h)).limit(800);
+    qv=qv.gte("creado",iniDia(d)).lte("creado",finDia(h)).limit(800);
   }else{ qk=qk.limit(150); qv=qv.limit(150); }
   const [kx,vt]=await Promise.all([qk,qv]).then(r=>[r[0].data||[],r[1].data||[]]);
   const rows=kx.concat(vt.map(v=>({conductor:v.conductor,tipo:"venta",
@@ -1884,7 +2146,7 @@ app.get("/admin/gps/dispositivos",authA,async(req,res)=>{
 app.get("/admin/gps/recorrido",authA,async(req,res)=>{
   const u=String(req.query.conductor||"");const d=String(req.query.fecha||hoy());
   const{data}=await db.from("posiciones").select("lat,lon,creado,vel").eq("conductor",u)
-    .gte("creado",d+"T00:00:00").lte("creado",d+"T23:59:59").order("creado").limit(2000);
+    .gte("creado",iniDia(d)).lte("creado",finDia(d)).order("creado").limit(2000);
   res.json({ok:true,puntos:data||[]});
 });
 app.post("/admin/conductores/:u/gpsid",authA,async(req,res)=>{
@@ -1913,8 +2175,10 @@ cron.schedule("*/20 * * * *",async()=>{
   try{
     const h=Number(new Date().toLocaleString("en-US",{hour:"2-digit",hour12:false,timeZone:"America/Lima"}));
     if(h<6||h>20)return;                       // solo en horario de trabajo
-    const HORAS=num(process.env.ALERTA_QUIETO_H,1,12)||3;
-    const desde=new Date(Date.now()-HORAS*3600000).toISOString();
+    const _pd=await getParams();
+    const MIN=num(_pd.operacion&&_pd.operacion.min_detenido,5,720,0)||((num(process.env.ALERTA_QUIETO_H,1,12)||3)*60);
+    const HORAS=MIN/60, HORAS_TXT=(MIN%60===0)?(MIN/60)+" h":MIN+" min";
+    const desde=new Date(Date.now()-MIN*60000).toISOString();
     const{data:cs}=await db.from("conductores").select("usuario,nombre").eq("activo",true);
     const quietos=[];
     for(const c of (cs||[])){
@@ -1936,8 +2200,8 @@ cron.schedule("*/20 * * * *",async()=>{
     if(quietos.length){
       const lista=quietos.join(", ");
       await evento("camion_detenido","🛑 "+(quietos.length>1?quietos.length+" camiones detenidos":"Camión detenido — "+lista),
-        lista+": "+HORAS+" h en el mismo lugar y sin registrar ventas. Puede ser avería, bloqueo de vía o un problema.","");
-      avisarAdmin("🛑 "+HORAS+" h detenido(s) y sin ventas: "+lista);
+        lista+": "+HORAS_TXT+" en el mismo lugar y sin registrar ventas. Puede ser avería, bloqueo de vía o un problema.","");
+      avisarAdmin("🛑 "+HORAS_TXT+" detenido(s) y sin ventas: "+lista,"camion_detenido");
     }
   }catch(e){console.error("cron quieto:",e.message);}
 },{timezone:"America/Lima"});
@@ -1950,23 +2214,33 @@ cron.schedule("0 7 * * *",async()=>{
     const{data:vs}=await db.from("ventas").select("tienda_id,creado").order("creado",{ascending:false}).limit(2000);
     const ult={};(vs||[]).forEach(v=>{if(v.tienda_id&&!(v.tienda_id in ult))ult[v.tienda_id]=v.creado;});
     const frias=(tds||[]).filter(t=>{const u=ult[t.id];return u?((Date.now()-new Date(u).getTime())/86400000)>=D:false;});
-    if(frias.length)await evento("inactivas","😴 "+frias.length+" tienda(s) sin comprar hace "+D+"+ días",frias.map(t=>t.nombre).join(", ")+". Revisa si conviene visitarlas o si dejaron de trabajar contigo.","");
+    if(frias.length){await evento("inactivas","😴 "+frias.length+" tienda(s) sin comprar hace "+D+"+ días",frias.map(t=>t.nombre).join(", ")+". Revisa si conviene visitarlas o si dejaron de trabajar contigo.","");
+      avisarAdmin("😴 "+frias.length+" tienda(s) sin comprar hace "+D+"+ días: "+frias.map(t=>t.nombre).slice(0,8).join(", "),"inactivas");}   /* 177 */
   }catch(e){console.error("cron inactivas:",e.message);}
 },{timezone:"America/Lima"});
 
 // ════════ INFORME DIARIO 22:00 (hora Perú) ════════
-cron.schedule("0 22 * * *",async()=>{
+cron.schedule("0 * * * *",async()=>{
   try{
-    const{data:vs}=await db.from("ventas").select("*").gte("creado",hoy()+"T00:00:00");
+    /* 175 · corre cada hora y solo actúa a la hora elegida en Configuración (antes fija a las 22) */
+    const _pi=await getParams(),HI=num(_pi.operacion&&_pi.operacion.hora_informe,0,23,22);
+    const hLima=Number(new Date().toLocaleString("en-US",{hour:"2-digit",hour12:false,timeZone:"America/Lima"}))%24;
+    if(hLima!==HI)return;
+    const{data:vs0}=await db.from("ventas").select("*").gte("creado",iniDia(hoy()));
+    const vs=(vs0||[]).filter(v=>!v.anulada);
     const tot=(vs||[]).reduce((s,v)=>s+Number(v.total||0),0);
     const por={};(vs||[]).forEach(v=>{por[v.conductor]=(por[v.conductor]||0)+Number(v.total||0)});
     let analisis="";
     if(anthropic){try{const r=await anthropic.messages.create({model:MODELO_IA,max_tokens:300,system:"Eres analista de una distribuidora de panes en Perú. Un párrafo ejecutivo en español, máx 80 palabras: lo importante del día, alertas y qué mirar mañana.",messages:[{role:"user",content:JSON.stringify({fecha:hoy(),total:tot,porConductor:por,ventas:(vs||[]).length})}]});analisis="\n\nANÁLISIS\n"+r.content[0].text;}catch(e){console.log("IA informe:",e.message);}}
-    await avisarAdmin("📊 INFORME "+hoy()+"\nVentas: S/"+tot.toFixed(2)+" ("+(vs||[]).length+" entregas)\n"+Object.entries(por).map(([k,v])=>k+": S/"+v.toFixed(2)).join("\n")+analisis);
+    await avisarAdmin("📊 INFORME "+hoy()+"\nVentas: S/"+tot.toFixed(2)+" ("+(vs||[]).length+" entregas)\n"+Object.entries(por).map(([k,v])=>k+": S/"+v.toFixed(2)).join("\n")+analisis,"informe",true);
   }catch(e){console.error("Informe:",e.message);}
 },{timezone:"America/Lima"});
 // Limpieza de logs a 30 días
 cron.schedule("0 3 * * *",async()=>{const lim=new Date(Date.now()-30*86400000).toISOString();await db.from("logs").delete().lt("creado",lim).neq("tipo","admin");},{timezone:"America/Lima"});
 
+/* 175 · ruta que no existe → JSON (antes HTML 404: la app lo confundía con falta de señal) */
+app.use((req,res)=>res.status(404).json({ok:false,error:"Ruta no existe en el servidor: "+req.method+" "+req.path}));
+app.use((err,req,res,next)=>{console.error("ERROR "+req.method+" "+req.path+":",err&&err.message);
+  if(res.headersSent)return;res.status(err&&err.status||500).json({ok:false,error:(err&&err.status===400)?"Datos inválidos (JSON)":"Error interno del servidor"});});
 const PORT=process.env.PORT||3000;
 app.listen(PORT,()=>console.log("Servidor v5.0 en puerto "+PORT+" · IA solo informes · Twilio solo alertas al dueño"));

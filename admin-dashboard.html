@@ -1601,6 +1601,7 @@ window.abrirTienda=async function(i){
  var tipos=(PARAMS_A.tipos_tienda&&PARAMS_A.tipos_tienda.length?PARAMS_A.tipos_tienda:['bodega','minimarket','puesto','mayorista','otro'])
   .map(function(x){return '<option value="'+x+'"'+(t.tp===x?' selected':'')+'>'+x+'</option>'}).join('');
  var h='<div class="card"><div class="ct">✏️ '+tnomA(t)+'</div>'
+ +'<button onclick="cerrarEdicion()" style="background:none;border:1.5px solid var(--linea);margin-bottom:10px">← Volver a la lista</button>'
  +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">'
  +'<input id="et-nom" value="'+(t.n||'')+'" placeholder="Nombre">'
  +'<select id="et-zona">'+(zonas?'<option value="">— sin zona —</option>'+zonas:'<option value="">— aún no hay zonas creadas —</option>')+'</select>'
@@ -1614,7 +1615,7 @@ window.abrirTienda=async function(i){
  +'</div><input id="et-not" value="'+(t.no||'')+'" placeholder="Notas" style="margin-top:9px">'
  +'<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
  +'<button onclick="guardarTiendaAdm()" style="background:#1D4ED8;color:#fff;border:none">Guardar</button>'
- +'<button onclick="TSEL=-1;render()" style="background:none">Cerrar</button></div></div>'
+ +'<button onclick="cerrarEdicion()" style="background:none">Cerrar sin guardar</button></div></div>'
  +'<div class="card"><div class="ct">🕘 Historial de cambios</div><div id="t-hist" style="font-size:12px;line-height:1.6">Cargando…</div></div>';
  document.getElementById('content').innerHTML=h;
  var r=await apiA('/admin/tiendas/'+t.id+'/historial');
@@ -1766,47 +1767,56 @@ if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='almacen'})){
  var ki=SECS.findIndex(function(s){return s[0]==='kardex'});
  SECS.splice(ki+1,0,['almacen','🏬','Almacén']);
 }
-window.ALM={stock:{},movimientos:[]};
+window.ALM={stock:{},prods:[],movimientos:[]};
 var _r=render;window.render=function(){
  if(CUR==='almacen'){try{document.getElementById('content').innerHTML=rAlmacen()}catch(e){console.error(e)}if(typeof nav==='function')nav();return;}
  _r();
 };
 window.rAlmacen=function(){
+ /* 176 · un solo inventario, producto por producto: el mismo que usan los envíos.
+    Antes: una cuenta aparte por categoría y un ajuste que no movía el stock real. */
  var a=(PARAMS_A.almacen)||{};
  var cats=(typeof CATC!=='undefined')?CATC:[];
- var total=0;
+ var prods=(ALM.prods||[]),total=0,usadas={};
  var filas=cats.map(function(x){
-  var q=Number(ALM.stock[x[0]]||0);total+=q;
-  return '<div style="display:grid;grid-template-columns:1fr 90px 90px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--linea)">'
-  +'<div style="font-size:13px">'+x[1]+'</div>'
-  +'<div style="text-align:right;font-weight:800;font-size:14px;color:'+(q>0?'#2F6B4F':'var(--tenue)')+'">'+q+'</div>'
-  +'<input id="alm-'+x[0]+'" type="number" placeholder="0" style="width:100%">'
-  +'</div>'}).join('');
+  var ps=prods.filter(function(p){return p.cat===x[0]});usadas[x[0]]=1;
+  var q=ps.reduce(function(s2,p){return s2+Number(p.cant||0)},0);total+=q;
+  return '<div style="padding:8px 0;border-bottom:1px solid var(--linea)"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px">'+x[1]+'</span><b style="font-size:14px;color:'+(q>0?'#2F6B4F':'var(--tenue)')+'">'+q+'</b></div>'
+   +(ps.length?'<div style="font-size:11.5px;opacity:.75;margin-top:3px;line-height:1.6">'+ps.map(function(p){return p.n+' <b>'+p.cant+'</b>'}).join(' · ')+'</div>':'')+'</div>';
+ }).join('');
+ var otros=prods.filter(function(p){return !usadas[p.cat]});
+ if(otros.length){var qo=otros.reduce(function(s2,p){return s2+Number(p.cant||0)},0);total+=qo;
+  filas+='<div style="padding:8px 0;border-bottom:1px solid var(--linea)"><div style="display:flex;justify-content:space-between"><span style="font-size:13px">Otras categorías</span><b>'+qo+'</b></div><div style="font-size:11.5px;opacity:.75;margin-top:3px">'+otros.map(function(p){return p.n+' <b>'+p.cant+'</b>'}).join(' · ')+'</div></div>';}
+ var MOVS=ALM.movimientos||[];
  return '<div class="card"><div class="ct">🏬 '+(a.nombre||'Almacén')+'</div>'
- +(a.ref?'<div style="font-size:12px;opacity:.7;margin-bottom:10px">'+a.ref+'</div>':'')
- +'<div style="display:grid;grid-template-columns:1fr 90px 90px;gap:8px;font-size:11px;opacity:.6;padding-bottom:4px"><div>Categoría</div><div style="text-align:right">En almacén</div><div style="text-align:right">Ajuste</div></div>'
- +filas
- +'<div style="display:flex;justify-content:space-between;padding-top:10px;font-weight:800"><span>Total guardado</span><span>'+total+' unidades</span></div>'
- +'<input id="alm-nota" placeholder="Motivo del ajuste" style="margin-top:10px">'
- +'<div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap">'
- +'<button onclick="almMov(\'retorno\')" style="flex:1;background:#2F7D4F;color:#fff;border:none">➕ Ingresar al almacén</button>'
- +'<button onclick="almMov(\'salida\')" style="flex:1;background:none">➖ Sacar del almacén</button></div>'
- +'<button onclick="almCargar()" style="width:100%;margin-top:9px;background:none">🔄 Actualizar</button></div>'
- +'<div class="card"><div class="ct">Movimientos ('+ALM.movimientos.length+')</div>'
- +(ALM.movimientos.length?ALM.movimientos.map(function(m){
-   var det=String(m.detalle||'');var obj={};try{obj=JSON.parse(det.split(' · ')[0])}catch(e){}
-   var txt=Object.keys(obj).map(function(k){var c=cats.find(function(x){return x[0]===k});return (c?c[1]:k)+' '+obj[k]}).join(', ');
-   return '<div style="padding:8px 0;border-bottom:1px solid var(--linea);font-size:12.5px"><b>'+(m.tipo==='almacen_retorno'?'➕ Ingreso':'➖ Salida')+'</b> · '+(m.conductor||'')+' · '+fechaHora(m.creado)
-   +'<div style="opacity:.75">'+(txt||det)+'</div></div>'}).join('')
-  :'<div style="font-size:12px;opacity:.6">Sin movimientos. Aparecerán cuando un conductor deje su sobrante al liquidar.</div>')+'</div>';
+  +(a.ref?'<div style="font-size:12px;opacity:.7;margin-bottom:10px">'+a.ref+'</div>':'')
+  +'<div style="display:flex;justify-content:space-between;font-size:11px;opacity:.6;padding-bottom:4px"><span>Categoría y productos</span><span>En almacén</span></div>'
+  +filas
+  +'<div style="display:flex;justify-content:space-between;padding-top:10px;font-weight:800"><span>Total guardado</span><span>'+total+' unidades</span></div>'
+  +'<button onclick="almCargar()" style="width:100%;margin-top:9px;background:none">🔄 Actualizar</button></div>'
+  +'<div class="card"><div class="ct">⚖️ Ajustar el conteo del almacén</div>'
+  +'<div style="font-size:11.5px;opacity:.7;margin-bottom:8px;line-height:1.5">Para corregir el stock cuando cuentas y no coincide, o cuando entra mercadería de producción. Marca producto por producto.</div>'
+  +pickerHTML('aj')
+  +'<input id="alm-nota" placeholder="Motivo del ajuste (ej: conteo del lunes, llegó de producción)" style="margin-top:4px">'
+  +'<div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap">'
+  +'<button onclick="almMov(\'ingreso\')" style="flex:1;background:#2F7D4F;color:#fff;border:none">➕ Ingresar al almacén</button>'
+  +'<button onclick="almMov(\'salida\')" style="flex:1;background:none">➖ Sacar del almacén</button></div></div>'
+  +'<div class="card"><div class="ct">Movimientos del almacén ('+MOVS.length+')</div>'
+  +(MOVS.length?MOVS.map(function(m){var c=Number(m.cant||0);
+    return '<div style="padding:8px 0;border-bottom:1px solid var(--linea);font-size:12.5px"><b style="color:'+(c>=0?'#2F6B4F':'#B23B2E')+'">'+(c>=0?'➕ ':'➖ ')+Math.abs(c)+'</b> '+m.prod
+     +'<div style="opacity:.7;font-size:11.5px">'+(m.motivo||'')+(m.de?(' · '+m.de):'')+' · '+(typeof fechaHora==='function'?fechaHora(m.creado):m.creado)+'</div></div>'}).join('')
+   :'<div style="font-size:12px;opacity:.6">Sin movimientos todavía.</div>')+'</div>';
 };
 window.almCargar=async function(){var r=await apiA('/admin/almacen');if(r&&r.ok){ALM=r;if(CUR==='almacen')render();}};
 window.almMov=async function(tipo){
- var items={},hay=false;
- (typeof CATC!=='undefined'?CATC:[]).forEach(function(x){var v=+((document.getElementById('alm-'+x[0])||{}).value)||0;if(v>0){items[x[0]]=v;hay=true;}});
- if(!hay)return alert('Escribe cuánto ingresa o sale en la columna Ajuste.');
- var r=await apiA('/admin/almacen/ajuste',{tipo:tipo,items:items,nota:(document.getElementById('alm-nota')||{}).value||''});
- if(r&&r.ok){await almCargar();alert('✓ Registrado');}else alert('No se pudo registrar');
+ var it=(typeof pkItems==='function')?pkItems('aj'):[],prods={},t=0;
+ it.forEach(function(x){var q=Number(x&&x.c)||0;if(q>0&&x.id){prods[x.id]=(prods[x.id]||0)+q;t+=q;}});
+ if(!t)return alert('Marca con + los productos y cantidades del ajuste.');
+ var nota=((document.getElementById('alm-nota')||{}).value||'').trim();
+ if(!confirm((tipo==='salida'?'Sacar ':'Ingresar ')+t+' unidades '+(tipo==='salida'?'del':'al')+' almacén.\n\n¿Confirmas el ajuste?'))return;
+ var r=await apiA('/admin/almacen/ajuste',{tipo:tipo,prods:prods,nota:nota});
+ if(r&&r.ok){if(typeof pkReset==='function')pkReset('aj');await almCargar();alert('✓ Ajuste registrado');}
+ else alert('No se pudo registrar: '+((r&&r.error)||'sin respuesta'));
 };
 if(CFGA.API&&CFGA.TOKEN)setTimeout(almCargar,900);
 })();
@@ -1940,8 +1950,16 @@ if(typeof rBandeja==='function'){var _rb=rBandeja;window.rBandeja=function(){
 
 /* ══ 4. Editar tienda: la pantalla ya no se regresa ══ */
 window.MODO_EDIT=false;
-if(typeof abrirTienda==='function'){var _at=abrirTienda;window.abrirTienda=function(i){MODO_EDIT=true;return _at(i);};}
+if(typeof abrirTienda==='function'){var _at=abrirTienda;window.abrirTienda=function(i){MODO_EDIT=true;window._editDesde=Date.now();return _at(i);};}
 var _r=render;window.render=function(){
+ /* El modo edición bloquea el repintado para no borrar el formulario
+    mientras se escribe. Si el bloqueo se queda puesto, la pantalla se
+    congela — era lo que pasaba con el botón Cerrar. Se libera solo en dos
+    casos: si ya no hay ficha elegida, o si el formulario no está en
+    pantalla (con un margen de 1,2 s para no soltarlo mientras se abre). */
+ if(MODO_EDIT&&(typeof TSEL==='undefined'||TSEL<0))window.MODO_EDIT=false;
+ if(MODO_EDIT&&!document.getElementById('et-nom')
+    &&(Date.now()-(window._editDesde||0))>1200)window.MODO_EDIT=false;
  if(MODO_EDIT&&CUR==='tiendas'){setTimeout(limpiarTop,20);return;}   /* no repintar encima */
  _r();setTimeout(limpiarTop,20);
 };
@@ -2702,54 +2720,7 @@ window.catVaciarTipo=async function(){
 };
 })();
 </script>
-<script id="v5nuevos">
-(function(){
-/* ═══ Añadir producto o categoría sin tocar lo que ya existe ═══ */
-window.prodAgregar=async function(){
- var el=document.getElementById('np-nom');
- var n=el?el.value.trim():'';if(!n)return alert('Escribe el nombre del producto.');
- var c=CATA[CATCAT];if(!c)return;
- if((c.prods||[]).some(function(p){return (p.n||'').toLowerCase()===n.toLowerCase()}))
-  return alert('Ya hay un producto con ese nombre en esta categoría.');
- var pv=parseFloat((document.getElementById('np-pv')||{}).value);
- var cuerpo={id:c.id+'_'+slug(n),cat:c.id,nombre:n,costo:0,precio:0,precios:{}};
- if(!isNaN(pv)&&pv>0){
-  if(TIPOSEL==='general'){
-   if(!confirm('Vas a crear "'+n+'" con precio general S/'+pv.toFixed(2)+'.\n\nLo usarán TODOS los tipos de tienda que no tengan precio propio.\n\n¿Continuar? (Cancela y elige un tipo si solo quieres ese precio para uno.)'))return;
-   cuerpo.precio=pv;
-  }else cuerpo.precios[TIPOSEL]=pv;             /* solo para el tipo elegido */
- }
- cuerpo.precio=cuerpo.precio||0;                /* nunca un general por descuido */
- var r=await apiA('/admin/catalogo/producto',cuerpo);
- if(!(r&&r.ok))return alert('No se pudo crear: '+((r&&r.error)||'sin respuesta del servidor'));
- var id=r.id||cuerpo.id;
- c.prods.push({id:id,n:n});
- CATE[id]={precio:cuerpo.precio,costo:0};
- PRECIOS[id]=Object.assign({},cuerpo.precios);
- if(el)el.value='';
- var pvi=document.getElementById('np-pv');if(pvi)pvi.value='';
- await cargarPreciosTipo();
- renderForzado();
- if(!isNaN(pv)&&pv>0&&TIPOSEL!=='general')
-  setTimeout(function(){alert('✓ "'+n+'" creado con precio S/'+pv.toFixed(2)+' solo para '+TIPOSEL+'. Los demás tipos usarán el precio de la categoría hasta que les pongas uno.')},60);
-};
-/* categoría nueva: nombre libre y sin precios de tipo heredados */
-window.catAgregar=async function(){
- var el=document.getElementById('nc-nom');
- var n=el?el.value.trim():'';if(!n)return alert('Escribe el nombre de la categoría.');
- var base=slug(n).slice(0,20),id=base,k=2;
- while(CATA.find(function(x){return x.id===id})){id=base.slice(0,18)+'_'+k;k++;if(k>50)break;}
- CATA.push({id:id,nom:n,
-  emoji:((document.getElementById('nc-emo')||{}).value||'').trim()||'📦',
-  precio:parseFloat((document.getElementById('nc-pre')||{}).value)||0,prods:[]});
- await catsGuardar();
- CATCAT=CATA.length-1;
- if(el)el.value='';
- renderForzado();
- setTimeout(function(){alert('✓ Categoría "'+n+'" creada. Sus productos empiezan sin precio en todos los tipos de tienda: ponles el precio de categoría por tipo o uno por producto.')},60);
-};
-})();
-</script>
+<!-- 176 · se quitó v5nuevos: sus prodAgregar/catAgregar los reemplazaba v5dupids y usaban slug(), privada de otro bloque -->
 <script id="v5dupids">
 (function(){
 /* ═══ Hay casillas repetidas con el mismo id (dos tarjetas de catálogo).
@@ -3240,26 +3211,7 @@ window.confirmarCierre=async function(id,estado){
   alert(estado==='observada'?'Liquidación marcada con observación.':'✓ Liquidación confirmada.');
  }else alert('No se pudo guardar.');
 };
-/* lista de cierres con estado y acceso al informe */
-if(typeof rReportes==='function'){var _rr=rReportes;window.rReportes=function(){
- var h=_rr.apply(this,arguments);
- try{
-  var cs=(window.CIERRES||[]);
-  if(cs.length){
-   var lista='<div class="card"><div class="ct">Liquidaciones</div>'
-    +cs.slice(0,15).map(function(c){
-      var est=c.estado||'pendiente';
-      var col=est==='confirmada'?'#2F6B4F':(est==='observada'?'#B23B2E':'#B97A1F');
-      return '<div onclick="verCierre('+c.id+')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--linea)">'
-       +'<div><b style="font-size:12.5px">'+(c.conductor||'—')+'</b>'
-       +'<div style="font-size:10.5px;opacity:.65">'+(c.fin?new Date(c.fin).toLocaleDateString('es-PE',{day:'2-digit',month:'short'}):'')
-       +(Number(c.diferencia)?(' · diferencia S/'+Number(c.diferencia).toFixed(2)):' · cuadra')+'</div></div>'
-       +'<span style="font-size:10.5px;font-weight:800;color:'+col+'">'+est+'</span></div>';
-    }).join('')+'</div>';
-   h=lista+h;
-  }
- }catch(e){}
- return h;};}
+/* 176 · se quitó un envoltorio de rReportes, sección que no existe (la lista vive en Cierres) */
 })();
 </script>
 <script id="v5cerrargps">
@@ -3394,8 +3346,8 @@ if(typeof cargarAdm==='function'){var _ca=cargarAdm;window.cargarAdm=async funct
  var r=await _ca.apply(this,arguments);
  await catCargar();
  return r;};}
-var _ir=window.irAdm;
-if(typeof _ir==='function'){window.irAdm=function(s){
+var _ir=window.ir;   /* 176 · antes window.irAdm, que no existe: esto nunca corría */
+if(typeof _ir==='function'){window.ir=function(s){
  var r=_ir.apply(this,arguments);
  if(s==='kardex'||s==='catalogo'||s==='pedidos')catCargar().then(function(){try{renderForzado()}catch(e){}});
  return r;};}
@@ -3558,12 +3510,7 @@ if(typeof rAlmacen==='function'){var _ra=rAlmacen;window.rAlmacen=function(){
   catch(e){window.CATC=guardo;throw e;}
  };
 });
-/* 3. El envío al almacén usa los identificadores reales */
-if(typeof almGuardarStock==='function'){var _ag=almGuardarStock;window.almGuardarStock=function(){
- var guardo=window.CATC;window.CATC=catsReales();
- try{var r=_ag.apply(this,arguments);window.CATC=guardo;return r;}
- catch(e){window.CATC=guardo;throw e;}
-};}
+/* 176 · se quitó un envoltorio de almGuardarStock, función que no existe */
 })();
 </script>
 <div id="v5velo-menu" onclick="cerrarMenuMovil()"></div>
@@ -3618,7 +3565,18 @@ var META={
  almacen:{n:'Almacén',i:'🏬',acc:null},
  visita:{n:'Visita',i:'👣',acc:null},
  usuario:{n:'Usuario',i:'👤',acc:null},
- respaldo:{n:'Respaldo',i:'💾',acc:null}
+ respaldo:{n:'Respaldo',i:'💾',acc:null},
+ /* 176 · avisos nuevos: antes caían como genéricos y sin botones (una entrega de efectivo
+    o un ajuste de conteo no se podían confirmar) */
+ entrega:{n:'Entrega de efectivo',i:'💵',acc:{si:'Confirmar que lo recibí',no:'No lo recibí',
+   ayuda:'Confirmar: se descuenta de lo que debe rendir en su liquidación. Si no lo recibiste, recházalo y no se descuenta.'}},
+ ajuste:{n:'Ajuste de conteo',i:'⚖️',acc:{si:'Aceptar ajuste',no:'Rechazar',
+   ayuda:'Aceptar descuenta esas unidades de su stock; rechazar lo deja como estaba.'}},
+ incidente:{n:'Robo o incidente',i:'🚨',acc:null},
+ alerta:{n:'Alerta',i:'🔔',acc:null},
+ credito_aviso:{n:'Venta al crédito',i:'💳',acc:null},
+ credito_alto:{n:'Deuda alta',i:'💳',acc:null},
+ entrega_lejos:{n:'Venta lejos de la tienda',i:'📍',acc:null}
 };
 function metaDe(t){return META[t]||{n:t,i:'🔔',acc:null}}
 function hora(f){try{return new Date(f).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
@@ -3845,7 +3803,7 @@ window.guardarConfig=async function(){
     conductor_cambia_precio:chk('ca_cambia')},
   avisos_cfg:{},futuras:{}
  };
- ['tienda_nueva','liquidacion','gastos','credito_sin_permiso','carga','merma','camion_detenido','zona','inactivas']
+ ['tienda_nueva','liquidacion','gastos','credito_sin_permiso','carga','merma','camion_detenido','zona','inactivas','venta_fuera_viaje','incidente','informe']
   .forEach(function(k){cuerpo.avisos_cfg[k]=chk('av_'+k)});
  ['sugerencia_carga','vip_auto','gastos_inusuales','orden_ruta','prediccion_compra']
   .forEach(function(k){cuerpo.futuras[k]=chk('fu_'+k)});
@@ -3893,7 +3851,7 @@ window.rConfig=function(){
  h+=caja('🏢 Negocio',
    campo('neg_nom','Nombre del negocio',v('negocio.nombre',''))
   +campo('neg_tel','WhatsApp del dueño',v('negocio.tel',''),'tel','Ahí llegan los avisos del sistema.')
-  +campo('neg_mon','Símbolo de moneda',v('negocio.moneda','S/')));
+  +campo('neg_mon','Símbolo de moneda',v('negocio.moneda','S/'),'text','Por ahora las apps muestran siempre S/: este dato solo queda guardado.'));
  h+=caja('💳 Crédito y cobranza',
    campo('cr_lim','Límite de crédito por defecto',v('credito_cfg.limite',230),'number','Se aplica a las tiendas que no tengan uno propio.')
   +campo('cr_dias','Días para considerar una deuda vencida',v('credito_cfg.dias_vencida',30),'number')
@@ -3923,7 +3881,7 @@ window.rConfig=function(){
       +'<div style="font-size:11px;opacity:.7;margin-top:2px">Viaje de ~'+m.dias_viaje+' día(s) · liquida en '+m.liquida_en+' · GPS '+m.gps+'</div></div>';
     }).join(''):'<div style="font-size:12px;opacity:.65;margin-bottom:8px">Sin modalidades todavía.</div>')
   +'<button onclick="modAgregar()" style="width:100%;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px;font-weight:700;cursor:pointer">+ Agregar modalidad</button>',
-   'Todos los conductores pueden hacer lo mismo y ven todas las tiendas. La modalidad solo define la duración esperada del viaje, dónde liquida y qué GPS usa.');
+   'Por ahora solo se guarda la lista: todavía no cambia nada en las apps. Se conectará cuando definamos cómo trabajan los conductores independientes.');
  h+=caja('🏬 Almacenes',
    (als.length?als.map(function(a){
      return '<div style="border:1px solid var(--linea);border-radius:10px;padding:9px 11px;margin-bottom:7px">'
@@ -3933,13 +3891,14 @@ window.rConfig=function(){
       +(a.ref?('<div style="font-size:11px;opacity:.7;margin-top:2px">'+a.ref+'</div>'):'')+'</div>';
     }).join(''):'<div style="font-size:12px;opacity:.65;margin-bottom:8px">Solo el almacén principal.</div>')
   +'<button onclick="almAgregar()" style="width:100%;padding:9px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font-size:12px;font-weight:700;cursor:pointer">+ Agregar almacén</button>',
-   'Puedes tener varios. Cada uno guarda su propio stock y puede recibir o enviar mercadería.');
+   'Por ahora el stock vive en un solo almacén (el principal, sección Almacén). Los que agregues aquí solo quedan anotados: todavía no guardan stock propio.');
  var avisos=[['tienda_nueva','Tienda nueva registrada'],['liquidacion','Liquidaciones'],['gastos','Gastos sobre el tope'],
   ['credito_sin_permiso','Crédito sin autorización'],['carga','Cargas con diferencias'],['merma','Mermas'],
-  ['camion_detenido','Camión detenido'],['zona','Ventas fuera de zona'],['inactivas','Tiendas inactivas']];
+  ['camion_detenido','Camión detenido'],['zona','Ventas fuera de zona'],['inactivas','Tiendas inactivas'],
+  ['venta_fuera_viaje','Ventas fuera de viaje'],['incidente','Robos o incidentes'],['informe','Informe diario']];   /* 176 */
  h+=caja('🔔 Qué avisos me llegan por WhatsApp',
    avisos.map(function(a){return inter('av_'+a[0],a[1],v('avisos_cfg.'+a[0],true))}).join(''),
-   'Los que apagues siguen llegando a la Bandeja; solo dejan de sonarte en el teléfono.');
+   'Los que apagues siguen llegando a la Bandeja; solo dejan de sonarte en el teléfono.<div id="wa-estado" style="margin-top:7px;font-weight:700">Comprobando WhatsApp…</div>');
  var fut=[['sugerencia_carga','Sugerir la carga según el historial','Necesita 3 o 4 viajes registrados'],
   ['vip_auto','Marcar tiendas VIP automáticamente','Necesita ~2 meses de ventas'],
   ['gastos_inusuales','Avisar de gastos fuera de lo normal','Necesita ~1 mes de gastos'],
@@ -3947,7 +3906,7 @@ window.rConfig=function(){
   ['prediccion_compra','Predecir cuándo vuelve a comprar cada tienda','Necesita ~3 meses de historial']];
  h+=caja('⏳ Funciones que mejoran con el tiempo',
    fut.map(function(f){return inter('fu_'+f[0],f[1],v('futuras.'+f[0],false),f[2])}).join(''),
-   'Puedes activarlas cuando quieras. Mientras no haya datos suficientes, el sistema lo avisará en vez de inventar resultados.');
+   'En preparación: todavía no hacen nada aunque las enciendas. Cada una se conectará cuando esté probada y haya datos suficientes.');
  h+='<div class="card"><button onclick="guardarConfig()" style="width:100%;padding:12px;border-radius:11px;border:0;background:#2F6B4F;color:#fff;font-size:13px;font-weight:800;cursor:pointer">Guardar configuración</button></div>';
  return h;
 };
@@ -4033,8 +3992,7 @@ window.pintaTabs=function(){
 };
 window.irTab=function(s){
  try{
-  if(typeof irAdm==='function')irAdm(s);
-  else if(typeof ir==='function')ir(s);
+  if(typeof ir==='function')ir(s);   /* 176 */
   window.scrollTo(0,0);
  }catch(e){}
  setTimeout(pintaTabs,120);
@@ -4057,6 +4015,15 @@ setTimeout(pintaTabs,800);
 /* ═══ Selector común, más claro: buscar, ver lo elegido y el total ═══
    Lo usan los tres: pedidos WhatsApp (pd), almacén (al) y carga (cg). */
 var BUSCA={},STOCK={cond:{},alm:{},t:0};
+/* pkSt() vive dentro de otro IIFE y no está en window: desde aquí no se ve.
+   El `typeof pkSt==='function'` de más abajo daba false y se caía al valor
+   por defecto {cat:0}, así que la lista SIEMPRE mostraba la primera
+   categoría por mucho que se tocaran los chips. _PK sí es global. */
+function stDe(p){
+ if(!window._PK)window._PK={};
+ if(!_PK[p])_PK[p]={cat:0,items:{}};
+ return _PK[p];
+}
 var ETIQ={pd:'Total del pedido',al:'Valor de la mercadería',alm:'Valor de la mercadería',cg:'Valor de la carga'};
 function pkEtiqueta(p){return ETIQ[p]||'Total'}
 /* Qué lista de precios usa cada pantalla. Pedidos usa el tipo de la tienda
@@ -4104,7 +4071,7 @@ window.pkBuscar=function(p,v){BUSCA[p]=String(v||'').toLowerCase();pkPinta(p)};
 
 window.pintaProductos=function(p){
  var cont=document.getElementById(p+'-prods');if(!cont)return;
- var st=(typeof pkSt==='function')?pkSt(p):{cat:0,items:{}};
+ var st=stDe(p);
  var q=BUSCA[p]||'';
  var lista=[];
  if(q){
@@ -4137,7 +4104,7 @@ window.pkFijar=function(p,id,v){
  var n=Math.max(0,parseInt(v,10)||0);
  var lim=limiteDe(p,id);
  if(lim!=null&&n>lim){alert('Solo hay '+lim+' disponibles.');n=lim;}
- var st=pkSt(p),cur=(st.items[id]&&st.items[id].c)||0;
+ var st=stDe(p),cur=(st.items[id]&&st.items[id].c)||0;
  pkAdd(p,id,n-cur);
 };
 /* resumen fijo abajo de cada selector */
@@ -4190,8 +4157,8 @@ if(typeof pkPinta==='function'){var _pp=pkPinta;window.pkPinta=function(p){
  try{pintaBuscador(p);pintaProductos(p);pintaResumenFijo(p);}catch(e){console.error('picker:',e)}
  return r;};}
 /* traer stocks al abrir las secciones que los necesitan */
-var _ir=window.irAdm;
-if(typeof _ir==='function'){window.irAdm=function(s){
+var _ir=window.ir;   /* 176 · antes window.irAdm, que no existe: esto nunca corría */
+if(typeof _ir==='function'){window.ir=function(s){
  var r=_ir.apply(this,arguments);
  if(s==='almacen'||s==='kardex')cargarStocks().then(function(){try{['al','alm','cg'].forEach(function(k){if(document.getElementById(k+'-chips'))pkPinta(k)});}catch(e){}});
  return r;};}
@@ -4754,6 +4721,106 @@ if(typeof rConfig==='function'){var _rc=rConfig;window.rConfig=function(){
  }catch(e){}
  return h;
 };}
+})();
+</script>
+<script id="v5salidaP">
+(function(){
+/* ═══ 168 · De todo menú del panel se puede salir ═══
+   El modo edición bloquea el repintado para no borrar el formulario
+   mientras se escribe. Si ese bloqueo se queda puesto, la pantalla se
+   congela: era lo que pasaba con el botón Cerrar. Aquí quedan las salidas
+   garantizadas, y una red por si algo vuelve a dejarlo trabado. */
+
+window.salirDeTodo=function(){
+ try{
+  /* 1) un modal abierto */
+  var mb=document.getElementById('mbg');
+  if(mb&&mb.classList&&mb.classList.contains('on')){
+   if(typeof cerrarModal==='function')cerrarModal(); else mb.classList.remove('on');
+   return true;
+  }
+  /* 2) la ficha de editar tienda */
+  if(window.MODO_EDIT||(typeof TSEL!=='undefined'&&TSEL>=0)){
+   if(typeof cerrarEdicion==='function')cerrarEdicion();
+   else{window.MODO_EDIT=false;try{TSEL=-1}catch(e){}if(typeof render==='function')render();}
+   return true;
+  }
+ }catch(e){}
+ return false;
+};
+
+document.addEventListener('keydown',function(ev){
+ if(ev.key==='Escape'||ev.keyCode===27)salirDeTodo();
+});
+
+/* Red de seguridad: si el modo edición quedó puesto pero el formulario ya
+   no está en pantalla, se libera solo. Sin esto, cualquier fallo dentro de
+   la ficha dejaba el panel congelado hasta recargar. */
+setInterval(function(){
+ try{
+  if(!window.MODO_EDIT)return;
+  if(document.getElementById('et-nom'))return;      /* el formulario sigue ahí */
+  window.MODO_EDIT=false;
+  if(typeof TSEL!=='undefined'&&TSEL>=0){try{TSEL=-1}catch(e){}}
+ }catch(e){}
+},1500);
+
+/* Cambiar de sección siempre sale de la ficha, sin dejar rastro */
+if(typeof ir==='function'){var _ir=ir;window.ir=function(s){
+ try{window.MODO_EDIT=false;if(typeof TSEL!=='undefined')TSEL=-1;}catch(e){}
+ return _ir.apply(this,arguments);
+};}
+})();
+</script>
+<script id="v5arreglos176">
+(function(){
+/* ═══ 176 · Abono desde la ficha de la tienda: ahora sí se registra (antes restaba 50 solo en pantalla) ═══ */
+window.abono=async function(id){
+ var t=(typeof TIENDAS!=='undefined'?TIENDAS:[]).find(function(x){return x.id===id});if(!t)return;
+ var v=prompt('¿Cuánto abonó '+t.n+'? (debe S/'+Number(t.sa||0).toFixed(2)+')','');if(v===null)return;
+ var m=Math.round((parseFloat(String(v).replace(',','.'))||0)*100)/100;
+ if(!(m>0))return alert('Escribe un monto válido.');
+ var r=await apiA('/admin/creditos/abono',{tienda_id:id,monto:m});
+ if(!(r&&r.ok))return alert('No se pudo registrar: '+((r&&r.error)||'sin respuesta del servidor'));
+ t.sa=Number(r.nuevo_saldo||0);
+ try{cerrarModal()}catch(e){}
+ alert('✓ Abono de S/'+Number(r.registrado||m).toFixed(2)+' registrado. Nueva deuda: S/'+t.sa.toFixed(2)+(r.aviso?('\n\n'+r.aviso):''));
+ if(typeof cargarAdm==='function')await cargarAdm();
+ if(typeof render==='function')render();
+};
+
+/* ═══ 176 · Almacén: el selector del ajuste se pinta al abrir la sección ═══ */
+var _rA=window.render;window.render=function(){var r=_rA.apply(this,arguments);
+ try{if(CUR==='almacen')setTimeout(function(){try{pkPinta('aj')}catch(e){}},70);
+  if(CUR==='config')setTimeout(pintaWA,80);}catch(e){}
+ return r;};
+
+/* ═══ 176 · Estado real de WhatsApp en Configuración (el servidor dice qué falta, sin mostrar claves) ═══ */
+window.pintaWA=async function(){
+ var el=document.getElementById('wa-estado');if(!el)return;
+ var r=await apiA('/admin/alertas-estado');if(!(r&&r.ok)){el.textContent='No se pudo comprobar el WhatsApp (sin respuesta del servidor).';return;}
+ var e2=document.getElementById('wa-estado');if(!e2)return;
+ if(r.whatsapp){e2.style.color='#2F6B4F';e2.textContent='✓ WhatsApp activo: los avisos encendidos te llegan al teléfono.';return;}
+ e2.style.color='#B23B2E';
+ e2.innerHTML='⚠️ Hoy el WhatsApp NO está conectado: los avisos solo llegan a la Bandeja.'
+  +(r.falta_en_railway&&r.falta_en_railway.length?('<br><span style="font-weight:500">Falta en Railway (Variables): '+r.falta_en_railway.join(', ')+'. Se obtienen creando una cuenta en Twilio.</span>'):'')
+  +(!r.telefono?'<br><span style="font-weight:500">Falta tu número: escríbelo arriba en «WhatsApp del dueño».</span>':'');
+};
+
+/* ═══ 176 · Cierres: foto del efectivo que manda el conductor al liquidar ═══ */
+if(typeof rCierres==='function'){var _rc=rCierres;window.rCierres=function(){
+ var h=_rc.apply(this,arguments);
+ try{var cf=((typeof CIERRES!=='undefined'&&CIERRES)||window.CIERRES||[]).filter(function(c){return c.tiene_foto});
+  if(cf.length)h+='<div class="card"><div class="ct">📷 Fotos del efectivo ('+cf.length+')</div>'
+   +cf.slice(0,20).map(function(c){return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--linea);font-size:12.5px"><span><b>'+(c.conductor||'—')+'</b> · '+(c.fin?new Date(c.fin).toLocaleDateString('es-PE',{day:'2-digit',month:'short'}):'')+'</span>'
+    +'<button onclick="verFotoCierre('+c.id+')" style="background:none">Ver foto</button></div>'}).join('')+'</div>';
+ }catch(e){}
+ return h;};}
+window.verFotoCierre=async function(id){
+ var r=await apiA('/admin/cierres/'+id+'/foto');
+ if(!(r&&r.ok&&r.foto))return alert('No se pudo abrir la foto: '+((r&&r.error)||'sin respuesta'));
+ var w=window.open('');if(w){w.document.write('<title>Foto del efectivo</title><img src="'+r.foto+'" style="max-width:100%">');}else alert('Permite las ventanas emergentes para ver la foto.');
+};
 })();
 </script>
 </body>
