@@ -357,8 +357,8 @@ window.PARAMS_A=JSON.parse(localStorage.getItem('v5a_params')||'null')||{limite_
 window.savePA=function(){
  if(!PARAMS_A.tipos_tienda||!PARAMS_A.tipos_tienda.length)PARAMS_A.tipos_tienda=['bodega','minimarket','puesto','mayorista','otro'];localStorage.setItem('v5a_params',JSON.stringify(PARAMS_A));};
 
-if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='pedidos'})){var bi=SECS.findIndex(function(s){return s[0]==='bandeja'});SECS.splice(bi+1,0,['pedidos','📩','Pedidos WhatsApp']);}
-window.rPedidos=window.rPedidos||function(){return '<div class="card"><div class="ct">📩 Pedidos WhatsApp</div><div style="font-size:12px;opacity:.6">Cargando…</div></div>'};
+if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='pedidos'})){var bi=SECS.findIndex(function(s){return s[0]==='bandeja'});SECS.splice(bi+1,0,['pedidos','📩','Pedidos']);}
+window.rPedidos=window.rPedidos||function(){return '<div class="card"><div class="ct">📩 Pedidos</div><div style="font-size:12px;opacity:.6">Cargando…</div></div>'};
 window.render=function(){
  var map={resumen:rResumen,bandeja:rBandeja,mapa:rMapa,tiendas:rTiendas,creditos:rCreditos,kardex:rKardex,perdidas:rPerdidas,cierres:rCierres,conductores:rConductores,informe:rInforme,config:rConfig,pedidos:rPedidos};
  try{document.getElementById('content').innerHTML=map[CUR]();}catch(e){console.error(CUR,e);document.getElementById('content').innerHTML='<div class="card"><div class="ct">Sección vacía</div><div style="font-size:12px;opacity:.65;line-height:1.6">Sin datos aún — esta vista analítica se activa cuando el sistema acumule movimiento real (ventas, cierres, kardex).</div></div>';}
@@ -2430,7 +2430,7 @@ if(typeof catCargar==='function'){var _cc=catCargar;window.catCargar=async funct
 </script>
 <script id="v5pedtipo">
 (function(){
-/* ═══ Pedidos WhatsApp: precios y productos del tipo de esa tienda ═══ */
+/* ═══ Pedidos: precios y productos del tipo de esa tienda ═══ */
 function tiendaSel(){
  try{
   var s=document.getElementById('pd-tienda');
@@ -2444,7 +2444,7 @@ window.tipoPedido=function(){
  var t=tiendaSel();return (t&&(t.tp||t.tipo))||'';
 };
 window.pdSetTipo=function(v){PD_TIPO=v;try{pkPinta('pd')}catch(e){}};
-/* selector de tipo dentro de Pedidos WhatsApp */
+/* selector de tipo dentro de Pedidos */
 window.pdTipoChips=function(){
  var TP=(PARAMS_A.tipos_tienda&&PARAMS_A.tipos_tienda.length)?PARAMS_A.tipos_tienda:['bodega','minimarket','puesto','mayorista','otro'];
  var t=tiendaSel(),suyo=(t&&(t.tp||t.tipo))||'';
@@ -2756,7 +2756,7 @@ window.catAgregar=async function(){
  CATCAT=CATA.length-1;
  limpiaCampo('nc-nom');limpiaCampo('nc-emo');limpiaCampo('nc-pre');
  await sincronizarCatalogo();
- alert('✓ Categoría "'+n+'" creada. Ya aparece en Catálogo, en Pedidos WhatsApp y en la app del conductor tras sincronizar.');
+ alert('✓ Categoría "'+n+'" creada. Ya aparece en Catálogo, en Pedidos y en la app del conductor tras sincronizar.');
 };
 window.prodAgregar=async function(){
  var n=valorCampo('np-nom');
@@ -2778,7 +2778,7 @@ window.prodAgregar=async function(){
  c.prods.push({id:id,n:n});CATE[id]={precio:cuerpo.precio,costo:0};PRECIOS[id]=Object.assign({},cuerpo.precios);
  limpiaCampo('np-nom');limpiaCampo('np-pv');
  await sincronizarCatalogo();
- alert('✓ "'+n+'" creado'+((!isNaN(pv)&&pv>0&&TIPOSEL!=='general')?(' con precio S/'+pv.toFixed(2)+' solo para '+TIPOSEL):'')+'. Ya está en Pedidos WhatsApp.');
+ alert('✓ "'+n+'" creado'+((!isNaN(pv)&&pv>0&&TIPOSEL!=='general')?(' con precio S/'+pv.toFixed(2)+' solo para '+TIPOSEL):'')+'. Ya está en Pedidos.');
 };
 
 /* ═══ Un solo lugar que refresca catálogo, pedidos y selectores ═══ */
@@ -3461,7 +3461,7 @@ window.precioOrigen=function(prodId,cat,tipo){
  if(((window.CATE||{})[prodId]||{}).precio>0)return 'precio general del producto';
  return (cat&&Number(cat.precio)>0)?'precio de la categoría':'⚠️ sin precio cargado';
 };
-/* Pedidos WhatsApp usa el cálculo común */
+/* Pedidos usa el cálculo común */
 if(typeof precioPedido==='function'){window.precioPedido=function(prodId,cat){
  return precioPanel(prodId,cat,(typeof tipoPedido==='function')?tipoPedido():null);
 };}
@@ -5075,5 +5075,1075 @@ window.verFotoCierre=async function(id){
 };
 })();
 </script>
+<style id="v5lugares181css">
+/* 181 · árbol de lugares y buscador */
+#lug-velo{position:fixed;inset:0;background:rgba(20,22,18,.55);z-index:3000;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto}
+#lug-caja{background:var(--carta,#fff);color:var(--tinta,#20241E);border-radius:14px;max-width:640px;width:100%;padding:16px 16px 12px;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+#lug-caja input.lug-q{width:100%;height:40px;padding:0 12px;border-radius:10px;border:1px solid var(--linea,#ddd);background:inherit;color:inherit;font-size:15px}
+.lug-arbol{max-height:52vh;overflow:auto;border:1px solid var(--linea,#ddd);border-radius:10px;margin-top:8px;padding:4px 6px}
+.lug-fila{display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid rgba(128,128,128,.12);font-size:13px}
+.lug-fila .ab{width:22px;text-align:center;cursor:pointer;opacity:.6;flex:0 0 auto;user-select:none}
+.lug-fila .nm{flex:1;min-width:0;cursor:pointer}
+.lug-fila .cnt{font-size:11px;opacity:.6;flex:0 0 auto;white-space:nowrap}
+.lug-ck{width:22px;height:22px;border-radius:6px;border:2px solid rgba(128,128,128,.55);display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;cursor:pointer;flex:0 0 auto;user-select:none}
+.lug-ck.si{background:#1D4ED8;border-color:#1D4ED8;color:#fff}
+.lug-ck.par{background:rgba(29,78,216,.15);border-color:#1D4ED8;color:#1D4ED8}
+.lug-res{border:1px solid var(--linea,#ddd);border-radius:10px;margin-top:4px;max-height:220px;overflow:auto}
+.lug-res div{padding:8px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid rgba(128,128,128,.12)}
+.lug-res div:hover{background:rgba(29,78,216,.08)}
+.lug-chip{display:inline-flex;align-items:center;gap:6px;border:1.5px solid #B97A1F;border-radius:999px;padding:4px 10px;font-size:12px;margin:0 6px 6px 0;background:rgba(185,122,31,.08)}
+.lug-chip b{cursor:pointer;color:#B23B2E}
+:is(#content,body) .lug-btn{width:auto!important;min-width:0!important;height:auto!important;min-height:0!important;padding:7px 12px!important;border-radius:9px!important;font-size:12px!important;font-weight:800!important;flex:0 0 auto!important}
+</style>
+<script id="v5lugares181">
+(function(){
+/* ═══ 181 · Fase 1: tipos de conductor y lugares ═══
+   · Empleado / Independiente (antes «ruta fija / de paso»).
+   · Lugares de cada conductor: árbol Departamento → Provincia → Distrito con casillas.
+     Manda el más específico: marcar una provincia y desmarcar un distrito = «menos ese».
+   · Configuración: zona protegida y límite de crédito por lugar.
+   · Ficha de tienda: su lugar (por GPS o corregido), quién la ve en zona protegida.
+   · Bandeja: tiendas por aprobar (es la misma / es nueva / rechazar). */
+var LUG=null;
+function sinTildes(x){return String(x||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');}
+async function cargarLug(forzar){
+ if(LUG&&!forzar)return LUG;
+ var r=await apiA('/admin/lugares');
+ if(r&&r.ok){
+  LUG=r;LUG.D={};LUG.Pv={};LUG.Di={};
+  (r.dep||[]).forEach(function(x){LUG.D[x[0]]=x[1]});
+  (r.prov||[]).forEach(function(x){LUG.Pv[x[0]]=x[1]});
+  (r.dist||[]).forEach(function(x){LUG.Di[x[0]]=x[1]});
+ }
+ return LUG;
+}
+function nomL(p){
+ p=String(p||'');if(!LUG||!p)return p;
+ var a=[];if(p.length>=6&&LUG.Di[p.slice(0,6)])a.push(LUG.Di[p.slice(0,6)]);
+ if(p.length>=4&&LUG.Pv[p.slice(0,4)])a.push(LUG.Pv[p.slice(0,4)]+(p.length===4?' (provincia)':''));
+ if(LUG.D[p.slice(0,2)])a.push(LUG.D[p.slice(0,2)]+(p.length===2?' (departamento)':''));
+ return a.join(', ');
+}
+function esIndep(u){return u&&(u.tipo==='independiente'||u.tipo==='paso');}
+window.tipoTxt=function(t){return (t==='independiente'||t==='paso')?'Independiente':'Empleado'};
+/* nombres: las tiendas por aprobar llevan ⏳ en todo el panel */
+if(typeof tnomA==='function'){var _tn=tnomA;window.tnomA=function(t){var n=_tn(t);return (t&&t.est==='pendiente')?('⏳ '+n):n};}
+
+/* ── buscador de lugares (departamento, provincia o distrito) ── */
+function buscarLugares(q,soloDist){
+ q=sinTildes(q).trim();if(!LUG||q.length<2)return [];
+ var out=[];
+ if(!soloDist){
+  Object.keys(LUG.D).forEach(function(k){if(sinTildes(LUG.D[k]).indexOf(q)>=0)out.push(k)});
+  Object.keys(LUG.Pv).forEach(function(k){if(sinTildes(LUG.Pv[k]).indexOf(q)>=0)out.push(k)});
+ }
+ Object.keys(LUG.Di).forEach(function(k){if(sinTildes(LUG.Di[k]).indexOf(q)>=0)out.push(k)});
+ out.sort(function(a,b){var sa=sinTildes(nomL(a)).indexOf(q)===0?0:1,sb=sinTildes(nomL(b)).indexOf(q)===0?0:1;return sa-sb||a.length-b.length});
+ return out.slice(0,14);
+}
+window.lugBuscador=function(id,soloDist,alElegir){
+ return '<input class="lug-q" id="'+id+'-q" placeholder="Busca un '+(soloDist?'distrito':'departamento, provincia o distrito')+'…" oninput="lugBuscar(\''+id+'\','+(soloDist?1:0)+',\''+alElegir+'\')" style="width:100%">'
+  +'<div class="lug-res" id="'+id+'-r" style="display:none"></div>';
+};
+window.lugBuscar=function(id,soloDist,alElegir){
+ var q=(document.getElementById(id+'-q')||{}).value||'',box=document.getElementById(id+'-r');if(!box)return;
+ var rs=buscarLugares(q,!!soloDist);
+ box.style.display=rs.length?'block':'none';
+ box.innerHTML=rs.map(function(p){return '<div onclick="'+alElegir+'(\''+p+'\')">'+nomL(p)+'</div>'}).join('');
+};
+
+/* ═════════ Árbol de lugares de un conductor ═════════ */
+var ST=null;
+function efectivo(p){
+ var m=null,s=false;
+ Object.keys(ST.inc).forEach(function(r){if(p.indexOf(r)===0&&(!m||r.length>m.length)){m=r;s=true}});
+ Object.keys(ST.exc).forEach(function(r){if(p.indexOf(r)===0&&(!m||r.length>=m.length)){m=r;s=false}});
+ return s;
+}
+function parcial(p){
+ var e=efectivo(p);
+ return Object.keys(ST.inc).some(function(k){return k.length>p.length&&k.indexOf(p)===0&&!e})
+  ||Object.keys(ST.exc).some(function(k){return k.length>p.length&&k.indexOf(p)===0&&e});
+}
+window.lugToggle=function(p){
+ /* casilla a medias → se marca entera; si no, se invierte */
+ var t=parcial(p)?true:!efectivo(p);
+ [ST.inc,ST.exc].forEach(function(S){Object.keys(S).forEach(function(k){if(k.indexOf(p)===0)delete S[k]})});
+ var padre=p.length>2?efectivo(p.slice(0,p.length-2)):false;
+ if(padre!==t)(t?ST.inc:ST.exc)[p]=1;
+ pintarArbol();
+};
+window.lugAbrirNodo=function(p){ST.ab[p]=!ST.ab[p];pintarArbol();};
+function cuentaDist(p){var n=0,s=0;Object.keys(LUG.Di).forEach(function(k){if(k.indexOf(p)===0){n++;if(efectivo(k))s++;}});return [s,n];}
+function fila(p,nivel,nombre,hijos){
+ var e=efectivo(p),pa=parcial(p),c=cuentaDist(p);
+ return '<div class="lug-fila" style="padding-left:'+(nivel*18)+'px">'
+  +(hijos?'<span class="ab" onclick="lugAbrirNodo(\''+p+'\')">'+(ST.ab[p]?'▾':'▸')+'</span>':'<span class="ab"></span>')
+  +'<span class="lug-ck '+(pa?'par':(e?'si':''))+'" onclick="lugToggle(\''+p+'\')">'+(pa?'–':(e?'✓':''))+'</span>'
+  +'<span class="nm" onclick="'+(hijos?'lugAbrirNodo':'lugToggle')+'(\''+p+'\')">'+nombre+'</span>'
+  +(hijos?'<span class="cnt">'+(c[0]?(c[0]+' de '+c[1]+' distritos'):(c[1]+' distritos'))+'</span>':'')
+  +'</div>';
+}
+function resumenST(){
+ var inc=Object.keys(ST.inc).sort(),exc=Object.keys(ST.exc).sort();
+ if(!inc.length)return esIndep(ST.c)?'Sin lugares: <b>no ve ninguna tienda</b>.':'Sin lugares: <b>ve todas las tiendas</b> (como hasta ahora).';
+ return '<b>Ve:</b> '+inc.map(nomL).join(' · ')+(exc.length?('<br><b>Menos:</b> '+exc.map(nomL).join(' · ')):'');
+}
+function pintarArbol(){
+ var box=document.getElementById('lug-arbol');if(!box)return;
+ var q=sinTildes(ST.q||'').trim(),h='';
+ var deps=Object.keys(LUG.D).sort();
+ if(q.length>=2){
+  var hits=buscarLugares(q,false);
+  h=hits.length?hits.map(function(p){return fila(p,0,nomL(p),false)}).join(''):'<div style="padding:10px;font-size:12px;opacity:.6">Nada coincide.</div>';
+ }else{
+  deps.forEach(function(d){
+   h+=fila(d,0,'<b>'+LUG.D[d]+'</b>',true);
+   if(!ST.ab[d])return;
+   Object.keys(LUG.Pv).filter(function(k){return k.indexOf(d)===0}).sort().forEach(function(pv){
+    h+=fila(pv,1,LUG.Pv[pv],true);
+    if(!ST.ab[pv])return;
+    Object.keys(LUG.Di).filter(function(k){return k.indexOf(pv)===0}).sort().forEach(function(di){h+=fila(di,2,LUG.Di[di],false)});
+   });
+  });
+ }
+ box.innerHTML=h;
+ var r=document.getElementById('lug-resumen');if(r)r.innerHTML=resumenST();
+}
+function tiendasProtegidas(){return (typeof TIENDAS!=='undefined'?TIENDAS:[]).filter(function(t){return t.prot&&t.act!==false&&(t.est||'ok')==='ok'})}
+window.lugAbrir=async function(usuario){
+ var L=await cargarLug();if(!L)return alert('No se pudo leer la lista de lugares del servidor.');
+ if(L.falta)return alert('Falta el archivo distritos-peru.json en el servidor. Súbelo al repositorio junto con server-v5.js.');
+ var c=USRS.find(function(u){return u.usuario===usuario});if(!c)return;
+ var Lg=c.lugares||{};ST={c:c,inc:{},exc:{},ab:{},q:''};
+ (Lg.inc||[]).forEach(function(p){ST.inc[p]=1});(Lg.exc||[]).forEach(function(p){ST.exc[p]=1});
+ /* abrir las ramas que ya tienen algo marcado */
+ Object.keys(ST.inc).concat(Object.keys(ST.exc)).forEach(function(p){ST.ab[p.slice(0,2)]=1;if(p.length>4)ST.ab[p.slice(0,4)]=1;});
+ var prot=esIndep(c)?tiendasProtegidas():[];
+ ST.hab={};prot.forEach(function(t){ST.hab[t.id]=(t.hab||[]).indexOf(usuario)>=0});
+ var v=document.createElement('div');v.id='lug-velo';
+ v.innerHTML='<div id="lug-caja">'
+  +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:15px">📍 Lugares de '+c.nombre+'</b><span style="font-size:11.5px;opacity:.7">'+tipoTxt(c.tipo)+'</span></div>'
+  +'<div style="font-size:11.5px;opacity:.7;margin:4px 0 8px;line-height:1.5">Marca dónde vende. Si marcas una provincia y desmarcas un distrito, queda «la provincia menos ese distrito».</div>'
+  +'<div id="lug-resumen" style="font-size:12.5px;line-height:1.5;background:rgba(29,78,216,.06);border-radius:9px;padding:8px 10px;margin-bottom:8px"></div>'
+  +'<input class="lug-q" id="lug-q" placeholder="Buscar un lugar…" oninput="lugQ(this.value)">'
+  +'<div class="lug-arbol" id="lug-arbol"></div>'
+  +(esIndep(c)?('<div style="margin-top:12px"><b style="font-size:13px">🛡️ Tiendas de zona protegida que ve</b>'
+    +'<div style="font-size:11.5px;opacity:.7;margin:2px 0 6px">En zona protegida solo ve las que marques aquí, más las que él registre.</div>'
+    +(prot.length?prot.map(function(t){return '<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12.5px"><input type="checkbox" style="width:18px;height:18px" '+(ST.hab[t.id]?'checked':'')+' onchange="lugHab('+t.id+',this.checked)"> '+tnomA(t)+' <span style="opacity:.55;font-size:11px">· '+(t.lugar||'')+'</span></label>'}).join('')
+      :'<div style="font-size:12px;opacity:.6">No hay tiendas en zona protegida.</div>')+'</div>'):'')
+  +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">'
+  +'<button class="lug-btn" onclick="lugCerrar()" style="background:none;border:1px solid var(--linea)">Cancelar</button>'
+  +'<button class="lug-btn" onclick="lugGuardar()" style="background:#1D4ED8;color:#fff;border:none">Guardar lugares</button></div></div>';
+ v.addEventListener('click',function(e){if(e.target===v)lugCerrar()});
+ document.body.appendChild(v);
+ pintarArbol();
+};
+window.lugQ=function(v){if(ST){ST.q=v;pintarArbol();}};
+window.lugHab=function(id,v){if(ST)ST.hab[id]=!!v;};
+window.lugCerrar=function(){var v=document.getElementById('lug-velo');if(v)v.remove();ST=null;};
+window.lugGuardar=async function(){
+ if(!ST)return;var c=ST.c;
+ var r=await apiA('/admin/conductores/'+c.usuario+'/lugares',{inc:Object.keys(ST.inc),exc:Object.keys(ST.exc)});
+ if(!(r&&r.ok))return alert('No se pudo guardar: '+((r&&r.error)||'sin respuesta del servidor'));
+ c.lugares=r.lugares;c.lugares_txt=r.resumen;try{saveU()}catch(e){}
+ /* tiendas protegidas marcadas a mano */
+ var cambios=0;
+ for(var id in (ST.hab||{})){
+  var t=TIENDAS.find(function(x){return String(x.id)===String(id)});if(!t)continue;
+  var tiene=(t.hab||[]).indexOf(c.usuario)>=0;
+  if(tiene!==!!ST.hab[id]){
+   var nuevo=(t.hab||[]).filter(function(u){return u!==c.usuario});if(ST.hab[id])nuevo.push(c.usuario);
+   var r2=await apiA('/admin/tiendas/'+t.id+'/habilitados',{usuarios:nuevo});
+   if(r2&&r2.ok){t.hab=r2.habilitados;cambios++;}
+  }
+ }
+ lugCerrar();
+ alert('✓ Lugares guardados: '+r.resumen+(cambios?('\n'+cambios+' tienda(s) de zona protegida actualizadas.'):'')+'\n\nEl conductor las ve al sincronizar su app.');
+ if(typeof cargarAdm==='function')await cargarAdm();
+ renderForzado();
+};
+
+/* ═════════ Conductores: tipo y lugares ═════════ */
+window.condTipo=async function(u){
+ var s=document.getElementById('ct-'+u);if(!s)return;
+ var r=await apiA('/admin/conductores/'+u+'/editar',{tipo:s.value});
+ if(!(r&&r.ok)){alert((r&&r.error)||'No se pudo cambiar el tipo');var c0=USRS.find(function(x){return x.usuario===u});if(c0)s.value=(esIndep(c0)?'independiente':'empleado');return;}
+ var c=USRS.find(function(x){return x.usuario===u});if(c)c.tipo=s.value;try{saveU()}catch(e){}
+ alert('✓ Tipo cambiado a '+tipoTxt(s.value)+'.');
+ if(typeof cargarAdm==='function')await cargarAdm();renderForzado();
+};
+if(typeof rConductores==='function'){var _rco=rConductores;window.rConductores=function(){
+ var h='';try{h=_rco.apply(this,arguments)}catch(e){}
+ /* selectores viejos «ruta fija / de paso» → empleado / independiente */
+ h=h.replace(/<select id="u-tipo"([^>]*)>[\s\S]*?<\/select>/,'<select id="u-tipo"$1><option value="empleado">Empleado (trabaja contigo)</option><option value="independiente">Independiente</option></select>')
+  .replace(/<select id="ed-t-([a-z0-9_]+)">[\s\S]*?<\/select>/g,function(m,u){var c=USRS.find(function(x){return x.usuario===u});var ind=esIndep(c);
+    return '<select id="ed-t-'+u+'"><option value="empleado"'+(ind?'':' selected')+'>Empleado</option><option value="independiente"'+(ind?' selected':'')+'>Independiente</option></select>'})
+  .replace('El tipo (fijo/de paso) limita su app solo.','El tipo (empleado / independiente) define sus reglas de dinero; sus lugares, qué tiendas ve.');
+ var filas=USRS.map(function(u){
+  var ind=esIndep(u);
+  return '<div style="padding:10px 0;border-bottom:1px solid var(--linea)">'
+   +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:13px;flex:1;min-width:140px">'+u.nombre+' <span style="font-weight:500;opacity:.55;font-size:11.5px">@'+u.usuario+(u.activo===false?' · desactivado':'')+'</span></b>'
+   +'<select id="ct-'+u.usuario+'" onchange="condTipo(\''+u.usuario+'\')" style="width:auto;min-width:150px"><option value="empleado"'+(ind?'':' selected')+'>Empleado</option><option value="independiente"'+(ind?' selected':'')+'>Independiente</option></select>'
+   +'<button class="lug-btn" onclick="lugAbrir(\''+u.usuario+'\')" style="background:#B97A1F;color:#fff;border:none">📍 Elegir lugares</button></div>'
+   +'<div style="font-size:11.5px;opacity:.75;margin-top:4px">'+(u.lugares_txt||((ind?'Sin lugares: no ve ninguna tienda':'Sin lugares: ve todas las tiendas')))+'</div></div>';
+ }).join('');
+ return '<div class="card"><div class="ct">📍 Tipo y lugares de cada conductor</div>'
+  +'<div style="font-size:11.5px;opacity:.7;margin-bottom:6px;line-height:1.5"><b>Empleado:</b> vende tu mercadería y te liquida. <b>Independiente:</b> vende la suya. El tipo solo se puede cambiar entre viajes.</div>'
+  +(USRS.length?filas:'<div style="font-size:12px;opacity:.6">Crea conductores primero.</div>')+'</div>'+h;
+};}
+
+/* ═════════ Configuración: zona protegida y crédito por lugar ═════════ */
+var CFGL=null;
+async function pintarCfgLug(){
+ var box=document.getElementById('cfg-lug');if(!box)return;
+ var L=await cargarLug(true);
+ if(!L){box.innerHTML='No se pudo leer la configuración de lugares.';return;}
+ if(L.falta){box.innerHTML='<div style="color:#B23B2E;font-weight:700">Falta el archivo <b>distritos-peru.json</b> en el servidor: súbelo al repositorio junto con server-v5.js.</div>';return;}
+ if(!CFGL)CFGL={prot:(L.protegidas||[]).slice(),lim:Object.assign({},L.limite_lugar||{})};
+ box.innerHTML='<b style="font-size:13px">🛡️ Zona protegida</b>'
+  +'<div style="font-size:11.5px;opacity:.7;margin:2px 0 6px;line-height:1.5">Ahí un independiente solo ve las tiendas que le habilites una por una (desde su ficha o la de la tienda), más las que él registre. Tus empleados ven todo.</div>'
+  +'<div>'+(CFGL.prot.length?CFGL.prot.map(function(p){return '<span class="lug-chip">'+nomL(p)+' <b onclick="cfgLugQuitar(\''+p+'\')">✕</b></span>'}).join(''):'<span style="font-size:12px;opacity:.6">Ninguna.</span>')+'</div>'
+  +lugBuscador('cfgp',false,'cfgLugProt')
+  +'<div style="margin-top:14px"><b style="font-size:13px">💳 Límite de crédito por lugar</b></div>'
+  +'<div style="font-size:11.5px;opacity:.7;margin:2px 0 6px;line-height:1.5">Las tiendas de ese lugar nacen con este límite (a cada una se le puede cambiar). Manda el lugar más específico. En el resto: S/'+Number(L.limite_credito||230).toFixed(0)+'.</div>'
+  +Object.keys(CFGL.lim).sort().map(function(p){return '<div style="display:flex;align-items:center;gap:8px;padding:5px 0"><span style="flex:1;font-size:12.5px">'+nomL(p)+'</span><span style="opacity:.6">S/</span><input type="number" value="'+CFGL.lim[p]+'" onchange="CFGLlim(\''+p+'\',this.value)" style="width:90px"><button class="lug-btn" onclick="cfgLugQuitarLim(\''+p+'\')" style="background:none;border:none;color:#B23B2E">✕</button></div>'}).join('')
+  +lugBuscador('cfgl',false,'cfgLugLim')
+  +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'
+  +'<button class="lug-btn" onclick="cfgLugGuardar()" style="background:#1D4ED8;color:#fff;border:none">Guardar lugares</button>'
+  +'<button class="lug-btn" onclick="cfgLugRecalc()" style="background:none;border:1px solid var(--linea)">Recalcular el distrito de todas las tiendas por GPS</button></div>'
+  +'<div id="cfg-lug-est" style="font-size:11.5px;font-weight:700;margin-top:6px"></div>'
+  +'<div style="font-size:10.5px;opacity:.55;margin-top:6px">'+(L.fuente||'')+'</div>';
+}
+window.cfgLugProt=function(p){if(CFGL.prot.indexOf(p)<0)CFGL.prot.push(p);pintarCfgLug();};
+window.cfgLugQuitar=function(p){CFGL.prot=CFGL.prot.filter(function(x){return x!==p});pintarCfgLug();};
+window.cfgLugLim=function(p){var v=prompt('Límite de crédito para las tiendas nuevas de '+nomL(p)+' (S/):','100');if(v===null)return;CFGL.lim[p]=Math.max(0,Number(v)||0);pintarCfgLug();};
+window.CFGLlim=function(p,v){CFGL.lim[p]=Math.max(0,Number(v)||0);};
+window.cfgLugQuitarLim=function(p){delete CFGL.lim[p];pintarCfgLug();};
+window.cfgLugGuardar=async function(){
+ var r=await apiA('/admin/lugares/config',{protegidas:CFGL.prot,limite_lugar:CFGL.lim});
+ var e=document.getElementById('cfg-lug-est');
+ if(r&&r.ok){CFGL=null;await cargarLug(true);if(e){e.style.color='#2F6B4F';e.textContent='✓ Guardado';}if(typeof cargarAdm==='function')await cargarAdm();pintarCfgLug();}
+ else{if(e){e.style.color='#B23B2E';e.textContent='No se guardó: '+((r&&r.error)||'sin respuesta');}}
+};
+window.cfgLugRecalc=async function(){
+ if(!confirm('¿Volver a calcular el distrito de todas las tiendas con su GPS?\n\nLas que corregiste a mano no se tocan.'))return;
+ var r=await apiA('/admin/lugares/recalcular',{todas:true});
+ alert(r&&r.ok?('✓ '+r.actualizadas+' tienda(s) cambiaron de distrito.'):'No se pudo: '+((r&&r.error)||'sin respuesta'));
+ if(typeof cargarAdm==='function')await cargarAdm();
+};
+if(typeof rConfig==='function'){var _rcf=rConfig;window.rConfig=function(){
+ var h='';try{h=_rcf.apply(this,arguments)}catch(e){}
+ setTimeout(function(){CFGL=null;pintarCfgLug()},30);
+ return h+'<div class="card"><div class="ct">📍 Lugares</div><div id="cfg-lug" style="font-size:12.5px">Cargando…</div></div>';
+};}
+
+/* ═════════ Ficha de tienda: su lugar y quién la ve ═════════ */
+function evPend(t){return (window.EVENTOS||[]).find(function(e){return e.tipo==='tienda_pend'&&!e.visto&&String(e.ref||'').split('|')[0]===String(t.id)})}
+function botonesPend(e,t){
+ var par=String(e.ref||'').split('|'),dup=par[1]?TIENDAS.find(function(x){return String(x.id)===String(par[1])}):null;
+ var cand=TIENDAS.filter(function(x){return String(x.id)!==String(par[0])&&x.act!==false&&x.est!=='pendiente'&&x.est!=='fusionada'&&x.est!=='rechazada'})
+  .sort(function(a,b){var ta=(t&&a.ub===t.ub)?0:1,tb=(t&&b.ub===t.ub)?0:1;return ta-tb||String(tnomA(a)).localeCompare(String(tnomA(b)))});
+ return '<div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap">'
+  +(dup?('<button onclick="accionPend('+e.id+',\'misma\','+dup.id+')" style="flex:1;min-width:140px;padding:8px;border-radius:9px;border:1.5px solid #1D4ED8;background:rgba(29,78,216,.08);color:#1D4ED8;font-size:11.5px;font-weight:800;cursor:pointer">Es la misma que «'+tnomA(dup)+'»</button>'):'')
+  +'<button onclick="accionPend('+e.id+',\'nueva\')" style="flex:1;min-width:110px;padding:8px;border-radius:9px;border:1.5px solid #2F6B4F;background:#EEF6EE;color:#2F6B4F;font-size:11.5px;font-weight:800;cursor:pointer">Es nueva: aprobar</button>'
+  +'<button onclick="accionPend('+e.id+',\'rechazar\')" style="flex:1;min-width:100px;padding:8px;border-radius:9px;border:1.5px solid #B23B2E;background:none;color:#B23B2E;font-size:11.5px;font-weight:800;cursor:pointer">Rechazar</button></div>'
+  +'<div style="display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap"><select id="fus-'+e.id+'" style="flex:1;min-width:160px;height:36px"><option value="">— Es la misma que otra tienda… —</option>'
+  +cand.slice(0,300).map(function(x){return '<option value="'+x.id+'">'+tnomA(x)+(x.lugar?(' · '+x.lugar.split(',')[0]):'')+'</option>'}).join('')+'</select>'
+  +'<button onclick="accionPend('+e.id+',\'misma\',(document.getElementById(\'fus-'+e.id+'\')||{}).value)" style="padding:8px 12px;border-radius:9px;border:1.5px solid rgba(128,128,128,.4);background:none;color:inherit;font-size:11.5px;font-weight:800;cursor:pointer">Unir</button></div>'
+  +'<div style="font-size:10.5px;opacity:.6;margin-top:5px">«Es la misma» pasa sus ventas, visitas y créditos a la tienda existente, y quien la registró la sigue viendo.</div>';
+}
+window.accionPend=async function(id,accion,destino){
+ if(accion==='misma'&&!destino)return alert('Elige la tienda con la que es la misma.');
+ if(accion==='rechazar'&&!confirm('¿Rechazar esta tienda? Deja de aparecerle a quien la registró.'))return;
+ var r=await apiA('/admin/eventos/'+id+'/accion',{accion:accion,destino:destino?Number(destino):undefined});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ alert('✓ '+(r.hecho||'Listo'));
+ if(typeof cargarAdm==='function')await cargarAdm();
+ renderForzado();
+};
+if(typeof htmlBandeja==='function'){var _hb=htmlBandeja;window.htmlBandeja=function(evs,compacto){
+ var h=_hb.apply(this,arguments);
+ /* nombre e ícono propios (la lista de tipos de la Bandeja vive en otro bloque) */
+ h=h.split('🔔 tienda_pend').join('⏳ Tiendas por aprobar').split('🔔 ⏳ ').join('⏳ ');
+ return h.replace(/<button onclick="archivarGrupo\('(tienda_pend\|[^']*)'\)"[^>]*>[^<]*<\/button>/g,function(m,k){
+  var e=(evs||[]).filter(function(x){return (x.tipo+'|'+String(x.titulo||'').slice(0,60)).replace(/'/g,'')===k})
+   .sort(function(a,b){return new Date(b.creado)-new Date(a.creado)})[0];
+  if(!e)return m;
+  var t=TIENDAS.find(function(x){return String(x.id)===String(e.ref).split('|')[0]});
+  return botonesPend(e,t);
+ });
+};}
+async function cardLugarTienda(i){
+ var t=TIENDAS[i];if(!t)return;var cont=document.getElementById('content');if(!cont||document.getElementById('t-lug'))return;
+ await cargarLug();
+ var inds=USRS.filter(function(u){return esIndep(u)&&u.activo!==false});
+ var e=(t.est==='pendiente')?evPend(t):null;
+ var h='<div class="card" id="t-lug"><div class="ct">📍 Lugar y quién la ve</div>'
+  +(t.est==='pendiente'?('<div style="background:#FDF6E4;border:1px solid #EFDCA8;border-radius:10px;padding:9px 11px;margin-bottom:10px;font-size:12.5px"><b>⏳ Por aprobar.</b> Mientras tanto solo la ve '+(t.conductor||'quien la registró')+'.'+(e?botonesPend(e,t):'')+'</div>'):'')
+  +(t.est==='fusionada'?'<div style="font-size:12.5px;margin-bottom:8px">Unida con otra tienda (ya no se usa).</div>':'')
+  +(t.est==='rechazada'?'<div style="font-size:12.5px;margin-bottom:8px;color:#B23B2E">Rechazada.</div>':'')
+  +'<div style="font-size:13px"><b>'+(t.lugar||'Sin ubicar')+'</b>'+(t.ub?' <span style="opacity:.55;font-size:11px">('+t.ub+(t.lug_manual?' · corregido a mano':' · por GPS')+')</span>':' <span style="opacity:.6;font-size:11.5px">— no tiene GPS o cae fuera del mapa</span>')+'</div>'
+  +(t.prot?'<div style="font-size:12px;margin-top:4px">🛡️ Zona protegida</div>':'')
+  +'<div style="font-size:11.5px;opacity:.7;margin-top:4px">Límite de crédito para tiendas nuevas de este lugar: S/'+Number(t.li_lugar||0).toFixed(0)+'</div>'
+  +'<div style="margin-top:10px"><b style="font-size:12.5px">Corregir el distrito</b></div>'
+  +lugBuscador('tlug',true,'tLugPoner')
+  +'<div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap"><button class="lug-btn" onclick="tLugAuto()" style="background:none;border:1px solid var(--linea)">Calcular por su GPS</button></div>';
+ if(t.prot){
+  h+='<div style="margin-top:12px"><b style="font-size:12.5px">Independientes que la ven</b>'
+   +'<div style="font-size:11.5px;opacity:.7;margin:2px 0 4px">En zona protegida solo la ven los que marques (y quien la registró).</div>'
+   +(inds.length?inds.map(function(u){return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12.5px"><input type="checkbox" class="t-hab" value="'+u.usuario+'" style="width:18px;height:18px" '+((t.hab||[]).indexOf(u.usuario)>=0?'checked':'')+'> '+u.nombre+'</label>'}).join('')
+     +'<button class="lug-btn" onclick="tHabGuardar()" style="background:#1D4ED8;color:#fff;border:none;margin-top:6px">Guardar quién la ve</button>'
+     :'<div style="font-size:12px;opacity:.6">No hay conductores independientes.</div>')+'</div>';
+ }
+ h+='</div>';
+ var cards=cont.querySelectorAll('.card');
+ if(cards.length)cards[0].insertAdjacentHTML('afterend',h);else cont.insertAdjacentHTML('beforeend',h);
+}
+window.tLugPoner=async function(ub){
+ var t=TIENDAS[TSEL];if(!t)return;
+ if(!confirm('¿Poner a «'+tnomA(t)+'» en '+nomL(ub)+'?\n\nQueda corregido a mano: el GPS ya no lo cambia.'))return;
+ var r=await apiA('/admin/tiendas/'+t.id+'/lugar',{ubigeo:ub});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ await cargarAdm();abrirTienda(TSEL);
+};
+window.tLugAuto=async function(){
+ var t=TIENDAS[TSEL];if(!t)return;
+ var r=await apiA('/admin/tiendas/'+t.id+'/lugar',{auto:true});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ alert(r.lugar?('✓ Por su GPS está en '+r.lugar):'Su GPS no cae dentro de ningún distrito (o no tiene GPS).');
+ await cargarAdm();abrirTienda(TSEL);
+};
+window.tHabGuardar=async function(){
+ var t=TIENDAS[TSEL];if(!t)return;
+ var us=[].slice.call(document.querySelectorAll('.t-hab')).filter(function(c){return c.checked}).map(function(c){return c.value});
+ var otros=(t.hab||[]).filter(function(u){var c=USRS.find(function(x){return x.usuario===u});return !esIndep(c)});
+ var r=await apiA('/admin/tiendas/'+t.id+'/habilitados',{usuarios:otros.concat(us)});
+ alert(r&&r.ok?'✓ Guardado':'No se pudo: '+((r&&r.error)||'sin respuesta'));
+ if(r&&r.ok){t.hab=r.habilitados;}
+};
+if(typeof abrirTienda==='function'){var _abt=abrirTienda;window.abrirTienda=async function(i){
+ var r=await _abt.apply(this,arguments);
+ try{await cardLugarTienda(i)}catch(e){console.error('lugar tienda:',e)}
+ return r;};}
+/* crédito: propone el límite del lugar de la tienda */
+if(typeof tCred==='function'){var _tcr=tCred;window.tCred=async function(i){
+ var t=TIENDAS[i],g=PARAMS_A.limite_credito;
+ try{if(t&&t.li_lugar)PARAMS_A.limite_credito=t.li_lugar;return await _tcr.apply(this,arguments);}
+ finally{PARAMS_A.limite_credito=g;}
+};}
+cargarLug();
+})();
+</script>
+
+<script id="v5indep183">
+(function(){
+/* ═══ 182–183 · Panel: deudas por acreedor, independientes y sus costos ═══ */
+function m2(n){return 'S/'+Number(n||0).toFixed(2)}
+function fch(f){try{return new Date(f).toLocaleDateString('es-PE',{day:'2-digit',month:'short'})}catch(e){return ''}}
+function esIndepU(u){var c=(typeof USRS!=='undefined'?USRS:[]).find(function(x){return x.usuario===u});return !!(c&&(c.tipo==='independiente'||c.tipo==='paso'));}
+function nomU(u){var c=(typeof USRS!=='undefined'?USRS:[]).find(function(x){return x.usuario===u});return c?c.nombre:u;}
+
+/* ── 182 · ficha de tienda: deudas por acreedor, deuda por deuda (PEPS) ── */
+async function cardDeudas(i){
+ var t=TIENDAS[i];if(!t||!t.id)return;var cont=document.getElementById('content');if(!cont||document.getElementById('t-deu'))return;
+ var r=await apiA('/admin/tiendas/'+t.id+'/deudas');
+ if(!(r&&r.ok))return;
+ var cs=(r.cuentas||[]).filter(function(c){return (c.cargos||[]).length});
+ var h='<div class="card" id="t-deu"><div class="ct">💳 Deudas de la tienda</div>';
+ if(!cs.length)h+='<div style="font-size:12.5px;opacity:.65">Nunca le fiaron.</div>';
+ cs.forEach(function(c){
+  h+='<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:13px;padding-bottom:4px;border-bottom:1.5px solid var(--linea)"><b>'+(c.acreedor==='dueno'?'A ti':('A '+c.nombre+' (independiente)'))+'</b><b>'+m2(c.saldo)+'</b></div>'
+   +'<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px"><tr style="opacity:.6"><td>Fiado</td><td>Por</td><td style="text-align:right">Monto</td><td style="text-align:right">Pagado</td><td style="text-align:right">Falta</td><td>Cobró</td></tr>'
+   +c.cargos.slice().reverse().map(function(g){return '<tr style="border-top:1px solid var(--linea)"><td style="padding:5px 0">'+fch(g.fecha)+'</td><td>'+(g.por||'—')+'</td><td style="text-align:right">'+m2(g.monto)+'</td><td style="text-align:right">'+m2(g.pagado)+'</td><td style="text-align:right;font-weight:800;color:'+(g.pendiente>0?'#B23B2E':'#2F6B4F')+'">'+(g.pendiente>0?m2(g.pendiente):'✓')+'</td><td style="font-size:11px;opacity:.8">'+(g.cobros.map(function(k){return (k.por||'—')+' '+m2(k.monto)+' '+fch(k.fecha)}).join('<br>')||'—')+'</td></tr>'}).join('')
+   +'</table></div>';
+ });
+ h+='<div style="font-size:10.5px;opacity:.6">Cada pago cancela primero la deuda más antigua de esa cuenta. Lo que le deben a un independiente es suyo: no suma a tus créditos.</div></div>';
+ var ref=document.getElementById('t-lug')||cont.querySelector('.card');
+ if(ref)ref.insertAdjacentHTML('afterend',h);else cont.insertAdjacentHTML('beforeend',h);
+}
+if(typeof abrirTienda==='function'){var _abt=abrirTienda;window.abrirTienda=async function(i){
+ var r=await _abt.apply(this,arguments);
+ try{await cardDeudas(i)}catch(e){console.error('deudas tienda:',e)}
+ return r;};}
+
+/* ── 183 · sección «Independientes» ── */
+if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='independientes'})){
+ var ci=SECS.findIndex(function(s){return s[0]==='conductores'});SECS.splice(ci+1,0,['independientes','🧑‍💼','Independientes']);
+}
+window.IND=null;var INDA={};
+async function cargarInd(){var r=await apiA('/admin/independientes');if(r&&r.ok){window.IND=r.independientes;}return window.IND;}
+function kpi(l,v,col){return '<div style="border:1px solid var(--linea);border-radius:10px;padding:8px 6px;text-align:center"><div style="font-size:15px;font-weight:800;color:'+(col||'inherit')+'">'+v+'</div><div style="font-size:10.5px;opacity:.65;margin-top:2px">'+l+'</div></div>';}
+function fichaInd(x){
+ var v=x.viaje||{},vt=v.ventas||{};
+ var h='<div class="card"><div class="ct" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span>🧑‍💼 '+x.nombre+' <span style="font-weight:500;opacity:.55;font-size:12px">@'+x.usuario+'</span></span>'
+  +'<span style="font-size:11.5px;font-weight:800;color:'+(x.en_viaje?'#2F6B4F':'#8A6410')+'">'+(x.en_viaje?'En viaje':'Entre viajes')+'</span></div>'
+  +'<div style="font-size:11.5px;opacity:.75;margin-bottom:8px">📍 '+(x.lugares_txt||'—')
+  +(x.ubicacion?(' · <a href="https://www.google.com/maps?q='+x.ubicacion.lat+','+x.ubicacion.lon+'" target="_blank">ubicación de hace '+Math.max(0,Math.round((Date.now()-new Date(x.ubicacion.hora))/60000))+' min</a>'):(x.en_viaje?' · sin ubicación reciente':''))+'</div>'
+  +'<div style="font-size:12px;font-weight:800;margin-bottom:6px">'+(x.en_viaje?'Viaje en curso':'Desde su último cierre')+' · desde '+fch(v.inicio)+'</div>'
+  +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">'
+  +kpi('Vendido',m2(vt.total),'#1D4ED8')+kpi('Costo',m2(vt.costo))+kpi('Ganancia',m2(v.ganancia),v.ganancia>=0?'#2F6B4F':'#B23B2E')+kpi('Sobrante al costo',m2(v.sobrante&&v.sobrante.valor))
+  +kpi('Fiado',m2(v.fiado))+kpi('Cobrado',m2(v.cobrado))+kpi('Pérdidas',m2(v.perdidas&&v.perdidas.costo),'#B23B2E')+kpi('Gastos',m2(v.gastos&&v.gastos.total))
+  +'</div>';
+ var ab=INDA[x.usuario]||{};
+ h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'
+  +['cierres','credito','costos','traspasos'].map(function(k){var n={cierres:'Cierres ('+x.cierres.length+')',credito:'Le deben '+m2(x.credito.total),costos:'Sus costos ('+Object.keys(x.costos||{}).length+')',traspasos:'Traspasos ('+x.traspasos.length+')'}[k];
+    return '<button onclick="indTab(\''+x.usuario+'\',\''+k+'\')" style="flex:1;min-width:120px;background:'+(ab.tab===k?'rgba(29,78,216,.12)':'none')+';border:1.5px solid '+(ab.tab===k?'#1D4ED8':'var(--linea)')+'">'+n+'</button>'}).join('')+'</div>';
+ if(ab.tab==='cierres'){
+  h+=x.cierres.length?('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px"><tr style="opacity:.6"><td>Cierre</td><td style="text-align:right">Vendido</td><td style="text-align:right">Costo</td><td style="text-align:right">Pérdidas</td><td style="text-align:right">Ganancia</td><td style="text-align:right">Sobrante</td><td style="text-align:right">Efectivo</td></tr>'
+   +x.cierres.map(function(c){return '<tr style="border-top:1px solid var(--linea)"><td style="padding:5px 0">'+fch(c.fin)+'</td><td style="text-align:right">'+m2(c.vendido)+'</td><td style="text-align:right">'+m2(c.costo)+'</td><td style="text-align:right">'+m2(c.perdidas)+'</td><td style="text-align:right;font-weight:800">'+m2(c.ganancia)+'</td><td style="text-align:right">'+m2(c.sobrante)+'</td><td style="text-align:right">'+(c.diferencia==null?'—':(Math.abs(c.diferencia)<0.01?'cuadra':m2(c.diferencia)))+'</td></tr>'
+    +((c.hechos&&c.hechos.length)?('<tr><td colspan="7" style="font-size:11px;opacity:.7;padding-bottom:5px">'+c.hechos.join(' · ')+'</td></tr>'):'')}).join('')+'</table>'):'<div style="font-size:12px;opacity:.6;margin-top:8px">Todavía no cerró ningún viaje.</div>';
+ }else if(ab.tab==='credito'){
+  h+=x.credito.tiendas.length?('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">'+x.credito.tiendas.map(function(t){return '<tr style="border-top:1px solid var(--linea)"><td style="padding:5px 0">'+t.n+'</td><td style="text-align:right;font-weight:800">'+m2(t.m)+'</td></tr>'}).join('')+'</table><div style="font-size:10.5px;opacity:.6;margin-top:4px">Es su dinero: no suma a tus créditos.</div>'):'<div style="font-size:12px;opacity:.6;margin-top:8px">Ninguna tienda le debe.</div>';
+ }else if(ab.tab==='costos'){
+  var ks=Object.keys(x.costos||{});
+  h+='<div style="font-size:11.5px;opacity:.75;margin-top:8px">Lo que le cobra el proveedor a él. Se cambian al armarle la carga (Kardex → Registrar carga, eligiéndolo como conductor). Tu catálogo no cambia.</div>'
+   +(ks.length?('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px">'+ks.map(function(id){var p=(typeof CATE!=='undefined'&&CATE[id])||{};var nom=id;(window.CATA||[]).forEach(function(c){(c.prods||[]).forEach(function(q){if(q.id===id)nom=q.n})});
+      return '<tr style="border-top:1px solid var(--linea)"><td style="padding:5px 0">'+nom+'</td><td style="text-align:right;font-weight:800">'+m2(x.costos[id])+'</td><td style="text-align:right;opacity:.6">tuyo '+m2(p.costo)+'</td></tr>'}).join('')+'</table>'):'<div style="font-size:12px;opacity:.6;margin-top:6px">Todavía usa tus costos (no tiene costos propios).</div>');
+ }else if(ab.tab==='traspasos'){
+  h+=x.traspasos.length?x.traspasos.map(function(t){return '<div style="font-size:12px;padding:5px 0;border-top:1px solid var(--linea)">'+fch(t.creado)+' · '+t.de+' → '+t.para+' · '+t.estado+'</div>'}).join(''):'<div style="font-size:12px;opacity:.6;margin-top:8px">Sin traspasos.</div>';
+ }
+ return h+'</div>';
+}
+window.indTab=function(u,k){INDA[u]=INDA[u]||{};INDA[u].tab=(INDA[u].tab===k)?null:k;pintarInd();};
+function pintarInd(){
+ var box=document.getElementById('ind-box');if(!box)return;
+ if(!window.IND){box.innerHTML='Cargando…';return;}
+ if(!IND.length){box.innerHTML='<div class="card"><div style="font-size:12.5px;opacity:.7">No hay conductores independientes. Se crean en Conductores (tipo Independiente).</div></div>';return;}
+ box.innerHTML='<div style="font-size:12px;opacity:.7;margin-bottom:10px;line-height:1.5">Sus números van siempre aparte: no suman a tus ventas, tu utilidad, tus créditos ni tu informe.</div>'+IND.map(fichaInd).join('');
+}
+window.rIndependientes=function(){
+ setTimeout(async function(){await cargarInd();pintarInd();},20);
+ return '<div id="ind-box">Cargando…</div>';
+};
+var _rin=window.render;window.render=function(){
+ if(typeof CUR!=='undefined'&&CUR==='independientes'){
+  try{document.getElementById('content').innerHTML=rIndependientes()}catch(e){console.error(e)}
+  try{if(typeof nav==='function')nav()}catch(e){}
+  try{var h1=document.querySelector('.top h1');if(h1)h1.textContent='Independientes'}catch(e){}
+  return;
+ }
+ return _rin.apply(this,arguments);
+};
+
+/* ── 183 · carga de un independiente: con SUS costos (tu catálogo no cambia) ── */
+function indCarga(){var s=document.getElementById('cg-cond');return (s&&s.value&&esIndepU(s.value))?s.value:null;}
+window.PK_P=null;
+if(typeof pkPinta==='function'){var _pkp=pkPinta;window.pkPinta=function(p){var g=window.PK_P;window.PK_P=p;try{var r=_pkp.apply(this,arguments);}finally{window.PK_P=g;}
+ try{if(p==='cg')textosInd();}catch(e){}return r;};}
+if(typeof pkCosto==='function'){var _pkc=pkCosto;window.pkCosto=function(id,cat){
+ var u=(window.PK_P==='cg')?indCarga():null;
+ if(u){var c=(USRS.find(function(x){return x.usuario===u})||{}).costos||{};if(Number(c[id])>0)return Number(c[id]);}
+ return _pkc.apply(this,arguments);};}
+var T_I=null,COLA_I={};
+function guardarCostosInd(u){
+ if(T_I)clearTimeout(T_I);
+ T_I=setTimeout(async function(){var lote=COLA_I;COLA_I={};T_I=null;
+  var r=await apiA('/admin/conductores/'+u+'/costos',{costos:lote});
+  var e=document.getElementById('cg-cst-est');
+  if(r&&r.ok){var c=USRS.find(function(x){return x.usuario===u});if(c)c.costos=r.costos;try{saveU()}catch(x){}if(e){e.style.color='#2F6B4F';e.textContent='✓ Guardado para '+nomU(u);}}
+  else{if(e){e.style.color='#B23B2E';e.textContent='No se guardó';}alert('No se pudo guardar el costo: '+((r&&r.error)||'sin respuesta'));}
+ },450);
+}
+if(typeof pkCostoProd==='function'){var _pcp=pkCostoProd;window.pkCostoProd=function(p,id,v){
+ var u=(p==='cg')?indCarga():null;if(!u)return _pcp.apply(this,arguments);
+ var n=Math.round((parseFloat(String(v).replace(',','.'))||0)*100)/100;if(n<0)n=0;
+ var c=USRS.find(function(x){return x.usuario===u});if(c){c.costos=c.costos||{};if(n>0)c.costos[id]=n;else delete c.costos[id];}
+ COLA_I[id]=n;guardarCostosInd(u);pkPinta(p);
+};}
+if(typeof pkCostoCat==='function'){var _pcc=pkCostoCat;window.pkCostoCat=async function(p){
+ var u=(p==='cg')?indCarga():null;if(!u)return _pcc.apply(this,arguments);
+ var st=(window._PK&&_PK[p])||{cat:0},c=CATA[st.cat];if(!c)return;
+ var inp=document.getElementById(p+'-ccat');var v=Math.round((parseFloat(String(inp&&inp.value||'').replace(',','.'))||0)*100)/100;
+ if(!(v>0))return alert('Escribe el costo (lo que le cobra el proveedor por unidad).');
+ if(!confirm('¿Poner S/'+v.toFixed(2)+' como costo de '+nomU(u)+' a los '+c.prods.length+' productos de '+c.nom+'?\n\nSolo para él: tu catálogo no cambia.'))return;
+ var cu=USRS.find(function(x){return x.usuario===u});cu.costos=cu.costos||{};
+ c.prods.forEach(function(pr){cu.costos[pr.id]=v;COLA_I[pr.id]=v;});
+ guardarCostosInd(u);pkPinta(p);
+};}
+function textosInd(){
+ var u=indCarga();if(!u)return;var n=nomU(u);
+ var bar=document.getElementById('cg-catc');if(bar){var b=bar.querySelector('b');if(b)b.textContent='Costo de '+n+' para toda la categoría';}
+ var res=document.getElementById('cg-res');if(res){
+  res.innerHTML=res.innerHTML.replace('Te cuesta esta carga','Le cuesta esta carga')
+   .replace('Costo = lo que te cobra el proveedor. Se cambia aquí mismo y queda guardado en el catálogo.','Costo de '+n+' (lo que le cobra el proveedor a él). Se guarda solo para él: tu catálogo no cambia.');}
+}
+document.addEventListener('change',function(e){if(e.target&&e.target.id==='cg-cond'){try{pkPinta('cg')}catch(x){}}});
+if(typeof cgEnviar==='function'){var _cge=cgEnviar;window.cgEnviar=async function(){
+ var u=indCarga(),g=window.PK_P,cf=window.confirm;window.PK_P='cg';
+ if(u)window.confirm=function(m){return cf.call(window,String(m).replace('Te cuesta','Le cuesta'));};
+ try{return await _cge.apply(this,arguments);}finally{window.PK_P=g;window.confirm=cf;}
+};}
+})();
+</script>
+
+<style id="v5pedidos184css">
+.pd-tab{padding:9px 14px;border-radius:18px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-weight:800;font-size:12.5px;cursor:pointer}
+.pd-tab.on{border-color:#1D4ED8;background:rgba(29,78,216,.12);color:#1D4ED8}
+.pd-lbl{font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;opacity:.6;margin:10px 0 5px}
+.pd-in{width:100%;padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;font:inherit;font-size:13px}
+.pd-chip{padding:7px 12px;border-radius:16px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-size:12px;font-weight:700;cursor:pointer;margin:0 6px 6px 0}
+.pd-chip.on{border-color:#1D4ED8;background:rgba(29,78,216,.12);color:#1D4ED8}
+.pd-btn{padding:11px 14px;border-radius:11px;border:none;background:#1D4ED8;color:#fff;font-weight:800;cursor:pointer;font-size:13px}
+.pd-btn.sec{background:none;border:1.5px solid rgba(128,128,128,.4);color:inherit}
+.pd-btn.rojo{background:none;border:1.5px solid #B23B2E;color:#B23B2E}
+.pd-btn.verde{background:#2F6B4F}
+.pd-it{border:1px solid var(--linea);border-radius:12px;padding:11px 12px;margin-bottom:8px}
+.pd-bad{display:inline-block;font-size:10.5px;font-weight:800;border-radius:10px;padding:2px 8px;background:rgba(29,78,216,.12);color:#1D4ED8;margin-right:5px}
+.pd-bad.am{background:rgba(217,163,47,.16);color:#B97A1F}.pd-bad.ro{background:rgba(178,59,46,.13);color:#B23B2E}.pd-bad.ve{background:rgba(47,107,79,.14);color:#2F6B4F}
+.pd-mu{font-size:11.5px;opacity:.7}
+.pd-lin{display:grid;grid-template-columns:1fr 64px 1.3fr;gap:6px;align-items:center;padding:5px 0;border-bottom:1px dashed var(--linea)}
+@media (max-width:700px){.pd-lin{grid-template-columns:1fr 56px}.pd-lin select{grid-column:1/3}}
+#ped-box input[type=radio],#ped-box input[type=checkbox],#cg-peds input[type=checkbox]{width:18px!important;height:18px!important;min-width:18px;margin:0!important;padding:0!important;flex:none!important;accent-color:#1D4ED8}
+#ped-box label,#cg-peds label{justify-content:flex-start!important;text-align:left}
+#ped-box .pd-chip,#ped-box .pd-tab{width:auto!important;display:inline-block!important}
+#ped-box .pd-it .pd-btn{width:auto}
+</style>
+<script id="v5pedidos184">
+(function(){
+/* ═══ 184 · Fase 2 — Pedidos y precios acordados (panel) ═══
+   · La sección se llama solo «Pedidos». Registrar (nace confirmado), pegar o dictar (la IA
+     o la lectura simple lo arma y queda «por confirmar»), link de pedido para la tienda.
+   · Por confirmar → Confirmar y enviar · Editar · Descartar. Vigentes: atrasados, hoy y
+     próximos, con reasignar y cancelar. Atendidos: quién, cuándo, lo pedido y lo vendido.
+   · Ficha de tienda: código, precios acordados (se quitan desde aquí) y link de pedido.
+   · Al armar una carga se ven los pedidos de ese conductor y se suman con un toque. */
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function m2(n){return 'S/'+Number(n||0).toFixed(2)}
+function hh(f){try{return new Date(f).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
+var $=function(id){return document.getElementById(id)};
+var ORIG={panel:['✍️','Registrado'],whatsapp:['💬','WhatsApp'],llamada:['📞','Llamada'],link:['🔗','Link'],foto:['📷','Foto']};
+function tiendas(){return (typeof TIENDAS!=='undefined'?TIENDAS:[])}
+function tPorId(id){return tiendas().find(function(t){return String(t.id)===String(id)})||null}
+function nomU(u){var c=(typeof USRS!=='undefined'?USRS:[]).find(function(x){return x.usuario===u});return c?c.nombre:(u||'')}
+function itemsTxt(its,visita){if(visita)return '🚚 Que pase el camión (elige al verlo)';return (its||[]).map(function(x){return x.c+' '+(x.n||x.p||'')}).join(', ')||'—'}
+function tLabel(t){return (t.cod?(t.cod+' · '):'')+tnomA(t)+(t.lugar?(' · '+t.lugar.split(',')[0]):'')}
+
+/* ── nombre: solo «Pedidos» ── */
+try{var sp=(typeof SECS!=='undefined'?SECS:[]).find(function(s){return s[0]==='pedidos'});if(sp){sp[1]='📩';sp[2]='Pedidos';}if(typeof nav==='function')nav();}catch(e){}
+
+/* ── datos ── */
+window.PEDS=null;var PEDS_T=0;
+async function cargarPeds(forzar){
+ if(!forzar&&window.PEDS&&Date.now()-PEDS_T<15000)return window.PEDS;
+ var r=await apiA('/admin/pedidos');
+ if(r&&r.ok){window.PEDS=r;PEDS_T=Date.now();}
+ return window.PEDS;
+}
+window.cargarPeds=cargarPeds;
+async function apiLargo(ruta,datos){
+ if(window.RO){alert('Estás en modo solo lectura: puedes ver todo el panel, pero no hacer cambios.');return {ok:false,error:'solo lectura'};}
+ if(!CFGA.API)return {ok:false,error:'Sin servidor'};
+ try{var ctl=new AbortController(),to=setTimeout(function(){ctl.abort()},60000);
+  var r=await fetch(CFGA.API+ruta,{method:'POST',headers:{'Content-Type':'application/json','x-admin':CFGA.TOKEN},body:JSON.stringify(datos||{}),signal:ctl.signal});
+  clearTimeout(to);return await r.json();
+ }catch(e){return {ok:false,error:'No respondió el servidor'}}
+}
+
+/* ── estado del formulario (sobrevive a los repintados) ── */
+var F={tab:'registrar',tienda:'',libre:'',fecha:'hoy',fechaD:'',conductor:'',nota:'',visita:false,editando:null,lineas:null,apodos:{},sug:null,sugDe:'',vigente:null,
+ pegar:{origen:'whatsapp',texto:'',tienda:'',foto:null},enviando:false};
+window.PDF=F;
+function tiendaForm(){return F.tienda&&F.tienda!=='_libre'?tPorId(F.tienda):null}
+/* el selector de productos usa el tipo y los precios acordados de la tienda elegida */
+window.tipoPedido=function(){if(window.PD_TIPO)return PD_TIPO;var t=tiendaForm();return (t&&(t.tp||t.tipo))||'';};
+if(typeof precioPedido==='function'){var _ppd=precioPedido;window.precioPedido=function(prodId,cat){
+ var t=tiendaForm();if(t&&t.precios&&t.precios[prodId]!=null&&!window.PD_TIPO)return Number(t.precios[prodId]);
+ return _ppd.apply(this,arguments);};}
+function fechaElegida(){
+ var h=(window.PEDS&&PEDS.hoy)||new Date(Date.now()-5*3600000).toISOString().slice(0,10);
+ if(F.fecha==='hoy')return {fecha:h,lo_antes:false};
+ if(F.fecha==='manana')return {fecha:new Date(new Date(h+'T12:00:00Z').getTime()+86400000).toISOString().slice(0,10),lo_antes:false};
+ if(F.fecha==='asap')return {fecha:h,lo_antes:true};
+ return {fecha:F.fechaD||h,lo_antes:false};
+}
+
+/* ── pantalla ── */
+window.rPedidos=function(){
+ setTimeout(async function(){await cargarPeds(false);pintaListas();pintaForm();},20);
+ return '<div id="ped-box"><div class="card" id="ped-form"></div><div id="ped-listas"><div class="card">Cargando pedidos…</div></div></div>';
+};
+function opcionesTiendas(sel,conLibre){
+ var ts=tiendas().filter(function(t){return t.act!==false&&(t.est||'ok')==='ok'}).slice().sort(function(a,b){return String(a.cod||'~').localeCompare(String(b.cod||'~'))||tnomA(a).localeCompare(tnomA(b))});
+ return '<option value="">— elige la tienda —</option>'+ts.map(function(t){return '<option value="'+t.id+'"'+(String(sel)===String(t.id)?' selected':'')+'>'+esc(tLabel(t))+'</option>'}).join('')
+  +(conLibre?'<option value="_libre"'+(sel==='_libre'?' selected':'')+'>🆕 Tienda sin registrar…</option>':'');
+}
+function pintaForm(){
+ var box=$('ped-form');if(!box)return;
+ var ia=!!(window.PEDS&&PEDS.ia);
+ var h='<div class="ct">📩 Nuevo pedido</div>'
+  +(F.editando?'':'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"><button class="pd-tab'+(F.tab==='registrar'?' on':'')+'" onclick="pdTab(\'registrar\')">✍️ Registrar</button><button class="pd-tab'+(F.tab==='pegar'?' on':'')+'" onclick="pdTab(\'pegar\')">📋 Pegar o dictar</button></div>');
+ if(F.tab==='pegar'&&!F.editando){
+  h+='<div class="pd-mu" style="margin-bottom:6px;line-height:1.5">Pega el mensaje de WhatsApp o escribe lo que te dijeron por teléfono. '+(ia?'La IA arma el pedido':'Se arma con una <b>lectura simple</b> (sin IA: falta <code>ANTHROPIC_API_KEY</code> en Railway)')+' y queda <b>por confirmar</b>: nada le llega al conductor hasta que lo revises.</div>'
+   +'<div class="pd-lbl">¿De dónde vino?</div>'
+   +[['whatsapp','💬 WhatsApp'],['llamada','📞 Llamada']].map(function(o){return '<button class="pd-chip'+(F.pegar.origen===o[0]?' on':'')+'" onclick="pdPegOrigen(\''+o[0]+'\')">'+o[1]+'</button>'}).join('')
+   +'<div class="pd-lbl">Mensaje o lo que te dijeron</div>'
+   +'<textarea id="pd-peg" class="pd-in" rows="5" placeholder="Ej.: Hola, soy de la tienda Rosa. Para mañana 10 colizas, media docena de chocochispas y 5 integrales" oninput="PDF.pegar.texto=this.value">'+esc(F.pegar.texto)+'</textarea>'
+   +((window.SpeechRecognition||window.webkitSpeechRecognition)?'<button class="pd-chip" style="margin-top:6px" onclick="pdDictar()" id="pd-mic">🎤 Dictar</button>':'')
+   +'<div class="pd-lbl">Tienda (si ya sabes cuál)</div><select class="pd-in" onchange="PDF.pegar.tienda=this.value">'+opcionesTiendas(F.pegar.tienda,false).replace('— elige la tienda —','— que la detecte —')+'</select>'
+   +'<div class="pd-lbl">O una foto del pedido escrito</div>'
+   +(ia?'<input type="file" accept="image/*" onchange="pdFoto(this)" class="pd-in">'+(F.pegar.foto?'<div class="pd-mu" style="margin-top:4px">📷 Foto lista para leer</div>':''):'<div class="pd-mu">Leer fotos necesita la IA (falta <code>ANTHROPIC_API_KEY</code>).</div>')
+   +'<div style="margin-top:12px"><button class="pd-btn" style="width:100%" onclick="pdArmar()" '+(F.enviando?'disabled':'')+'>'+(F.enviando?'Leyendo…':'Armar pedido')+'</button></div>';
+  box.innerHTML=h;return;
+ }
+ var ed=F.editando?((window.PEDS&&PEDS.por_confirmar)||[]).find(function(p){return p.id===F.editando}):null;
+ if(ed){var o=ORIG[ed.origen]||['📩',ed.origen];
+  h+='<div style="background:rgba(29,78,216,.08);border-radius:10px;padding:10px 12px;margin-bottom:6px;font-size:12.5px;line-height:1.5"><b>Revisando el pedido #'+ed.id+'</b> · '+o[0]+' '+o[1]+' · '+hh(ed.creado)
+   +(ed.texto&&ed.texto!=='(foto)'?('<div style="margin-top:5px;white-space:pre-wrap;opacity:.85;max-height:140px;overflow:auto;border-left:3px solid rgba(29,78,216,.4);padding-left:8px">'+esc(ed.texto)+'</div>'):'')
+   +(ed.detectado&&ed.detectado.dudas?('<div style="margin-top:5px;color:#B97A1F">⚠ '+esc(ed.detectado.dudas)+'</div>'):'')
+   +'<div style="margin-top:6px"><button class="pd-chip" onclick="pdCancelarEd()">Cancelar la revisión</button></div></div>';}
+ var t=tiendaForm();
+ h+='<div class="pd-lbl">¿Qué tienda pidió?</div>'
+  +'<input class="pd-in" placeholder="Buscar por nombre o código…" oninput="pdFiltraT(this.value)" style="margin-bottom:6px">'
+  +'<select id="pd-t" class="pd-in" onchange="pdTienda(this.value)">'+opcionesTiendas(F.tienda,!F.editando)+'</select>'
+  +(F.tienda==='_libre'?'<input class="pd-in" style="margin-top:6px" placeholder="Nombre de la tienda sin registrar" value="'+esc(F.libre)+'" oninput="PDF.libre=this.value">':'')
+  +(t?('<div class="pd-mu" style="margin-top:6px;line-height:1.6">'+(t.cod?('Código <b>'+esc(t.cod)+'</b> · '):'')+'Precios de <b>'+esc(t.tp||'bodega')+'</b>'+(t.precios&&Object.keys(t.precios).length?(' · <b>Personalizada</b> ('+Object.keys(t.precios).length+' precios acordados)'):'')
+   +(t.tel?(' · 📞 '+esc(t.tel)):'')+' · <a href="#" onclick="pdLink('+t.id+');return false">🔗 Enviar link de pedido</a></div>'):'')
+  +(F.vigente&&!F.editando?('<div style="background:rgba(217,163,47,.14);color:#8A6410;border-radius:9px;padding:8px 10px;margin-top:6px;font-size:12px">Ya tiene un pedido '+(F.vigente.estado==='por_confirmar'?'por confirmar':'sin entregar')+' (#'+F.vigente.id+'): <b>el nuevo lo reemplaza</b>.</div>'):'')
+  +'<div class="pd-lbl">¿Para cuándo?</div>'
+  +[['hoy','Hoy'],['manana','Mañana'],['asap','Lo antes posible'],['dia','Otro día']].map(function(o){return '<button class="pd-chip'+(F.fecha===o[0]?' on':'')+'" onclick="pdFecha(\''+o[0]+'\')">'+o[1]+'</button>'}).join('')
+  +(F.fecha==='dia'?'<input type="date" class="pd-in" style="max-width:220px" value="'+esc(F.fechaD)+'" onchange="PDF.fechaD=this.value">':'')
+  +'<div class="pd-lbl">¿Quién lo lleva?</div><div id="pd-conds">'+htmlConds()+'</div>'
+  +'<label style="display:flex;gap:8px;align-items:center;margin:10px 0 2px;font-size:13px;cursor:pointer"><input type="checkbox" '+(F.visita?'checked':'')+' onchange="pdVisita(this.checked)"> 🚚 Solo que pase el camión (elige al verlo, sin productos)</label>';
+ if(!F.visita){
+  if(F.lineas&&F.lineas.length){
+   h+='<div class="pd-lbl">Lo que decía el mensaje</div><div class="pd-mu" style="margin-bottom:4px">Si un producto está mal leído, cámbialo: se recuerda para esta tienda.</div>'
+    +F.lineas.map(function(l,i){return '<div class="pd-lin"><div style="font-size:12.5px">'+(l.id?'':'❓ ')+'«'+esc(l.texto)+'»'+(l.apodo?' <span class="pd-bad ve">recordado</span>':'')+'</div>'
+     +'<input type="number" min="0" class="pd-in" value="'+l.c+'" onchange="pdLinC('+i+',this.value)" style="padding:7px">'
+     +'<select class="pd-in" style="padding:7px" onchange="pdLinP('+i+',this.value)">'+opcionesProd(l.id)+'</select></div>'}).join('');
+  }
+  h+='<div class="pd-lbl">Productos del pedido</div>'+pickerHTML('pd');
+ }
+ h+='<input id="pd-nota" class="pd-in" style="margin-top:8px" placeholder="Nota (ej.: antes de las 11)" value="'+esc(F.nota)+'" oninput="PDF.nota=this.value">'
+  +'<div style="margin-top:12px"><button class="pd-btn" style="width:100%" onclick="pdGuardar()" '+(F.enviando?'disabled':'')+'>'+(F.enviando?'Enviando…':(F.editando?'Confirmar y enviar al conductor':'Registrar y enviar al conductor'))+'</button></div>';
+ box.innerHTML=h;
+ if(!F.visita)try{pkPinta('pd')}catch(e){}
+}
+function opcionesProd(sel){
+ return '<option value="">— no es un producto —</option>'+(window.CATA||[]).map(function(c){return '<optgroup label="'+esc((c.emoji||'')+' '+c.nom)+'">'+(c.prods||[]).map(function(p){return '<option value="'+p.id+'"'+(p.id===sel?' selected':'')+'>'+esc(p.n)+'</option>'}).join('')+'</optgroup>'}).join('');
+}
+function htmlConds(){
+ var s=F.sug;
+ if(!s){var us=(typeof USRS!=='undefined'?USRS:[]).filter(function(u){return u.activo!==false});s=us.map(function(u){return {u:u.usuario,n:u.nombre,tipo:u.tipo}});}
+ if(!s.length)return '<div class="pd-mu">Aún no hay conductores: créalos en Conductores.</div>';
+ var si=s.filter(function(x){return !x.fuera}),no=s.filter(function(x){return x.fuera});
+ if(!F.conductor&&si.length===1)F.conductor=si[0].u;
+ var fila=function(x){return '<label style="display:flex;gap:8px;align-items:center;padding:6px 0;font-size:13px;cursor:pointer"><input type="radio" name="pd-cond" value="'+esc(x.u)+'" '+(F.conductor===x.u?'checked':'')+' onchange="PDF.conductor=this.value"> '+esc(x.n)+' <span class="pd-mu">'+(x.tipo==='independiente'?'independiente':'empleado')+(x.fuera?' · fuera de sus lugares':'')+'</span></label>'};
+ return (si.length?si.map(fila).join(''):(F.sug?'<div class="pd-mu">Nadie tiene habilitado el lugar de esta tienda.</div>':''))
+  +(no.length?('<details'+(F.conductor&&no.some(function(x){return x.u===F.conductor})?' open':'')+' style="margin-top:4px"><summary class="pd-mu" style="cursor:pointer">Otros conductores ('+no.length+')</summary>'+no.map(fila).join('')+'</details>'):'');
+}
+window.pdTab=function(t){F.tab=t;pintaForm();};
+window.pdPegOrigen=function(o){F.pegar.origen=o;pintaForm();};
+window.pdFiltraT=function(q){
+ q=String(q||'').toLowerCase();var s=$('pd-t');if(!s)return;
+ Array.prototype.forEach.call(s.options,function(o){if(!o.value||o.value==='_libre')return;o.hidden=q&&o.textContent.toLowerCase().indexOf(q)<0;});
+ var vis=Array.prototype.filter.call(s.options,function(o){return o.value&&o.value!=='_libre'&&!o.hidden});
+ if(q&&vis.length===1&&s.value!==vis[0].value){s.value=vis[0].value;pdTienda(vis[0].value,true);}
+};
+window.pdTienda=async function(v,sinRepintar){
+ F.tienda=v;F.sug=null;F.vigente=null;F.conductor=F.editando?F.conductor:'';window.PD_TIPO='';
+ if(v&&v!=='_libre'){
+  var r=await apiA('/admin/tiendas/'+v+'/sugeridos');
+  if(r&&r.ok&&F.tienda===v){F.sug=r.sugeridos||[];F.vigente=r.vigente||null;
+   var si=F.sug.filter(function(x){return !x.fuera});if(!F.conductor&&si.length===1)F.conductor=si[0].u;}
+ }
+ var q=document.querySelector('#ped-form input[placeholder^="Buscar por nombre"]'),qv=q?q.value:'';
+ pintaForm();
+ if(qv){var q2=document.querySelector('#ped-form input[placeholder^="Buscar por nombre"]');if(q2){q2.value=qv;pdFiltraT(qv);if(sinRepintar){q2.focus();}}}
+};
+window.pdFecha=function(f){F.fecha=f;pintaForm();};
+window.pdVisita=function(v){F.visita=!!v;pintaForm();};
+function pkSetItem(id,c){
+ var st=_PK.pd||(_PK.pd={cat:0,items:{}}),pr=null,cat=null;
+ (window.CATA||[]).forEach(function(k){var f=(k.prods||[]).find(function(x){return x.id===id});if(f){pr=f;cat=k;}});
+ if(!pr)return;if(c>0)st.items[id]={id:id,n:pr.n,c:c,cat:cat.id};else delete st.items[id];
+}
+function pkSuma(id,d){var st=_PK.pd||(_PK.pd={cat:0,items:{}});var cur=st.items[id]?st.items[id].c:0;pkSetItem(id,Math.max(0,cur+d));}
+window.pdLinC=function(i,v){var l=F.lineas[i];if(!l)return;var n=Math.max(0,Math.round(Number(v)||0));if(l.id)pkSuma(l.id,n-l.c);l.c=n;try{pkPinta('pd')}catch(e){}};
+window.pdLinP=function(i,v){var l=F.lineas[i];if(!l)return;if(l.id)pkSuma(l.id,-l.c);l.id=v||null;if(v){pkSuma(v,l.c);F.apodos[l.texto]=v;}pintaForm();};
+window.pdCancelarEd=function(){F.editando=null;F.lineas=null;F.apodos={};pkReset('pd');pintaForm();};
+
+/* ── registrar o confirmar ── */
+window.pdGuardar=async function(){
+ if(F.enviando)return;
+ var t=tiendaForm();
+ if(!F.tienda)return alert('Elige la tienda.');
+ if(F.tienda==='_libre'&&!String(F.libre||'').trim())return alert('Escribe el nombre de la tienda sin registrar.');
+ if(!F.conductor)return alert('Elige quién lo lleva.');
+ var it=F.visita?[]:pkItems('pd').map(function(x){return {id:x.id,n:x.n,c:x.c}});
+ if(!F.visita&&!it.length)return alert('Añade al menos un producto (o marca «que pase el camión»).');
+ if(F.fecha==='dia'&&!F.fechaD)return alert('Elige el día.');
+ var fe=fechaElegida();
+ var cuerpo={tienda_id:t?t.id:undefined,tienda:t?tnomA(t):String(F.libre||'').trim(),conductor:F.conductor,items:it,visita:F.visita,fecha:fe.fecha,lo_antes:fe.lo_antes,nota:String(F.nota||'').trim(),
+  hora:new Date().toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'})};
+ F.enviando=true;pintaForm();
+ var r;
+ if(F.editando){cuerpo.apodos=F.apodos;r=await apiA('/admin/pedidos/'+F.editando+'/confirmar',cuerpo);}
+ else r=await apiA('/pedidos',cuerpo);
+ F.enviando=false;
+ if(!(r&&r.ok)){pintaForm();return alert('No se pudo: '+((r&&r.error)||'sin respuesta del servidor'));}
+ var quien=nomU(F.conductor);
+ alert('✓ Pedido enviado a '+quien+(r.reemplazados&&r.reemplazados.length?(' · reemplazó al pedido anterior sin entregar'):'')+(r.aviso?('\n\n'+r.aviso):''));
+ F.editando=null;F.lineas=null;F.apodos={};F.nota='';F.visita=false;F.vigente=null;F.conductor='';F.sug=null;F.tienda='';F.libre='';F.fecha='hoy';window.PD_TIPO='';pkReset('pd');
+ await cargarPeds(true);pintaForm();pintaListas();
+};
+
+/* ── pegar, dictar o foto ── */
+window.pdFoto=function(inp){
+ var f=inp.files&&inp.files[0];if(!f)return;var rd=new FileReader();
+ rd.onload=function(){var img=new Image();img.onload=function(){var cv=document.createElement('canvas'),s=Math.min(1,1600/Math.max(img.width,img.height));cv.width=img.width*s;cv.height=img.height*s;cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);F.pegar.foto=cv.toDataURL('image/jpeg',.8);F.pegar.origen='foto';pintaForm();};img.src=rd.result;};
+ rd.readAsDataURL(f);
+};
+window.pdDictar=function(){
+ var SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return;
+ var r=new SR();r.lang='es-PE';r.interimResults=false;r.continuous=false;
+ var b=$('pd-mic');if(b)b.textContent='🎙️ Escuchando…';
+ r.onresult=function(e){var t=Array.prototype.map.call(e.results,function(x){return x[0].transcript}).join(' ');F.pegar.texto=(F.pegar.texto?F.pegar.texto+'\n':'')+t;F.pegar.origen='llamada';pintaForm();};
+ r.onerror=function(){if(b)b.textContent='🎤 Dictar';};r.onend=function(){var b2=$('pd-mic');if(b2)b2.textContent='🎤 Dictar';};
+ try{r.start()}catch(e){}
+};
+window.pdArmar=async function(){
+ if(F.enviando)return;
+ var tx=String(F.pegar.texto||'').trim();
+ if(!tx&&!F.pegar.foto)return alert('Pega el mensaje, escribe lo que te dijeron o sube la foto.');
+ F.enviando=true;pintaForm();
+ var r=await apiLargo('/admin/pedidos/interpretar',{texto:tx,imagen:F.pegar.foto||undefined,origen:F.pegar.foto?'foto':F.pegar.origen,tienda_id:F.pegar.tienda?Number(F.pegar.tienda):undefined});
+ F.enviando=false;
+ if(!(r&&r.ok)){pintaForm();return alert('No se pudo armar: '+((r&&r.error)||'sin respuesta'));}
+ F.pegar={origen:'whatsapp',texto:'',tienda:'',foto:null};
+ await cargarPeds(true);pintaListas();
+ await pdEditar(r.id);
+};
+
+/* ── listas ── */
+function pintaListas(){
+ var box=$('ped-listas');if(!box)return;var D=window.PEDS;
+ if(!D){box.innerHTML='<div class="card">No se pudieron cargar los pedidos. Revisa la conexión con el servidor.</div>';return;}
+ var st=D.stats||{},tot=Object.keys(st).reduce(function(a,k){return a+st[k]},0);
+ var h='<div class="pd-mu" style="margin:0 2px 10px">Este mes entraron <b>'+tot+'</b> pedido(s): '+Object.keys(ORIG).filter(function(k){return st[k]}).map(function(k){return ORIG[k][0]+' '+ORIG[k][1].toLowerCase()+' '+st[k]}).join(' · ')+(tot?'':'—')
+  +' · IA: <b>'+(D.ia?'activa':'no (lectura simple)')+'</b></div>';
+ /* por confirmar */
+ var pc=D.por_confirmar||[];
+ h+='<div class="card"><div class="ct">🕐 Por confirmar ('+pc.length+')</div>'+(pc.length?'':'<div class="pd-mu">Nada por confirmar.</div>')
+  +pc.map(function(p){var o=ORIG[p.origen]||['📩',p.origen],sinR=((p.detectado&&p.detectado.lineas)||[]).filter(function(l){return !l.id}).length;
+   var si=(p.sugeridos||[]).filter(function(x){return !x.fuera});var pre=si.length===1?si[0].u:'';
+   return '<div class="pd-it"><div><span class="pd-bad">'+o[0]+' '+o[1]+'</span><span class="pd-mu">'+hh(p.creado)+'</span></div>'
+    +'<div style="margin-top:6px;font-size:13.5px"><b>'+(p.tienda_id?esc(p.tienda):('⚠️ Tienda no reconocida'+(p.tienda?(': «'+esc(p.tienda)+'»'):'')))+'</b>'+(p.codigo?(' <span class="pd-mu">'+esc(p.codigo)+'</span>'):'')+'</div>'
+    +'<div style="font-size:12.5px;margin-top:3px">'+esc(itemsTxt(p.items,p.visita))+'</div>'
+    +(sinR?('<div style="font-size:12px;color:#B97A1F;margin-top:3px">❓ '+sinR+' línea(s) sin reconocer: usa Editar</div>'):'')
+    +'<div class="pd-mu" style="margin-top:3px">Para: <b>'+(p.lo_antes?'lo antes posible':esc(p.fecha_txt||p.fecha))+'</b>'+(p.no_abre?' · ⚠️ ese día no atiende':'')+(p.nota?(' · 📝 '+esc(p.nota)):'')+'</div>'
+    +(p.reemplaza?('<div style="font-size:12px;color:#8A6410;margin-top:3px">Reemplazará al pedido #'+p.reemplaza+' sin entregar.</div>'):'')
+    +(p.texto&&p.texto!=='(foto)'?('<details style="margin-top:4px"><summary class="pd-mu" style="cursor:pointer">Texto original</summary><div style="white-space:pre-wrap;font-size:12px;opacity:.85;margin-top:4px">'+esc(p.texto)+'</div></details>'):'')
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">'
+    +(p.tienda_id?('<select id="pc-c-'+p.id+'" class="pd-in" style="flex:1;min-width:160px;padding:8px"><option value="">— ¿quién lo lleva? —</option>'+(p.sugeridos||[]).map(function(x){return '<option value="'+esc(x.u)+'"'+(x.u===pre?' selected':'')+'>'+esc(x.n)+(x.fuera?' (fuera de sus lugares)':'')+'</option>'}).join('')+'</select>'
+      +'<button class="pd-btn verde" onclick="pdConfirmar('+p.id+')">Confirmar y enviar</button>'):'')
+    +'<button class="pd-btn sec" onclick="pdEditar('+p.id+')">Editar</button><button class="pd-btn rojo" onclick="pdDescartar('+p.id+')">Descartar</button></div></div>';}).join('')+'</div>';
+ /* vigentes */
+ var vg=D.vigentes||[],atr=vg.filter(function(p){return p.atrasado}),hoyL=vg.filter(function(p){return !p.atrasado&&p.fecha<=D.hoy}),prox=vg.filter(function(p){return p.fecha>D.hoy});
+ var fila=function(p){
+  return '<div class="pd-it"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div style="font-size:13.5px"><b>'+esc(p.tienda)+'</b>'+(p.codigo?(' <span class="pd-mu">'+esc(p.codigo)+'</span>'):'')+'</div>'
+   +'<div>'+(p.atrasado?'<span class="pd-bad ro">⏰ atrasado</span>':'')+(p.estado==='devuelto'?'<span class="pd-bad am">↩️ devuelto</span>':'')+'<span class="pd-bad">'+esc(p.fecha_txt||p.fecha)+'</span></div></div>'
+   +'<div style="font-size:12.5px;margin-top:3px">'+esc(itemsTxt(p.items,p.visita))+'</div>'
+   +'<div class="pd-mu" style="margin-top:3px">'+(p.conductor?('Lo lleva <b>'+esc(p.conductor_n)+'</b>'):'<b style="color:#B23B2E">Sin conductor</b>')
+   +(p.no_pude?(' · «No pude» de '+esc(nomU(p.no_pude.por))+': '+esc(p.no_pude.motivo)):'')+(p.nota?(' · 📝 '+esc(p.nota)):'')+' · '+(ORIG[p.origen]||['',''])[0]+' '+hh(p.creado)+'</div>'
+   +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px"><select id="pv-c-'+p.id+'" class="pd-in" style="flex:1;min-width:160px;padding:8px"><option value="">'+(p.conductor?'— pasárselo a otro —':'— ¿quién lo lleva? —')+'</option>'
+   +(p.sugeridos||[]).filter(function(x){return x.u!==p.conductor}).map(function(x){return '<option value="'+esc(x.u)+'">'+esc(x.n)+(x.fuera?' (fuera de sus lugares)':'')+'</option>'}).join('')+'</select>'
+   +'<button class="pd-btn sec" onclick="pdAsignar('+p.id+')">Asignar</button><button class="pd-btn rojo" onclick="pdCancelar('+p.id+')">Cancelar pedido</button></div></div>';};
+ h+='<div class="card"><div class="ct">🚚 Vigentes ('+vg.length+')</div><div class="pd-mu" style="margin:-4px 0 8px">Siguen vigentes hasta que alguien los entregue: se marcan solos al registrar la venta a esa tienda.</div>'
+  +(vg.length?'':'<div class="pd-mu">No hay pedidos vigentes.</div>')
+  +(atr.length?('<div class="pd-lbl" style="color:#B23B2E;opacity:1">⏰ Atrasados ('+atr.length+')</div>'+atr.map(fila).join('')):'')
+  +(hoyL.length?('<div class="pd-lbl">📅 Para hoy ('+hoyL.length+')</div>'+hoyL.map(fila).join('')):'')
+  +(prox.length?('<div class="pd-lbl">🔜 Próximos ('+prox.length+')</div>'+prox.map(fila).join('')):'')+'</div>';
+ /* atendidos */
+ var at=D.atendidos||[];
+ h+='<div class="card"><div class="ct">✅ Atendidos (7 días) ('+at.length+')</div>'+(at.length?'':'<div class="pd-mu">Aún ninguno.</div>')
+  +at.map(function(p){var dif=difPedido(p);
+   return '<div style="padding:8px 0;border-bottom:1px solid var(--linea);font-size:12.5px"><b>'+esc(p.tienda)+'</b>'+(p.codigo?(' <span class="pd-mu">'+esc(p.codigo)+'</span>'):'')
+    +' · '+(p.atendido_por_n?('lo atendió <b>'+esc(p.atendido_por_n)+'</b>'+(p.conductor&&p.atendido_por&&p.conductor!==p.atendido_por?(' (era de '+esc(p.conductor_n)+')'):'')):'entregado')+' · '+hh(p.atendido_en||p.creado)
+    +'<div class="pd-mu" style="margin-top:2px">Pidió: '+esc(itemsTxt(p.items,p.visita))+(p.vendido?(' · Vendió: '+esc((p.vendido||[]).map(function(x){return x.c+' '+x.n}).join(', ')||(p.visita?'visitada, no compró':'—'))):'')+(dif?(' · <span style="color:#B97A1F">'+esc(dif)+'</span>'):'')+'</div></div>'}).join('')+'</div>';
+ box.innerHTML=h;
+}
+function difPedido(p){
+ if(p.visita||!p.vendido)return '';
+ var v={};(p.vendido||[]).forEach(function(x){v[x.id]=(v[x.id]||0)+Number(x.c||0)});
+ var falta=[];(p.items||[]).forEach(function(x){if(!x.id)return;var d=Number(x.c||0)-(v[x.id]||0);if(d>0)falta.push(d+' '+x.n);});
+ return falta.length?('faltó: '+falta.join(', ')):'';
+}
+window.pdConfirmar=async function(id){
+ var p=((window.PEDS&&PEDS.por_confirmar)||[]).find(function(x){return x.id===id});if(!p)return;
+ var s=$('pc-c-'+id),c=s?s.value:'';if(!c)return alert('Elige quién lo lleva.');
+ if(((p.detectado&&p.detectado.lineas)||[]).some(function(l){return !l.id})&&!confirm('Hay líneas del mensaje que no se reconocieron y no irán en el pedido. ¿Enviar igual?'))return;
+ var r=await apiA('/admin/pedidos/'+id+'/confirmar',{conductor:c});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ alert('✓ Pedido enviado a '+nomU(c)+(r.aviso?('\n\n'+r.aviso):''));
+ await cargarPeds(true);pintaListas();
+};
+window.pdEditar=async function(id){
+ var p=((window.PEDS&&PEDS.por_confirmar)||[]).find(function(x){return x.id===id});
+ if(!p){await cargarPeds(true);p=((PEDS&&PEDS.por_confirmar)||[]).find(function(x){return x.id===id});}
+ if(!p)return;
+ F.tab='registrar';F.editando=id;F.apodos={};F.visita=!!p.visita;F.nota=p.nota||'';F.conductor='';
+ F.fecha=p.lo_antes?'asap':(p.fecha===PEDS.hoy?'hoy':'dia');F.fechaD=p.fecha||'';
+ F.lineas=((p.detectado&&p.detectado.lineas)||[]).map(function(l){return {texto:l.texto,c:l.c,id:l.id||null,apodo:!!l.apodo}});
+ pkReset('pd');(p.items||[]).forEach(function(x){if(x.id)pkSetItem(x.id,x.c)});
+ await pdTienda(p.tienda_id?String(p.tienda_id):'');
+ var si=(F.sug||[]).filter(function(x){return !x.fuera});if(!F.conductor&&si.length===1)F.conductor=si[0].u;
+ pintaForm();
+ try{$('ped-form').scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}
+};
+window.pdDescartar=async function(id){
+ if(!confirm('¿Descartar este pedido? No le llega a nadie.'))return;
+ var r=await apiA('/admin/pedidos/'+id+'/descartar',{});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ if(F.editando===id)pdCancelarEd();
+ await cargarPeds(true);pintaListas();
+};
+window.pdAsignar=async function(id){
+ var s=$('pv-c-'+id),c=s?s.value:'';if(!c)return alert('Elige el conductor.');
+ var r=await apiA('/admin/pedidos/'+id+'/asignar',{conductor:c});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ await cargarPeds(true);pintaListas();
+};
+window.pdCancelar=async function(id){
+ var m=prompt('¿Cancelar este pedido? Escribe el motivo (queda guardado):','');if(m===null)return;
+ var r=await apiA('/admin/pedidos/'+id+'/cancelar',{motivo:m||'por el dueño'});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ await cargarPeds(true);pintaListas();
+};
+
+/* ── link de pedido: siempre lo envía el dueño desde su WhatsApp ── */
+window.pdLink=async function(tid){
+ var t=tPorId(tid);
+ if(!confirm('Se crea un link para que «'+(t?tnomA(t):'la tienda')+'» haga su pedido: sirve una sola vez y dura 2 horas. ¿Crear y enviar?'))return;
+ var w=window.open('','_blank');
+ var r=await apiA('/admin/tiendas/'+tid+'/link-pedido',{});
+ if(!(r&&r.ok)){if(w)w.close();return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));}
+ if(r.wa){if(w)w.location=r.wa;else window.open(r.wa,'_blank');return;}
+ if(w)w.close();
+ try{await navigator.clipboard.writeText(r.msg)}catch(e){}
+ prompt('La tienda no tiene un celular válido registrado. Copia el mensaje y envíaselo tú:',r.msg);
+};
+
+/* ── ficha de la tienda: código, precios acordados y pedidos ── */
+async function cardPedTienda(i){
+ var t=TIENDAS[i];if(!t||!t.id)return;var cont=document.getElementById('content');if(!cont||$('t-ped'))return;
+ var pr=t.precios||{},ids=Object.keys(pr);
+ var cat=function(id){return (window.CATA||[]).find(function(c){return (c.prods||[]).some(function(p){return p.id===id})})||null};
+ var nom=function(id){var c=cat(id),p=c&&(c.prods||[]).find(function(x){return x.id===id});return p?p.n:id};
+ var base=function(id){try{return (typeof precioPanel==='function')?precioPanel(id,cat(id),t.tp||'bodega'):0}catch(e){return 0}};
+ var h='<div class="card" id="t-ped"><div class="ct">💲 Precios y pedidos</div>'
+  +'<div style="font-size:13px;line-height:1.7">Código: <b>'+(t.cod?esc(t.cod):'—')+'</b>'+(t.cod?'':' <span class="pd-mu">('+((t.est||'ok')!=='ok'?'se asigna al aprobarla':(t.ub?'se asigna en unos minutos':'falta su distrito: se asigna cuando tenga GPS o lo corrijas'))+')</span>')
+  +'<br>Precios: '+(ids.length?('<b>Personalizada</b> (base '+esc(t.tp||'bodega')+'): '+ids.length+' precio(s) acordado(s)'):('los de su tipo, <b>'+esc(t.tp||'bodega')+'</b>'))
+  +(t.n_apodos?('<br><span class="pd-mu">Recuerda '+t.n_apodos+' apodo(s) de productos para leer sus pedidos.</span>'):'')+'</div>';
+ if(ids.length){
+  h+='<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px"><tr style="opacity:.6"><td>Producto</td><td style="text-align:right">Su precio</td><td style="text-align:right">Precio '+esc(t.tp||'bodega')+'</td><td></td></tr>'
+   +ids.map(function(id){var b=base(id);return '<tr style="border-top:1px solid var(--linea)"><td style="padding:6px 0">'+esc(nom(id))+'</td><td style="text-align:right;font-weight:800">'+m2(pr[id])+'</td><td style="text-align:right;opacity:.75">'+m2(b)+'</td><td style="text-align:right"><button class="pd-chip" style="margin:0" onclick="pdQuitarPrecio('+t.id+',\''+id+'\')">Quitar</button></td></tr>'}).join('')
+   +'</table><div style="margin-top:6px"><button class="pd-chip" onclick="pdQuitarPrecio('+t.id+',null)">Quitar todos (vuelve a precios de '+esc(t.tp||'bodega')+')</button></div>'
+   +'<div class="pd-mu" style="margin-top:4px">Los acuerda el conductor al vender: desde entonces a cualquiera le sale ese precio en esta tienda.</div>';
+ }
+ h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">'+((t.est||'ok')==='ok'?'<button class="pd-btn" onclick="pdLink('+t.id+')">🔗 Enviar link de pedido</button>':'')+'<button class="pd-btn sec" onclick="pdDesdeTienda('+t.id+')">📩 Registrar un pedido</button></div></div>';
+ var ref=$('t-deu')||$('t-lug')||cont.querySelector('.card');
+ if(ref)ref.insertAdjacentHTML('afterend',h);else cont.insertAdjacentHTML('beforeend',h);
+}
+if(typeof abrirTienda==='function'){var _abt184=abrirTienda;window.abrirTienda=async function(i){
+ var r=await _abt184.apply(this,arguments);
+ try{await cardPedTienda(i)}catch(e){console.error('precios tienda:',e)}
+ return r;};}
+window.pdQuitarPrecio=async function(tid,id){
+ if(!confirm(id?'¿Quitar este precio acordado? Vuelve al precio de su tipo.':'¿Quitar todos sus precios acordados? Vuelve a los precios de su tipo.'))return;
+ var r=await apiA('/admin/tiendas/'+tid+'/precios',id?{quitar:[id]}:{todos:true});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ var t=tPorId(tid);if(t)t.precios=r.precios||{};
+ var c=$('t-ped');if(c)c.remove();var i=tiendas().indexOf(t);if(i>=0)await cardPedTienda(i);
+};
+window.pdDesdeTienda=function(tid){F.tab='registrar';F.editando=null;F.lineas=null;pkReset('pd');try{if(typeof cerrarEdicion==='function')cerrarEdicion()}catch(e){}ir('pedidos');setTimeout(function(){pdTienda(String(tid))},120);};
+
+/* ── carga: los pedidos de ese conductor, para incluirlos ── */
+async function pintaPedCarga(){
+ var s=$('cg-cond');if(!s)return;var box=$('cg-peds');
+ if(!box){box=document.createElement('div');box.id='cg-peds';box.style.cssText='margin:8px 0';var sug=$('cg-sug');(sug||s).insertAdjacentElement('afterend',box);}
+ var u=s.value;if(!u){box.innerHTML='';return;}
+ await cargarPeds(false);
+ var ps=((window.PEDS&&PEDS.vigentes)||[]).filter(function(p){return p.conductor===u&&!p.visita});
+ if(!ps.length){box.innerHTML='<div class="pd-mu">📩 No tiene pedidos pendientes.</div>';return;}
+ box.innerHTML='<div style="border:1.5px solid rgba(29,78,216,.35);border-radius:12px;padding:10px 12px"><b style="font-size:12.5px">📩 Sus pedidos ('+ps.length+')</b>'
+  +ps.map(function(p){return '<label style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:12px;cursor:pointer"><input type="checkbox" class="cgp-ck" value="'+p.id+'" checked> <span><b>'+esc(p.tienda)+'</b> · '+esc(p.fecha_txt||p.fecha)+(p.atrasado?' ⏰':'')+'<br><span class="pd-mu">'+esc(itemsTxt(p.items))+'</span></span></label>'}).join('')
+  +'<button class="pd-btn sec" style="margin-top:6px" onclick="pdSumarCarga()">➕ Sumar los marcados a la carga</button></div>';
+}
+window.pdSumarCarga=function(){
+ var ids=Array.prototype.map.call(document.querySelectorAll('.cgp-ck:checked'),function(x){return Number(x.value)});
+ var ps=((window.PEDS&&PEDS.vigentes)||[]).filter(function(p){return ids.indexOf(p.id)>=0});
+ if(!ps.length)return alert('Marca al menos un pedido.');
+ var st=_PK.cg||(_PK.cg={cat:0,items:{}}),n=0;
+ ps.forEach(function(p){(p.items||[]).forEach(function(x){if(!x.id)return;var pr=null,cat=null;(window.CATA||[]).forEach(function(k){var f=(k.prods||[]).find(function(y){return y.id===x.id});if(f){pr=f;cat=k;}});if(!pr)return;
+  var cur=st.items[x.id]?st.items[x.id].c:0;st.items[x.id]={id:x.id,n:pr.n,c:cur+Number(x.c||0),cat:cat.id};n+=Number(x.c||0);});});
+ try{pkPinta('cg')}catch(e){}
+ alert('✓ Se sumaron '+n+' unidades a la carga.');
+};
+document.addEventListener('change',function(e){if(e.target&&e.target.id==='cg-cond')setTimeout(pintaPedCarga,30);});
+if(typeof cgTog==='function'){var _cgt=cgTog;window.cgTog=function(){var r=_cgt.apply(this,arguments);setTimeout(pintaPedCarga,60);return r;};}
+
+/* ── Bandeja: nombres de los avisos nuevos y atajo a Pedidos ── */
+var NOMB={pedido_nuevo:['📩','Pedidos por confirmar'],pedido_atendido:['✅','Pedidos atendidos'],pedido_no_pude:['↩️','Pedidos no entregados'],pedido_atrasado:['⏰','Pedidos atrasados'],
+ precio_acordado:['💲','Precios acordados'],credito_limite:['💳','Fiado sobre el límite'],cierre_indep:['🏁','Cierres de independientes'],cierre_sobra:['⚖️','Contó de más al cerrar'],correccion_indep:['✎','Ventas corregidas']};
+if(typeof htmlBandeja==='function'){var _hb184=htmlBandeja;window.htmlBandeja=function(evs,compacto){
+ var h=_hb184.apply(this,arguments);
+ Object.keys(NOMB).forEach(function(k){h=h.split('🔔 '+k).join(NOMB[k][0]+' '+NOMB[k][1]);});
+ ['📩','✅','↩️','⏰','💲','💳','🏁','⚖️','✎'].forEach(function(e){h=h.split('🔔 '+e).join(e);});
+ return h.replace(/<button onclick="archivarGrupo\('((?:pedido_[a-z_]+)\|[^']*)'\)"/g,function(m,k){
+  return '<button onclick="ir(\'pedidos\')" style="width:100%;margin-top:8px;padding:7px;border-radius:9px;border:1.5px solid #1D4ED8;background:rgba(29,78,216,.1);color:#1D4ED8;font-size:11px;font-weight:800;cursor:pointer">Ver en Pedidos</button>'+m;
+ });
+};}
+})();
+</script>
+
+<script id="v5traspasos185">
+(function(){
+/* ═══ 185 · Fase 5 — Traspasos con precio y pago (panel) ═══
+   · Sección «↔ Traspasos»: fiado por aprobar, lo que toca al almacén (aceptar con precio,
+     confirmar la entrega o la recepción), el almacén con un independiente (le vendes o le
+     compras), todos los activos, cuentas entre conductores (registrar pagos) y completados
+     (con «Anular», que devuelve la mercadería y deshace el dinero). */
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function m2(n){return 'S/'+Number(n||0).toFixed(2)}
+function hh(f){try{return new Date(f).toLocaleString('es-PE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}catch(e){return ''}}
+var $=function(id){return document.getElementById(id)};
+var PAGO={efectivo:'al contado',yape:'por Yape',fiado:'fiado'},EST={pendiente:'pendiente',por_aprobar:'fiado por aprobar',aceptado:'aceptado',parcial:'falta una confirmación',completado:'completado',anulado:'anulado'};
+if(typeof SECS!=='undefined'&&!SECS.find(function(s){return s[0]==='traspasos'})){
+ var ci=SECS.findIndex(function(s){return s[0]==='independientes'});if(ci<0)ci=SECS.findIndex(function(s){return s[0]==='conductores'});
+ SECS.splice(ci+1,0,['traspasos','↔','Traspasos']);try{if(typeof nav==='function')nav()}catch(e){}
+}
+window.TRA=null;var NF={con:'',dir:'vender',pm:'precio',pr:{},pago:'efectivo'};window.TRNF=NF;
+async function cargarTra(){var r=await apiA('/admin/traspasos');if(r&&r.ok)window.TRA=r;return window.TRA;}
+window.cargarTra=cargarTra;
+window.rTraspasos=function(){setTimeout(async function(){await cargarTra();pintaTra();},20);return '<div id="tra-box"><div class="card">Cargando traspasos…</div></div>';};
+var _rtra=window.render;window.render=function(){
+ if(typeof CUR!=='undefined'&&CUR==='traspasos'){
+  try{document.getElementById('content').innerHTML=rTraspasos()}catch(e){console.error(e)}
+  try{if(typeof nav==='function')nav()}catch(e){}
+  try{var h1=document.getElementById('top-t');if(h1)h1.textContent='Traspasos'}catch(e){}
+  return;
+ }
+ return _rtra.apply(this,arguments);
+};
+function items(t){return (t.items||[]).map(function(x){return x.c+' '+esc(x.n)+(x.pu!=null?(' a '+m2(x.pu)):'')}).join(', ')}
+function linea(t){return '<b>'+esc(t.de_n)+'</b> → <b>'+esc(t.para_n)+'</b>'+(t.total!=null?(' · '+m2(t.total)+' '+(PAGO[t.pago]||'')):'')}
+function card(t,acciones){
+ return '<div style="border:1px solid var(--linea);border-radius:12px;padding:10px 12px;margin-bottom:8px"><div style="font-size:13px">'+linea(t)+' <span style="font-size:10.5px;font-weight:800;border-radius:9px;padding:2px 8px;background:rgba(29,78,216,.12);color:#1D4ED8">'+esc(EST[t.estado]||t.estado)+'</span>'+(t.cruce?'':' <span style="font-size:10.5px;opacity:.6">mismo dueño</span>')+'</div>'
+  +'<div style="font-size:12px;margin-top:3px">'+items(t)+'</div><div style="font-size:11px;opacity:.65;margin-top:2px">#'+t.id+' · '+hh(t.creado)+(t.conf_de?' · entregó ✓':'')+(t.conf_para?' · recibió ✓':'')+(t.dist_m?(' · a '+t.dist_m+' m'):'')+(t.nota?(' · 📝 '+esc(t.nota)):'')+(t.anul_motivo?(' · anulado: '+esc(t.anul_motivo)):'')+'</div>'
+  +(acciones?('<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+acciones+'</div>'):'')+'</div>';
+}
+function btn(txt,fn,tipo){var st=tipo==='ok'?'background:#2F6B4F;color:#fff;border:none':(tipo==='no'?'background:none;border:1.5px solid #B23B2E;color:#B23B2E':(tipo==='pri'?'background:#1D4ED8;color:#fff;border:none':'background:none;border:1.5px solid rgba(128,128,128,.4);color:inherit'));return '<button onclick="'+fn+'" style="padding:8px 12px;border-radius:9px;font-weight:800;font-size:12px;cursor:pointer;'+st+'">'+txt+'</button>'}
+function pintaTra(){
+ var box=$('tra-box');if(!box)return;var D=window.TRA;
+ if(!D){box.innerHTML='<div class="card">No se pudieron cargar los traspasos.</div>';return;}
+ var act=D.activos||[],apr=act.filter(function(t){return t.estado==='por_aprobar'});
+ var alm=act.filter(function(t){return (t.de==='almacen'||t.para==='almacen')&&t.estado!=='por_aprobar'});
+ var otros=act.filter(function(t){return t.de!=='almacen'&&t.para!=='almacen'&&t.estado!=='por_aprobar'});
+ var h='';
+ h+='<div class="card"><div class="ct">💳 Fiado por aprobar ('+apr.length+')</div>'+(apr.length?'':'<div style="font-size:12px;opacity:.6">Nada por aprobar.</div>')
+  +apr.map(function(t){return card(t,btn('Aprobar el fiado','traAprobar('+t.id+',true)','ok')+btn('No aprobar','traAprobar('+t.id+',false)','no'))}).join('')
+  +'<div style="font-size:10.5px;opacity:.6">Un empleado quiere fiar tu mercadería a un independiente. Al contado no necesita tu aprobación.</div></div>';
+ h+='<div class="card"><div class="ct">🏬 Con el almacén ('+alm.length+')</div>'+(alm.length?'':'<div style="font-size:12px;opacity:.6">Nada pendiente con el almacén.</div>')
+  +alm.map(function(t){var a='';
+   var almIni=t.iniciador==='almacen',almEntrega=t.de==='almacen';
+   if(t.estado==='pendiente'&&!almIni){
+    if(t.cruce&&t.modo==='pedir'&&almEntrega)a+=btn('Aceptar y poner precio','traAceptarForm('+t.id+')','pri');
+    else a+=btn(t.cruce?('Aceptar '+m2(t.total)+' '+(PAGO[t.pago]||'')):'Aceptar','traAceptar('+t.id+')','pri');
+    a+=btn('Rechazar','traRechazar('+t.id+')','no');
+   }else if(t.estado==='pendiente'&&almIni){a+='<span style="font-size:11.5px;opacity:.7">Esperando que '+esc(almEntrega?t.para_n:t.de_n)+' lo acepte.</span>'+btn('Cancelar','traRechazar('+t.id+')','no');}
+   else if((t.estado==='aceptado'||t.estado==='parcial')&&!(almEntrega?t.conf_de:t.conf_para)){a+=btn(almEntrega?('Entregué'+(t.cruce?(t.pago==='fiado'?' (queda fiado)':' y cobré '+m2(t.total)):'')):('Recibí'+(t.cruce?(' y '+(t.pago==='fiado'?'queda fiado':'pagué '+m2(t.total))):'')),'traConfirmar('+t.id+')','ok')+btn('Rechazar','traRechazar('+t.id+')','no');}
+   else a+='<span style="font-size:11.5px;opacity:.7">Esperando la confirmación del conductor.</span>';
+   return card(t,a)+(TRAF===t.id?formPrecio(t):'');}).join('')+'</div>';
+ /* nuevo con un independiente */
+ var ind=D.independientes||[];
+ h+='<div class="card"><div class="ct">➕ El almacén con un independiente</div>'+(!ind.length?'<div style="font-size:12px;opacity:.6">No hay independientes.</div>':
+  ('<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><select id="traf-con" style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit" onchange="TRNF.con=this.value"><option value="">— independiente —</option>'+ind.map(function(x){return '<option value="'+esc(x.u)+'"'+(NF.con===x.u?' selected':'')+'>'+esc(x.n)+'</option>'}).join('')+'</select>'
+  +'<select style="padding:10px;border-radius:10px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit" onchange="TRNF.dir=this.value;pintaTra()"><option value="vender"'+(NF.dir==='vender'?' selected':'')+'>Le vendes (sale del almacén)</option><option value="comprar"'+(NF.dir==='comprar'?' selected':'')+'>Le compras (entra al almacén)</option></select></div>'
+  +'<div style="margin-top:10px">'+pickerHTML('trx')+'</div><div id="traf-precios"></div>'
+  +'<div style="margin-top:8px">'+[['costo','A costo'],['precio','A precio'],['libre','Libre']].map(function(o){return btn((NF.pm===o[0]?'● ':'')+o[1],"TRNF.pm='"+o[0]+"';pintaTra()",NF.pm===o[0]?'pri':'')}).join(' ')
+  +' &nbsp; '+[['efectivo','Contado'],['yape','Yape'],['fiado','Fiado']].map(function(o){return btn((NF.pago===o[0]?'● ':'')+o[1],"TRNF.pago='"+o[0]+"';pintaTra()",NF.pago===o[0]?'pri':'')}).join(' ')+'</div>'
+  +'<div style="font-size:11px;opacity:.65;margin-top:6px">'+(NF.pm==='costo'?(NF.dir==='vender'?'A costo: el costo PEPS de tu almacén.':'A costo: el costo PEPS del independiente.'):(NF.pm==='precio'?'A precio: el del catálogo si dejas el casillero vacío.':'Libre: escribe el precio de cada producto.'))+'</div>'
+  +'<button onclick="traNuevo()" style="width:100%;margin-top:10px;padding:12px;border:none;border-radius:11px;background:#1D4ED8;color:#fff;font-weight:800;cursor:pointer">Enviar al independiente</button>'))+'</div>';
+ h+='<div class="card"><div class="ct">↔ Entre conductores ('+otros.length+')</div>'+(otros.length?otros.map(function(t){return card(t,btn('Rechazar','traRechazar('+t.id+')','no'))}).join(''):'<div style="font-size:12px;opacity:.6">Ningún traspaso activo entre conductores.</div>')+'</div>';
+ var cu=D.cuentas||[];
+ h+='<div class="card"><div class="ct">💵 Cuentas entre conductores</div>'+(cu.length?cu.map(function(c,i){var mia=c.deudor==='dueno'||c.acreedor==='dueno';
+   return '<div style="border:1px solid var(--linea);border-radius:12px;padding:10px 12px;margin-bottom:8px"><div style="font-size:13px"><b>'+esc(c.deudor==='dueno'?'Tú':c.deudor_n)+'</b> '+(c.deudor==='dueno'?'le debes a ':'le debe a ')+'<b>'+esc(c.acreedor==='dueno'?'ti':c.acreedor_n)+'</b>: <b style="color:'+(c.acreedor==='dueno'?'#2F6B4F':'#B23B2E')+'">'+m2(c.saldo)+'</b></div>'
+    +(c.cargos||[]).map(function(g){return '<div style="font-size:11.5px;opacity:.8;margin-top:3px">'+hh(g.fecha)+' · '+esc(g.detalle||'')+' · '+m2(g.monto)+' · <b>'+(g.estado==='pagado'?'pagado':(g.estado==='parcial'?('faltan '+m2(g.pendiente)):'pendiente'))+'</b>'+(g.cobros&&g.cobros.length?(' · pagos: '+g.cobros.map(function(k){return esc(k.por)+' '+m2(k.monto)}).join(', ')):'')+'</div>'}).join('')
+    +(mia&&c.saldo>0?('<div style="margin-top:8px">'+btn(c.acreedor==='dueno'?'Registrar que te pagó':'Registrar que le pagaste','traCuenta('+i+')','ok')+'</div>'):'')+'</div>'}).join(''):'<div style="font-size:12px;opacity:.6">No hay cuentas pendientes.</div>')
+  +'<div style="font-size:10.5px;opacity:.6">Nacen de los traspasos fiados. Cada pago cancela primero la deuda más antigua. Si un empleado cobra o paga por ti, entra o sale de su efectivo del viaje.</div></div>';
+ var hi=D.historial||[];
+ h+='<div class="card"><div class="ct">✅ Completados (14 días)</div>'+(hi.length?hi.map(function(t){return card(t,t.estado==='completado'?btn('Anular','traAnular('+t.id+')','no'):'')}).join(''):'<div style="font-size:12px;opacity:.6">Sin traspasos completados.</div>')
+  +'<div style="font-size:10.5px;opacity:.6">Anular devuelve la mercadería a quien la entregó y deshace el cobro o el fiado. Coordínalo antes con ellos.</div></div>';
+ box.innerHTML=h;
+ try{if(document.getElementById('trx-chips'))pkPinta('trx');}catch(e){}
+ pintaPreciosNF();
+}
+window.pintaTra=pintaTra;   /* los botones del formulario la llaman */
+/* precios del formulario nuevo: una fila por producto elegido */
+function pintaPreciosNF(){
+ var b=$('traf-precios');if(!b)return;var it=(typeof pkItems==='function')?pkItems('trx'):[];
+ if(!it.length||NF.pm==='costo'){b.innerHTML='';return;}
+ b.innerHTML='<div style="border:1.5px dashed rgba(128,128,128,.35);border-radius:10px;padding:8px 10px;margin-top:6px">'+it.map(function(x){return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span style="flex:1;font-size:12.5px">'+x.c+' '+esc(x.n)+'</span>S/ <input type="number" step="0.10" min="0" value="'+(NF.pr[x.id]!=null?NF.pr[x.id]:'')+'" placeholder="'+(NF.pm==='precio'?'catálogo':'0.00')+'" onchange="TRNF.pr[\''+x.id+'\']=this.value" style="width:90px;padding:7px;border-radius:8px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:right"></div>'}).join('')+'</div>';
+}
+if(typeof pkPinta==='function'){var _pk185=pkPinta;window.pkPinta=function(p){var r=_pk185.apply(this,arguments);if(p==='trx')try{pintaPreciosNF()}catch(e){}return r;};}
+window.traNuevo=async function(){
+ var con=($('traf-con')||{}).value||NF.con;if(!con)return alert('Elige el independiente.');
+ var it=pkItems('trx');if(!it.length)return alert('Elige al menos un producto.');
+ var prods={},pr={};it.forEach(function(x){prods[x.id]=x.c;if(NF.pr[x.id]!=null&&NF.pr[x.id]!=='')pr[x.id]=Number(NF.pr[x.id]);});
+ var r=await apiA('/admin/traspasos/nuevo',{con:con,direccion:NF.dir,prods:prods,precio_modo:NF.pm,precios:pr,pago:NF.pago});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ alert('✓ Enviado por '+m2(r.total)+'. Cuando lo acepte, confirma aquí la entrega o la recepción.');
+ NF.pr={};pkReset('trx');await cargarTra();pintaTra();
+};
+var TRAF=null;
+function formPrecio(t){
+ return '<div style="border:1.5px solid #1D4ED8;border-radius:12px;padding:10px 12px;margin:-4px 0 10px"><b style="font-size:12.5px">Precio y forma de pago</b>'
+  +(t.items||[]).map(function(x){return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0"><span style="flex:1;font-size:12.5px">'+x.c+' '+esc(x.n)+'</span>S/ <input id="traf-p-'+x.id+'" type="number" step="0.10" min="0" placeholder="catálogo" style="width:90px;padding:7px;border-radius:8px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:inherit;text-align:right"></div>'}).join('')
+  +'<div style="margin-top:6px"><select id="traf-pm" style="padding:8px;border-radius:9px"><option value="precio">A precio (vacío = catálogo)</option><option value="costo">A costo (PEPS del almacén)</option><option value="libre">Libre</option></select> <select id="traf-pago" style="padding:8px;border-radius:9px"><option value="efectivo">Contado</option><option value="yape">Yape</option><option value="fiado">Fiado</option></select></div>'
+  +'<div style="margin-top:8px">'+btn('Aceptar','traAceptarPrecio('+t.id+')','pri')+' '+btn('Cerrar','traAceptarForm(null)','')+'</div></div>';
+}
+window.traAceptarForm=function(id){TRAF=id;pintaTra();};
+window.traAceptarPrecio=async function(id){
+ var t=((window.TRA&&TRA.activos)||[]).find(function(x){return x.id===id});if(!t)return;
+ var pr={};(t.items||[]).forEach(function(x){var v=($('traf-p-'+x.id)||{}).value;if(v)pr[x.id]=Number(v);});
+ var r=await apiA('/admin/traspasos/'+id+'/aceptar',{precio_modo:($('traf-pm')||{}).value,precios:pr,pago:($('traf-pago')||{}).value});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ TRAF=null;alert('✓ Aceptado por '+m2(r.total)+'. Al entregarlo, confírmalo aquí.');await cargarTra();pintaTra();
+};
+window.traAceptar=async function(id){var r=await apiA('/admin/traspasos/'+id+'/aceptar',{});if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));await cargarTra();pintaTra();};
+window.traConfirmar=async function(id){
+ if(!confirm('¿Confirmas tu parte (entrega o recepción) de este traspaso?'))return;
+ var r=await apiA('/admin/traspasos/'+id+'/confirmar',{});if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ alert(r.estado==='completado'?'✓ Traspaso completado: se movió la mercadería.':'✓ Confirmado. Falta el conductor.');await cargarTra();pintaTra();
+};
+window.traRechazar=async function(id){if(!confirm('¿Rechazar este traspaso?'))return;var r=await apiA('/admin/traspasos/'+id+'/rechazar',{});if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));await cargarTra();pintaTra();};
+window.traAprobar=async function(id,si){var r=await apiA('/admin/traspasos/'+id+'/aprobar',{aprobar:!!si});if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));await cargarTra();pintaTra();};
+window.traAnular=async function(id){
+ var m=prompt('¿Anular este traspaso? La mercadería vuelve a quien la entregó y se deshace el cobro o el fiado.\nEscribe el motivo:','');if(!m)return;
+ var r=await apiA('/admin/traspasos/'+id+'/anular',{motivo:m});if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ alert('✓ Traspaso anulado.');await cargarTra();pintaTra();
+};
+window.traCuenta=async function(i){
+ var c=((window.TRA&&TRA.cuentas)||[])[i];if(!c)return;
+ var v=prompt('¿Cuánto? (la deuda es '+m2(c.saldo)+')',Number(c.saldo).toFixed(2));if(!v)return;
+ var yape=confirm('¿Fue por Yape? (Aceptar = Yape · Cancelar = efectivo)');
+ var r=await apiA('/admin/cuentas/mov',{deudor:c.deudor,acreedor:c.acreedor,monto:Number(String(v).replace(',','.')),pago:yape?'yape':'efectivo'});
+ if(!(r&&r.ok))return alert('No se pudo: '+((r&&r.error)||'sin respuesta'));
+ await cargarTra();pintaTra();
+};
+/* Bandeja: nombres y atajo */
+var NOMB={traspaso_fiado:['💳','Fiado de mercadería por aprobar'],traspaso_lejos:['📍','Traspasos confirmados lejos'],cuenta_mov:['💵','Cuentas entre conductores']};
+if(typeof htmlBandeja==='function'){var _hb185=htmlBandeja;window.htmlBandeja=function(evs,compacto){
+ var h=_hb185.apply(this,arguments);
+ Object.keys(NOMB).forEach(function(k){h=h.split('🔔 '+k).join(NOMB[k][0]+' '+NOMB[k][1]);});
+ ['💳','📍','💵','↔'].forEach(function(e){h=h.split('🔔 '+e).join(e);});
+ return h.replace(/<button onclick="archivarGrupo\('((?:traspaso[a-z_]*|cuenta_mov)\|[^']*)'\)"/g,function(m,k){
+  return '<button onclick="ir(\'traspasos\')" style="width:100%;margin-top:8px;padding:7px;border-radius:9px;border:1.5px solid #1D4ED8;background:rgba(29,78,216,.1);color:#1D4ED8;font-size:11px;font-weight:800;cursor:pointer">Ver en Traspasos</button>'+m;
+ });
+};}
+})();
+</script>
+
 </body>
 </html>

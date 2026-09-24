@@ -32,6 +32,8 @@ let twilioC=null;if(process.env.TWILIO_ACCOUNT_SID&&process.env.TWILIO_AUTH_TOKE
 let anthropic=null;if(process.env.ANTHROPIC_API_KEY){try{const A=require("@anthropic-ai/sdk");anthropic=new A({apiKey:process.env.ANTHROPIC_API_KEY});}catch(e){console.log("Anthropic no disponible:",e.message);}}
 // ⬇️ Si Anthropic publica un modelo nuevo, cámbialo SOLO aquí:
 const MODELO_IA="claude-sonnet-4-6";
+/* 184 · pedidos: texto con Haiku 4.5 (barato); fotos de pedidos con Sonnet 5 */
+const MODELO_IA_PEDIDOS="claude-haiku-4-5-20251001",MODELO_IA_FOTOS="claude-sonnet-5";
 
 const app=express();
 /* 175 · Express 4 no atrapa los errores de las rutas async: la petición quedaba
@@ -64,7 +66,7 @@ app.use(cors({origin:(o,cb)=>{
   cb(null,ORIG.includes(String(o).replace(/\/+$/,"")));
 }}));
 app.use(rateLimit({windowMs:15*60*1000,max:400}));
-const NO_TOCAR=new Set(["pass","actual","nueva","clave","foto"]);
+const NO_TOCAR=new Set(["pass","actual","nueva","clave","foto","imagen","texto"]);   /* 184 · imagen y texto se limpian en su ruta */
 function sanea(o,prof){if(prof>7)return null;   /* 175 · antes 4: los puntos de las zonas llegaban vacíos */
  if(typeof o==="string")return limpia(o,300);
  if(Array.isArray(o))return o.slice(0,300).map(x=>sanea(x,prof+1));
@@ -117,19 +119,58 @@ async function avisarAdmin(msg,tipo,bandeja){
    cambio leía el saldo, sumaba o restaba y lo escribía (dos cambios a la vez se
    pisaban), y los abonos NO quedaban en el historial: la base solo aceptaba "cargo"
    y "pago" y el servidor escribía "abono" (así se perdió el abono de TIENDA4). */
-async function saldoHistorial(tid){
-  const{data}=await db.from("creditos_mov").select("tipo,monto").eq("tienda_id",tid);
-  return Math.max(0,Math.round((data||[]).reduce((s,m)=>s+(m.tipo==="cargo"?1:-1)*Number(m.monto||0),0)*100)/100);
+/* 182 · CADA ACREEDOR SU CUENTA. «dueno» = el dueño (lo que fían y cobran sus empleados);
+   un independiente fía y cobra en su propia cuenta. tiendas.sa sigue siendo la deuda con el
+   dueño (la que ve Créditos del panel); el total con todos se calcula del historial. */
+const acreedorDe=m=>(m&&m.acreedor)||"dueno";
+async function saldosTienda(tid){
+  const{data}=await db.from("creditos_mov").select("tipo,monto,acreedor").eq("tienda_id",tid);
+  const por={};
+  (data||[]).forEach(m=>{const a=acreedorDe(m);por[a]=(por[a]||0)+(m.tipo==="cargo"?1:-1)*Number(m.monto||0);});
+  let total=0;Object.keys(por).forEach(a=>{por[a]=Math.max(0,Math.round(por[a]*100)/100);total+=por[a];});
+  return {por,total:Math.round(total*100)/100};
 }
-async function moverDeuda(tid,tipo,monto,detalle,por){
+async function saldoHistorial(tid,acreedor){
+  const s=await saldosTienda(tid);return s.por[acreedor||"dueno"]||0;
+}
+async function moverDeuda(tid,tipo,monto,detalle,por,acreedor){
+  const A=acreedor||"dueno";
   monto=Math.round(num(monto,0,999999)*100)/100;
   if(!tid||!monto)return {sa:null,monto:0};
-  if(tipo==="abono"){const s0=await saldoHistorial(tid);if(monto>s0)monto=s0;if(!monto)return {sa:s0,monto:0};}
-  const{error}=await db.from("creditos_mov").insert({tienda_id:tid,tipo,monto,detalle:limpia(detalle,160),por});
+  if(tipo==="abono"){const s0=await saldoHistorial(tid,A);if(monto>s0)monto=s0;if(!monto)return {sa:s0,monto:0,total:(await saldosTienda(tid)).total};}
+  const{error}=await db.from("creditos_mov").insert({tienda_id:tid,tipo,monto,detalle:limpia(detalle,160),por,acreedor:A});
   if(error)throw new Error("No se pudo registrar el "+tipo+" en el historial: "+error.message);
-  const sa=await saldoHistorial(tid);
-  await db.from("tiendas").update({sa}).eq("id",tid);
-  return {sa,monto};
+  const st=await saldosTienda(tid);
+  await db.from("tiendas").update({sa:st.por.dueno||0}).eq("id",tid);
+  return {sa:st.por[A]||0,monto,total:st.total};
+}
+/* 182 · cobros por PEPS: cada pago cancela primero la deuda más antigua de ESE acreedor.
+   Deja, por cada deuda: quién fió, cuándo, cuánto ya se pagó, quién lo cobró y cuánto falta. */
+async function deudasDetalle(tid){
+  const{data}=await db.from("creditos_mov").select("*").eq("tienda_id",tid);
+  const movs=(data||[]).slice().sort((a,b)=>(new Date(a.creado)-new Date(b.creado))||(a.id-b.id));
+  const cuentas={};
+  movs.forEach(m=>{
+    const a=acreedorDe(m),c=cuentas[a]||(cuentas[a]={acreedor:a,cargos:[],saldo:0,a_favor:0});
+    const monto=Number(m.monto||0);
+    if(m.tipo==="cargo"){c.cargos.push({id:m.id,fecha:m.creado,por:m.por,detalle:m.detalle,monto,pagado:0,pendiente:monto,cobros:[]});return;}
+    let resto=monto;
+    for(const g of c.cargos){if(resto<=0)break;if(g.pendiente<=0)continue;
+      const x=Math.min(resto,g.pendiente);g.pagado=Math.round((g.pagado+x)*100)/100;g.pendiente=Math.round((g.pendiente-x)*100)/100;
+      g.cobros.push({por:m.por,fecha:m.creado,monto:Math.round(x*100)/100});resto-=x;}
+    if(resto>0.004)c.a_favor=Math.round((c.a_favor+resto)*100)/100;
+  });
+  Object.values(cuentas).forEach(c=>{
+    c.saldo=Math.round(c.cargos.reduce((s,g)=>s+g.pendiente,0)*100)/100;
+    c.cargos.forEach(g=>{g.estado=g.pendiente<=0.004?"pagado":(g.pagado>0?"parcial":"pendiente");});
+  });
+  return Object.values(cuentas);
+}
+async function nombresAcreedores(){
+  const[{data:cs},P]=await Promise.all([db.from("conductores").select("usuario,nombre"),getParams()]);
+  const m={dueno:((P.negocio&&P.negocio.nombre)?(P.negocio.nombre+" (dueño)"):"el dueño")};
+  (cs||[]).forEach(c=>{m[c.usuario]=c.nombre||c.usuario;});
+  return m;
 }
 async function evento(tipo,titulo,desc,ref){await db.from("eventos").insert({tipo,titulo,descripcion:desc,ref:String(ref||""),visto:false});}
 async function avisoA(para,txt){await db.from("avisos").insert({para,txt,hora:horaPE()});}
@@ -305,6 +346,520 @@ function authA(req,res,next){
 // ════════ SALUD ════════
 const fs=require("fs");
 const path=require("path");
+/* ═══ 181 · LUGARES: distritos oficiales del Perú (distritos-peru.json, INEI 2026) ═══
+   · Cada tienda toma su distrito por GPS (columna ubigeo, 6 dígitos INEI). El dueño
+     puede corregirlo a mano (lug_manual) para tiendas pegadas a un límite.
+   · Cada conductor tiene lugares habilitados: prefijos de departamento (2 dígitos),
+     provincia (4) o distrito (6), con excepciones. Manda el prefijo más específico.
+     Sin lugares: el empleado ve todas las tiendas; el independiente, ninguna.
+   · Zona protegida (hoy el distrito Espinar, 080801): el independiente solo ve ahí las
+     tiendas que el dueño le habilite una por una, más las que él mismo registre. */
+let GEO=null;
+function geo(){
+  if(GEO)return GEO;
+  try{GEO=JSON.parse(fs.readFileSync(path.join(__dirname,"distritos-peru.json"),"utf8"));}
+  catch(e){console.log("Lugares: falta distritos-peru.json en el repositorio →",e.message);GEO={dist:[],dep:{},prov:{},escala:1e4,falta:true};}
+  GEO.idx={};(GEO.dist||[]).forEach(d=>{GEO.idx[d[0]]=d;});
+  return GEO;
+}
+function enAnillo(x,y,r){let d=false;for(let i=0,j=r.length-2;i<r.length;j=i,i+=2){const xi=r[i],yi=r[i+1],xj=r[j],yj=r[j+1];if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi))d=!d;}return d;}
+function ubicarGPS(lat,lon){
+  lat=Number(lat);lon=Number(lon);if(!isFinite(lat)||!isFinite(lon)||(!lat&&!lon))return null;
+  const G=geo(),E=G.escala||1e4,x=Math.round(lon*E),y=Math.round(lat*E);
+  for(const d of G.dist){const b=d[2];if(x<b[0]||x>b[2]||y<b[1]||y>b[3])continue;
+    for(const pol of d[3])if(enAnillo(x,y,pol[0])&&!pol.slice(1).some(h=>enAnillo(x,y,h)))return d[0];}
+  return null;
+}
+const PREF_RE=/^\d{2}(\d{2}(\d{2})?)?$/;
+function lugarValido(p){p=String(p||"");if(!PREF_RE.test(p))return false;const G=geo();
+  return p.length===2?!!G.dep[p]:(p.length===4?!!G.prov[p]:!!G.idx[p]);}
+function nombreLugar(p){
+  p=String(p||"");if(!p)return "";const G=geo(),partes=[];
+  if(p.length>=6&&G.idx[p.slice(0,6)])partes.push(G.idx[p.slice(0,6)][1]);
+  if(p.length>=4&&G.prov[p.slice(0,4)])partes.push(G.prov[p.slice(0,4)]);
+  if(G.dep[p.slice(0,2)])partes.push(G.dep[p.slice(0,2)]);
+  return partes.join(", ");
+}
+/* «fijo» y «paso» son los nombres viejos: se leen como empleado e independiente */
+const tipoNorm=v=>{v=String(v||"").toLowerCase();return (v==="paso"||v==="independiente")?"independiente":"empleado";};
+const tipoDe=c=>tipoNorm(c&&c.tipo);
+function lugaresDe(c){
+  const L=(c&&c.lugares&&typeof c.lugares==="object")?c.lugares:{};
+  return {inc:(Array.isArray(L.inc)?L.inc:[]).filter(p=>PREF_RE.test(p)),exc:(Array.isArray(L.exc)?L.exc:[]).filter(p=>PREF_RE.test(p))};
+}
+function habilitadoEn(c,ub){
+  const L=lugaresDe(c);
+  if(!L.inc.length)return tipoDe(c)==="empleado";
+  if(!ub)return tipoDe(c)==="empleado";
+  let mejor=null;
+  L.inc.forEach(p=>{if(ub.startsWith(p)&&(!mejor||p.length>mejor.p.length))mejor={p,s:true};});
+  L.exc.forEach(p=>{if(ub.startsWith(p)&&(!mejor||p.length>=mejor.p.length))mejor={p,s:false};});
+  return !!(mejor&&mejor.s);
+}
+const protegidas=P=>Array.isArray(P&&P.protegidas)?P.protegidas.filter(p=>PREF_RE.test(p)):["080801"];
+const esProtegida=(P,ub)=>!!ub&&protegidas(P).some(p=>ub.startsWith(p));
+function puedeVer(c,t,P){
+  if(!c||!t||t.act===false)return false;
+  const u=c.usuario,est=t.estado_reg||"ok";
+  if(est==="rechazada"||est==="fusionada")return false;
+  if(t.conductor_reg===u)return true;                        // las que él registró (también pendientes)
+  if(est==="pendiente")return false;                          // pendiente de otro: no la ve nadie más
+  if((Array.isArray(t.habilitados)?t.habilitados:[]).includes(u))return true;   // habilitada a mano
+  if(!habilitadoEn(c,t.ubigeo))return false;
+  if(tipoDe(c)==="independiente"&&esProtegida(P,t.ubigeo))return false;
+  return true;
+}
+function limiteLugar(P,ub){
+  const m=(P&&P.limite_lugar&&typeof P.limite_lugar==="object")?P.limite_lugar:{};
+  let mejor=null;Object.keys(m).forEach(p=>{if(ub&&String(ub).startsWith(p)&&(!mejor||p.length>mejor.length))mejor=p;});
+  return mejor?num(m[mejor],0,100000,0):(num(P&&P.limite_credito,0,100000,230)||230);
+}
+function resumenLugares(c){
+  const L=lugaresDe(c);
+  if(!L.inc.length)return tipoDe(c)==="empleado"?"Sin lugares: ve todas las tiendas":"Sin lugares: no ve ninguna tienda";
+  return L.inc.map(nombreLugar).join(" · ")+(L.exc.length?(" (menos "+L.exc.map(nombreLugar).join(", ")+")"):"");
+}
+/* repetidas: se compara con TODAS las tiendas, también las que el conductor no ve */
+const normN=x=>String(x||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"")
+  .replace(/\b(tienda|bodega|minimarket|market|la|el|de|del|los|las|don|dona|sra|sr)\b/g," ").replace(/[^a-z0-9]/g,"");
+function metrosEntre(a,b,c,d){const R=6371000,k=Math.PI/180,x=Math.sin((c-a)*k/2)**2+Math.cos(a*k)*Math.cos(c*k)*Math.sin((d-b)*k/2)**2;return Math.round(2*R*Math.asin(Math.sqrt(x)));}
+async function buscarRepetida(nombre,lat,lon,P){
+  const radio=num((P&&P.operacion&&P.operacion.radio_dup_m)||(P&&P.dup_radio_m),1,500,15),nn=normN(nombre);
+  const{data:ts}=await db.from("tiendas").select("id,nombre,lat,lon,act,estado_reg").eq("act",true);
+  let mejor=null;
+  (ts||[]).forEach(t=>{
+    if(t.estado_reg==="rechazada"||t.estado_reg==="fusionada")return;
+    const m=(lat!=null&&lon!=null&&t.lat!=null&&t.lon!=null)?metrosEntre(lat,lon,Number(t.lat),Number(t.lon)):null;
+    const nt=normN(t.nombre),mismo=nn.length>=3&&nt===nn, cerca=(m!=null&&m<=radio);
+    /* 182 · nombre parecido (uno contiene al otro, 4+ letras) a menos de 50 m */
+    const parecido=!mismo&&nn.length>=4&&nt.length>=4&&(nt.indexOf(nn)>=0||nn.indexOf(nt)>=0)&&m!=null&&m<=50;
+    if(cerca||parecido||(mismo&&(m==null||m<=300))){const pt=(cerca?1000-m:0)+(mismo?500:0)+(parecido?200:0);if(!mejor||pt>mejor.pt)mejor={t,m,pt};}
+  });
+  return mejor;
+}
+async function recalcularLugares(todas){
+  const{data:ts}=await db.from("tiendas").select("id,nombre,lat,lon,ubigeo,lug_manual");
+  let n=0;
+  for(const t of (ts||[])){
+    if(t.lug_manual||t.lat==null||t.lon==null)continue;
+    if(!todas&&t.ubigeo)continue;
+    const ub=ubicarGPS(t.lat,t.lon);
+    if(ub&&ub!==t.ubigeo){await db.from("tiendas").update({ubigeo:ub}).eq("id",t.id);n++;}
+  }
+  return n;
+}
+setTimeout(async()=>{try{geo();const n=await recalcularLugares(false);if(n)console.log("Lugares: "+n+" tiendas ubicadas en su distrito");}catch(e){console.log("Lugares:",e.message);}},8000);
+/* ═══ 184 · FASE 2: PEDIDOS Y PRECIOS ACORDADOS ═══
+   · Código de tienda DEP-PRO-NNNN (ej. CUS-ESP-0045): departamento y provincia con
+     abreviaturas FIJAS (ISO para los departamentos; las provincias, tabla congelada aquí)
+     y el número de la tienda dentro de su provincia. Se asigna una vez y no cambia nunca,
+     aunque después se corrija su distrito.
+   · Un pedido pasa por «Por confirmar» (link, mensaje pegado, foto) o nace confirmado (lo
+     registra el dueño). Confirmado = vigente hasta que alguien lo entregue: lo atiende la
+     venta a esa tienda. «No pude» lo devuelve al dueño. Pasado su día, queda atrasado.
+   · Precio acordado: el que un conductor cambió al vender queda para esa tienda. */
+const ABREV_DEP={"10":"HUC","11":"ICA","12":"JUN","13":"LAL","14":"LAM","15":"LIM","16":"LOR","17":"MDD","18":"MOQ","19":"PAS","20":"PIU","21":"PUN","22":"SAM","23":"TAC","24":"TUM","25":"UCA","01":"AMA","02":"ANC","03":"APU","04":"ARE","05":"AYA","06":"CAJ","07":"CAL","08":"CUS","09":"HUV"};
+const ABREV_PRO=Object.fromEntries("0101:CHA,0102:BAG,0103:BON,0104:CON,0105:LUY,0106:RME,0107:UTC,0201:HUA,0202:AIJ,0203:ARA,0204:ASU,0205:BOL,0206:CAR,0207:CFF,0208:CAS,0209:COR,0210:HRI,0211:HRM,0212:HYL,0213:MLU,0214:OCR,0215:PAL,0216:POM,0217:REC,0218:SAN,0219:SIH,0220:YUN,0301:ABA,0302:AND,0303:ANT,0304:AYM,0305:COT,0306:CHI,0307:GRA,0401:ARE,0402:CAM,0403:CAR,0404:CAS,0405:CAY,0406:CON,0407:ISL,0408:UNI,0501:HUA,0502:CAN,0503:HSA,0504:HNT,0505:MAR,0506:LUC,0507:PAR,0508:PSS,0509:SUC,0510:VFA,0511:VHU,0601:CAJ,0602:CJB,0603:CEL,0604:CHO,0605:CON,0606:CUT,0607:HUA,0608:JAE,0609:SIG,0610:SMA,0611:SMI,0612:SPA,0613:SCR,0701:PCC,0801:CUS,0802:ACO,0803:ANT,0804:CAL,0805:CAN,0806:CNC,0807:CHU,0808:ESP,0809:CON,0810:PAR,0811:PAU,0812:QUI,0813:URU,0901:HUA,0902:ACO,0903:ANG,0904:CAS,0905:CHU,0906:HYT,0907:TAY,1001:HUA,1002:AMB,1003:DMA,1004:HCY,1005:HML,1006:LPR,1007:MAR,1008:PAC,1009:PIN,1010:LAU,1011:YAR,1101:ICA,1102:CHI,1103:NAS,1104:PAL,1105:PIS,1201:HUA,1202:CON,1203:CHA,1204:JAU,1205:JUN,1206:SAT,1207:TAR,1208:YAU,1209:CHU,1301:TRU,1302:ASC,1303:BOL,1304:CHE,1305:JUL,1306:OTU,1307:PAC,1308:PAT,1309:SCA,1310:SCH,1311:GCH,1312:VIR,1401:CHI,1402:FER,1403:LAM,1501:LIM,1502:BAR,1503:CAJ,1504:CAN,1505:CNT,1506:HUA,1507:HRC,1508:HRA,1509:OYO,1510:YAU,1601:MAY,1602:AAM,1603:LOR,1604:MRC,1605:REQ,1606:UCA,1607:DMA,1608:PUT,1701:TAM,1702:MAN,1703:TAH,1801:MNI,1802:GSC,1803:ILO,1901:PAS,1902:DAC,1903:OXA,2001:PIU,2002:AYA,2003:HUA,2004:MOR,2005:PAI,2006:SUL,2007:TAL,2008:SEC,2101:PUN,2102:AZA,2103:CAR,2104:CHU,2105:COL,2106:HUA,2107:LAM,2108:MEL,2109:MOH,2110:SAP,2111:SRO,2112:SAN,2113:YUN,2201:MOY,2202:BEL,2203:DOR,2204:HUA,2205:LAM,2206:MCA,2207:PIC,2208:RIO,2209:SMA,2210:TOC,2301:TAC,2302:CAN,2303:JBA,2304:TAR,2401:TUM,2402:CVI,2403:ZAR,2501:CPO,2502:ATA,2503:PAB,2504:PUR".split(",").map(x=>x.split(":")));
+function prefijoCodigo(ub){ub=String(ub||"");const d=ABREV_DEP[ub.slice(0,2)],p=ABREV_PRO[ub.slice(0,4)];return (d&&p)?(d+"-"+p):null;}
+let _codCorre=false;
+async function asegurarCodigos(){
+  if(_codCorre)return 0;_codCorre=true;
+  try{
+    const{data:ts}=await db.from("tiendas").select("id,ubigeo,codigo,estado_reg").order("id",{ascending:true});
+    const max={};
+    (ts||[]).forEach(t=>{const m=String(t.codigo||"").match(/^([A-Z]{3}-[A-Z]{3})-(\d+)$/);if(m)max[m[1]]=Math.max(max[m[1]]||0,parseInt(m[2],10));});
+    let n=0;
+    for(const t of (ts||[])){
+      if(t.codigo||!t.ubigeo||(t.estado_reg&&t.estado_reg!=="ok"))continue;
+      const pre=prefijoCodigo(t.ubigeo);if(!pre)continue;
+      const k=(max[pre]||0)+1;max[pre]=k;
+      const{error}=await db.from("tiendas").update({codigo:pre+"-"+String(k).padStart(4,"0")}).eq("id",t.id).is("codigo",null);
+      if(!error)n++;
+    }
+    return n;
+  }catch(e){console.log("códigos:",e.message);return 0;}
+  finally{_codCorre=false;}
+}
+const cryptoR=require("crypto");
+const PED_VIG=["pendiente","devuelto"];
+const normTxt=s=>String(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
+const fechaOK=f=>/^\d{4}-\d{2}-\d{2}$/.test(String(f||""))&&!isNaN(new Date(String(f)+"T12:00:00Z").getTime());
+const sumarDias=(f,n)=>new Date(new Date(f+"T12:00:00Z").getTime()+n*86400000).toISOString().slice(0,10);
+const diaDe=f=>diaIdx(new Date(String(f).slice(0,10)+"T12:00:00-05:00").getTime());
+function fechaTxt(f){
+  f=String(f||"").slice(0,10);if(!fechaOK(f))return "";
+  const h=hoy();if(f===h)return "hoy";if(f===sumarDias(h,1))return "mañana";if(f===sumarDias(h,-1))return "ayer";
+  return DIA_NOM[diaDe(f)]+" "+Number(f.slice(8,10))+"/"+Number(f.slice(5,7));
+}
+const txtItems=(its,visita)=>visita?"🚚 que pase el camión (elige al verlo)":((Array.isArray(its)?its:[]).map(x=>x.c+" "+(x.n||x.p||"")).join(", ")||"—");
+/* productos activos (de categorías activas), para validar y para el link */
+async function catalogoPed(){
+  const[{data:cat},{data:cats}]=await Promise.all([
+    db.from("catalogo").select("id,cat,nombre,activo,no_tipos,orden").or("activo.is.null,activo.eq.true"),
+    db.from("categorias").select("id,nom,emoji,orden,activa").eq("activa",true).order("orden")]);
+  const cv=new Set((cats||[]).map(c=>c.id));
+  const prods=(cat||[]).filter(p=>cv.has(p.cat)).sort((a,b)=>(Number(a.orden||0)-Number(b.orden||0))||String(a.nombre).localeCompare(String(b.nombre)));
+  return {prods,cats:cats||[],por:Object.fromEntries(prods.map(p=>[p.id,p]))};
+}
+/* [{id,n,c}] solo con productos que existen; admite el formato viejo {p,c} (sin id) */
+function itemsPed(items,C){
+  const out=[],vistos={};
+  (Array.isArray(items)?items:[]).slice(0,80).forEach(x=>{
+    if(!x||typeof x!=="object")return;
+    const c=Math.round(num(x.c,0,999,0));if(!c)return;
+    const id=limpia(x.id,40);
+    if(id){if(!C.por[id])return;if(vistos[id]){vistos[id].c=Math.min(999,vistos[id].c+c);return;}
+      const it={id,n:C.por[id].nombre,c};vistos[id]=it;out.push(it);return;}
+    const n=limpia(x.p||x.n,60);if(n)out.push({n,c});
+  });
+  return out;
+}
+const telPE=v=>{const d=String(v||"").replace(/\D/g,"");if(/^9\d{8}$/.test(d))return "51"+d;if(/^519\d{8}$/.test(d))return d;return null;};
+function sugeridosDe(t,conds,P){
+  const act=(conds||[]).filter(c=>c.activo!==false);
+  const si=t?act.filter(c=>puedeVer(c,t,P)):[];
+  return si.map(c=>({u:c.usuario,n:c.nombre||c.usuario,tipo:tipoDe(c)}))
+    .concat(act.filter(c=>!si.includes(c)).map(c=>({u:c.usuario,n:c.nombre||c.usuario,tipo:tipoDe(c),fuera:true})));
+}
+/* deja vigente un pedido (confirmado, con conductor) y reemplaza al anterior sin entregar de esa tienda */
+async function activarPedido(p,conductor){
+  const upd={estado:"pendiente",conductor,confirmado_en:new Date().toISOString()};
+  let f=fechaOK(p.fecha&&String(p.fecha).slice(0,10))?String(p.fecha).slice(0,10):hoy();
+  if(p.lo_antes||f<hoy())f=hoy();
+  upd.fecha=f;
+  await db.from("pedidos").update(upd).eq("id",p.id);
+  Object.assign(p,upd);
+  let reemp=[];
+  if(p.tienda_id){
+    const{data:otros}=await db.from("pedidos").select("id,estado,creado,conductor").eq("tienda_id",p.tienda_id).in("estado",["pendiente","devuelto","por_confirmar"]);
+    reemp=(otros||[]).filter(o=>o.id!==p.id&&(o.estado!=="por_confirmar"||new Date(o.creado)<=new Date(p.creado||Date.now())));
+    for(const o of reemp){
+      await db.from("pedidos").update({estado:"reemplazado",reemplazado_por:p.id}).eq("id",o.id);
+      if(o.estado==="pendiente"&&o.conductor&&o.conductor!==conductor)await avisoA(o.conductor,"↩️ El pedido de «"+(p.tienda||"una tienda")+"» cambió y ya no te toca a ti.");
+    }
+  }
+  await avisoA(conductor,"📩 Pedido para "+fechaTxt(f)+" — «"+(p.tienda||"")+"»: "+txtItems(p.items,p.visita)+(p.nota?(" · "+p.nota):""));
+  let aviso=null;
+  if(p.tienda_id){
+    const{data:t}=await db.from("tiendas").select("nombre,dias_atiende").eq("id",p.tienda_id).maybeSingle();
+    if(t&&!abreEl(t.dias_atiende,diaDe(f))){
+      aviso="⚠️ "+t.nombre+" no atiende los "+DIA_NOM[diaDe(f)]+" según sus días cargados. El pedido queda registrado igual.";
+      const P=await getParams();
+      if(((P.dias_cfg||{}).avisar_pedido)!==false)
+        await evento("pedido_dia","📅 Pedido para un día que no atiende — "+t.nombre,"El pedido es para el "+DIA_NOM[diaDe(f)]+" "+f+", pero esa tienda tiene marcado que no atiende ese día ("+diasTexto(t.dias_atiende)+"). Revisa si los días están bien cargados.",String(p.tienda_id));
+    }
+  }
+  return {reemplazados:reemp.map(o=>o.id),aviso};
+}
+/* la venta (o la visita, si pidió que pase el camión) atiende el pedido vigente de esa tienda */
+async function atenderPedido(t,u,v,items,esVisita){
+  const{data:ps}=await db.from("pedidos").select("*").in("estado",PED_VIG);
+  const nt=String(t.nombre||"").toLowerCase().trim();
+  const suyos=(ps||[]).filter(p=>(p.tienda_id&&p.tienda_id===t.id)||(!p.tienda_id&&String(p.tienda||"").toLowerCase().trim()===nt));
+  if(!suyos.length)return [];
+  const vend=(Array.isArray(items)?items:[]).filter(x=>x&&x.id).map(x=>({id:x.id,n:x.n,c:num(x.c,0,9999)}));
+  const{data:yo}=await db.from("conductores").select("nombre").eq("usuario",u).maybeSingle();
+  const quien=(yo&&yo.nombre)||u,hechos=[];
+  for(const p of suyos){
+    if(esVisita&&!p.visita)continue;
+    const f=String(p.fecha||hoy()).slice(0,10);
+    /* desde el día del pedido lo atiende cualquiera; antes, solo el asignado si lleva algo del pedido */
+    const toca=f<=hoy()||(p.conductor===u&&(p.visita||(p.items||[]).some(x=>x&&x.id&&vend.some(y=>y.id===x.id))));
+    if(!toca)continue;
+    await db.from("pedidos").update({estado:"atendido",atendido_por:u,atendido_en:new Date().toISOString(),venta_id:v?v.id:null,vendido:esVisita?[]:vend}).eq("id",p.id);
+    if(p.conductor&&p.conductor!==u)await avisoA(p.conductor,"✅ El pedido de «"+t.nombre+"» ya lo atendió "+quien+". Ya no hace falta que lo lleves.");
+    await evento("pedido_atendido","✅ Pedidos atendidos",t.nombre+(t.codigo?(" ("+t.codigo+")"):"")+" · lo atendió "+quien
+      +((p.conductor&&p.conductor!==u)?(" (estaba asignado a "+p.conductor+")"):"")+" · pidió: "+txtItems(p.items,p.visita)
+      +(esVisita?" · la visitó y no compró":(" · vendió: "+(vend.map(x=>x.c+" "+x.n).join(", ")||"—"))),String(p.id));
+    hechos.push(p.id);
+  }
+  return hechos;
+}
+/* precio acordado: lo que el conductor cambió al vender queda como precio de esa tienda */
+async function guardarAcordados(t,u,pa,P){
+  if(!pa||typeof pa!=="object"||Array.isArray(pa)||!Object.keys(pa).length)return 0;
+  const{data:yo}=await db.from("conductores").select("usuario,nombre,tipo").eq("usuario",u).maybeSingle();
+  const ind=tipoDe(yo)==="independiente";
+  if(!ind&&P&&P.catalogo_cfg&&P.catalogo_cfg.conductor_cambia_precio===false)return 0;
+  const ids=Object.keys(pa).slice(0,200).map(k=>limpia(k,40)).filter(Boolean);
+  if(!ids.length)return 0;
+  const{data:cat}=await db.from("catalogo").select("id,nombre").in("id",ids);
+  const nom={};(cat||[]).forEach(p=>{nom[p.id]=p.nombre;});
+  const{data:tt}=await db.from("tiendas").select("precios").eq("id",t.id).maybeSingle();
+  const pr=Object.assign({},(tt&&tt.precios&&typeof tt.precios==="object"&&!Array.isArray(tt.precios))?tt.precios:{});
+  const cambios=[];
+  ids.forEach(id=>{
+    if(!nom[id])return;const x=(pa[id]&&typeof pa[id]==="object")?pa[id]:{};
+    const r2=v=>Math.round(num(v,0,100000,0)*100)/100;
+    const ahora=r2(x.ahora),antes=r2(x.antes),base=r2(x.cat);
+    if(!(ahora>0)||Math.abs(ahora-antes)<0.005)return;
+    if(base>0&&Math.abs(ahora-base)<0.005)delete pr[id];else pr[id]=ahora;
+    cambios.push(nom[id]+" de S/"+antes.toFixed(2)+" a S/"+ahora.toFixed(2));
+  });
+  if(!cambios.length)return 0;
+  await db.from("tiendas").update({precios:pr}).eq("id",t.id);
+  await evento("precio_acordado","💲 Precios acordados",t.nombre+": "+cambios.slice(0,8).join(", ")+(cambios.length>8?(" y "+(cambios.length-8)+" más"):"")
+    +" — acordado por "+((yo&&yo.nombre)||u)+(ind?" (independiente)":"")+". Desde ahora es su precio.",String(t.id));
+  return cambios.length;
+}
+/* ── camino 1: leer el pedido de un mensaje pegado, lo dictado de una llamada o una foto ── */
+async function leerPedidoIA(texto,img,C,tiendas){
+  const catN=Object.fromEntries(C.cats.map(c=>[c.id,c.nom]));
+  const cat=C.prods.map(p=>p.id+" | "+p.nombre+" | "+(catN[p.cat]||p.cat)).join("\n");
+  const tl=tiendas.slice(0,300).map(t=>t.id+" | "+(t.codigo||"—")+" | "+t.nombre+" | "+(t.dueno||"—")+" | "+(t.tel||"—")).join("\n");
+  const ap=(tiendas.length===1&&tiendas[0].apodos&&typeof tiendas[0].apodos==="object")?Object.keys(tiendas[0].apodos).slice(0,150).map(k=>k+" = "+tiendas[0].apodos[k]).join("\n"):"";
+  const instr="Hoy es "+DIA_NOM[diaIdx()]+" "+hoy()+" (Perú).\n\nCATÁLOGO (id | nombre | categoría):\n"+cat
+    +"\n\nTIENDAS (id | código | nombre | dueño | teléfono):\n"+tl+(ap?("\n\nAPODOS DE ESTA TIENDA (texto = id):\n"+ap):"")
+    +"\n\n"+(img?("El pedido está en la imagen."+(texto?("\nNota del dueño: "+texto):"")):("MENSAJE:\n\"\"\"\n"+texto+"\n\"\"\""))
+    +"\n\nDevuelve SOLO este JSON:\n{\"tienda_id\": número o null, \"tienda_texto\": \"cómo nombran a la tienda\", \"fecha\": \"AAAA-MM-DD\" o null, \"visita\": true o false, \"lineas\": [{\"texto\": \"lo que decía esa línea\", \"id\": \"id del catálogo\" o null, \"c\": cantidad}], \"nota\": \"indicaciones que no son productos\", \"dudas\": \"lo que no quedó claro\"}";
+  const sys="Lees pedidos de tiendas para una distribuidora de panes y pasteles de Perú. Usa solo ids del catálogo y de la lista de tiendas. Si no estás seguro de un producto, pon id null: no adivines. Cantidades en unidades (docena = 12, media docena = 6). Si piden que pase el camión sin decir productos, visita = true. Si no dicen para cuándo, fecha = null. Las fechas relativas («mañana», «el jueves») se calculan desde hoy. Responde solo con el JSON.";
+  const content=img?[{type:"image",source:{type:"base64",media_type:img[1],data:img[2]}},{type:"text",text:instr}]:instr;
+  const r=await anthropic.messages.create({model:img?MODELO_IA_FOTOS:MODELO_IA_PEDIDOS,max_tokens:1500,system:sys,messages:[{role:"user",content}]});
+  const txt=(r&&r.content||[]).map(c=>c.text||"").join("");
+  const j=JSON.parse((txt.match(/\{[\s\S]*\}/)||["{}"])[0]);
+  const f=fechaOK(j.fecha)?String(j.fecha):null;
+  return {tienda_id:num(j.tienda_id,0,1e12,0)||null,tienda_texto:limpia(j.tienda_texto,80),fecha:f,lo_antes:!f,visita:j.visita===true,
+    lineas:(Array.isArray(j.lineas)?j.lineas:[]).slice(0,60).filter(l=>l&&typeof l==="object").map(l=>({texto:limpia(l.texto,60),id:(l.id&&C.por[l.id])?String(l.id):null,c:Math.max(1,Math.round(num(l.c,1,999,1)))})),
+    nota:limpia(j.nota,200),dudas:limpia(j.dudas,200)};
+}
+/* sin IA (o si la IA falla): lectura simple, línea por línea. Siempre se revisa. */
+const NUMS_TXT={un:1,uno:1,una:1,dos:2,tres:3,cuatro:4,cinco:5,seis:6,siete:7,ocho:8,nueve:9,diez:10,once:11,doce:12,quince:15,veinte:20,treinta:30,cuarenta:40,cincuenta:50};
+const RELLENO_RE=/\b(de|del|la|las|los|el|unidades?|und|uds?|paquetes?|bolsas?|por favor|porfa|porfavor|quiero|queremos|necesito|necesitamos|mandame|manda|mande|traeme|trae|traer|para|hola|buenos? dias|buenas tardes|buenas noches|buenas|gracias|me|nos|pedido|pedir|tambien|mas|manana|hoy|pasado|lunes|martes|miercoles|jueves|viernes|sabado|domingo|porfis|soy|somos|tienda)\b/g;
+/* clave de un apodo: el texto sin cantidades ni relleno («10 chocos» y «5 chocos» son lo mismo) */
+function claveApodo(t){
+  let s=" "+normTxt(t)+" ";
+  s=s.replace(/ \d+ /g," ").replace(/ (media|docenas?|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|quince|veinte|treinta|cuarenta|cincuenta) /g," ");
+  return s.replace(RELLENO_RE," ").replace(/\s+/g," ").trim().slice(0,40);
+}
+function leerPedidoSimple(texto,C,tiendas){
+  const T0=normTxt(texto);let tienda=null;
+  const cod=String(texto).toUpperCase().match(/\b[A-Z]{3}-[A-Z]{3}-\d{4}\b/);
+  if(cod)tienda=tiendas.find(t=>t.codigo===cod[0])||null;
+  if(!tienda){const tels=(String(texto).match(/9\d{2}[\s-]?\d{3}[\s-]?\d{3}/g)||[]).map(x=>x.replace(/\D/g,""));
+    if(tels.length)tienda=tiendas.find(t=>tels.some(x=>String(t.tel||"").replace(/\D/g,"").endsWith(x)))||null;}
+  if(!tienda){let mejor=null;tiendas.forEach(t=>{const n=normTxt(t.nombre);if(n.length>=3&&(" "+T0+" ").includes(" "+n+" ")&&(!mejor||n.length>normTxt(mejor.nombre).length))mejor=t;});tienda=mejor;}
+  if(!tienda&&tiendas.length===1)tienda=tiendas[0];
+  const ap=(tienda&&tienda.apodos&&typeof tienda.apodos==="object")?tienda.apodos:{};
+  const prods=C.prods.map(p=>({p,n:normTxt(p.nombre)})).filter(x=>x.n).sort((a,b)=>b.n.length-a.n.length);
+  const sinS=s=>s.split(" ").map(w=>w.length>3?w.replace(/(es|s)$/,""):w).join(" ");
+  const busca=s=>{
+    const ka=claveApodo(s);if(ap[ka]&&C.por[ap[ka]])return ap[ka];
+    let f=prods.find(x=>s===x.n||(" "+s+" ").includes(" "+x.n+" ")||(x.n.startsWith(s)&&s.length>=4));
+    if(!f){const s2=sinS(s);f=prods.find(x=>{const n2=sinS(x.n);return s2===n2||(" "+s2+" ").includes(" "+n2+" ")||(n2.startsWith(s2)&&s2.length>=4)||(n2.includes(s2)&&s2.length>=5);});}
+    return f?f.p.id:null;};
+  const lineas=[];
+  String(texto).replace(/\b[A-Z]{3}-[A-Z]{3}-\d{4}\b/gi," ").replace(/9\d{2}[\s-]?\d{3}[\s-]?\d{3}/g," ").split(/\n|,|;|\+|\s+y\s+/i).forEach(seg=>{
+    let s=" "+normTxt(seg)+" ";if(!s.trim())return;
+    let c=null;
+    const toma=(re,val)=>{if(c!=null)return;const m=s.match(re);if(m){c=(typeof val==="function")?val(m):val;s=s.replace(m[0]," ");}};
+    toma(/ media docena /,6);
+    toma(/ (\d{1,3}) docenas? /,m=>Number(m[1])*12);
+    toma(/ (?:un|una) docena /,12);
+    toma(/ docenas? /,12);
+    toma(/ (\d{1,3}) /,m=>Number(m[1]));
+    Object.keys(NUMS_TXT).forEach(w=>toma(new RegExp(" "+w+" "),NUMS_TXT[w]));
+    s=s.replace(RELLENO_RE," ").replace(/\s+/g," ").trim();
+    if(c==null||s.length<3)return;
+    lineas.push({texto:limpia(seg.trim(),60),id:busca(s),c:Math.max(1,Math.min(999,c))});
+  });
+  const visita=!lineas.length&&/\b(pase|pasen|venga|vengan|camion|carro|visita)\b/.test(T0);
+  let fecha=null;
+  if(/\bpasado manana\b/.test(T0))fecha=sumarDias(hoy(),2);
+  else if(/\bmanana\b/.test(T0)&&!/\b(en|por|de) la manana\b/.test(T0))fecha=sumarDias(hoy(),1);
+  else{const dias=["lunes","martes","miercoles","jueves","viernes","sabado","domingo"];const i=dias.findIndex(d=>new RegExp("\\b"+d+"\\b").test(T0));
+    if(i>=0){let k=(i-diaIdx()+7)%7;if(k===0)k=7;fecha=sumarDias(hoy(),k);}}
+  return {tienda_id:tienda?tienda.id:null,tienda_texto:tienda?tienda.nombre:"",fecha,lo_antes:!fecha,visita,lineas,nota:"",dudas:"Lectura simple, sin IA: revisa cada línea antes de confirmar."};
+}
+/* pasado su día, el pedido queda atrasado (sigue vigente) y avisa una vez en la Bandeja */
+async function revisarAtrasados(){
+  try{
+    const{data:ps}=await db.from("pedidos").select("*").in("estado",PED_VIG).lt("fecha",hoy());
+    const pend=(ps||[]).filter(p=>!p.avisado_atraso);
+    if(!pend.length)return 0;
+    const{data:cs}=await db.from("conductores").select("usuario,nombre");
+    const N={};(cs||[]).forEach(c=>{N[c.usuario]=c.nombre||c.usuario;});
+    for(const p of pend){
+      await db.from("pedidos").update({avisado_atraso:true}).eq("id",p.id);
+      await evento("pedido_atrasado","⏰ Pedidos atrasados","«"+(p.tienda||"")+"» pidió para "+fechaTxt(p.fecha)+" y aún no se entrega"
+        +(p.conductor?(" (asignado a "+(N[p.conductor]||p.conductor)+")"):(p.estado==="devuelto"?" (devuelto: falta reasignarlo)":""))+": "+txtItems(p.items,p.visita)+". Sigue vigente.",String(p.id));
+    }
+    return pend.length;
+  }catch(e){console.log("atrasados:",e.message);return 0;}
+}
+setTimeout(()=>{asegurarCodigos().then(n=>{if(n)console.log("Códigos: "+n+" tiendas recibieron su código");});revisarAtrasados();},12000);
+setInterval(()=>{asegurarCodigos();revisarAtrasados();},10*60*1000);
+
+/* ═══ 185 · FASE 5: TRASPASOS CON PRECIO Y PAGO ═══
+   · De quién es la mercadería y el dinero: el empleado y el almacén son del dueño; el
+     independiente, suyo. Entre dueños distintos («cruce») el que entrega pone precio
+     (a costo PEPS, a precio o libre) y forma de pago (contado, Yape o fiado).
+   · Pasos: pedir u ofrecer → el otro acepta (y pone precio si entrega) → si es fiado de
+     mercadería del dueño a un independiente, lo aprueba el dueño → se entregan en persona y
+     cada uno confirma → con las dos confirmaciones se mueven la mercadería y el dinero.
+   · La venta del que entrega queda como venta suya (con su costo PEPS); el que recibe la
+     toma a ese precio como costo. El fiado va a las cuentas entre conductores. */
+const TR_ACT=["pendiente","parcial","aceptado","por_aprobar"];
+async function duenoDe(u){if(!u||u==="almacen")return "dueno";return (await independientes()).has(u)?u:"dueno";}
+async function nombresTr(){const N=await nombresAcreedores();N.almacen="Almacén";return N;}
+const r2=v=>Math.round(Number(v||0)*100)/100;
+/* costo PEPS promedio de las próximas q unidades de cada producto (lo que costaría entregarlas) */
+async function costoPEPS(u,prods){
+  const ids=Object.keys(prods||{});if(!ids.length)return {};
+  const[{data:ls},R]=await Promise.all([db.from("lotes").select("prod_id,cant,costo,creado,id").eq("conductor",u).in("prod_id",ids),costoRef(ids,u)]);
+  const lot=(ls||[]).filter(l=>Number(l.cant)>0).sort((a,b)=>(new Date(a.creado)-new Date(b.creado))||(a.id-b.id));
+  const out={};
+  ids.forEach(id=>{let q=Number(prods[id]||0),v=0,n=q;if(!(q>0)){out[id]=r2(R[id]);return;}
+    for(const l of lot){if(q<=0)break;if(l.prod_id!==id)continue;const x=Math.min(q,Number(l.cant));v+=x*Number(l.costo||0);q-=x;}
+    if(q>0)v+=q*Number(R[id]||0);out[id]=r2(v/n);});
+  return out;
+}
+/* precio sugerido: el del catálogo para el tipo de tienda principal */
+async function precioSugerido(ids){
+  if(!ids.length)return {};
+  const[{data:cat},{data:cats},P]=await Promise.all([db.from("catalogo").select("id,cat,precio,precios").in("id",ids),db.from("categorias").select("id,precio"),getParams()]);
+  const tipo=(Array.isArray(P.tipos_tienda)&&P.tipos_tienda[0])||"bodega",cp={};(cats||[]).forEach(c=>{cp[c.id]=Number(c.precio||0);});
+  const out={};(cat||[]).forEach(p=>{const pr=(p.precios&&typeof p.precios==="object")?p.precios:{};out[p.id]=r2(Number(pr[tipo])>0?pr[tipo]:(Number(p.precio)>0?p.precio:(cp[p.cat]||0)));});
+  return out;
+}
+/* precios del traspaso según el modo (a costo: PEPS de quien entrega; a precio o libre: lo que pusieron) */
+async function preciosTr(de,prods,modo,dados){
+  const ids=Object.keys(prods);
+  if(!["costo","precio","libre"].includes(modo))throw new Error("Elige el precio: a costo, a precio o libre");
+  let pr={};
+  if(modo==="costo")pr=await costoPEPS(de,prods);
+  else{const sug=modo==="precio"?await precioSugerido(ids):{};
+    ids.forEach(id=>{const v=num(dados&&dados[id],0,100000,0);pr[id]=r2(v>0?v:(sug[id]||0));});}
+  const falta=ids.filter(id=>!(pr[id]>0));
+  if(falta.length&&modo!=="costo")throw new Error("Falta el precio de "+falta.length+" producto(s)");
+  const total=r2(ids.reduce((a,id)=>a+Number(prods[id])*Number(pr[id]||0),0));
+  return {precios:pr,total};
+}
+/* ¿tiene quien entrega lo que se va a entregar? */
+async function faltaStock(u,prods){
+  const st=await leerStock(u),{data:cat}=await db.from("catalogo").select("id,nombre").in("id",Object.keys(prods));
+  const nom={};(cat||[]).forEach(p=>{nom[p.id]=p.nombre;});
+  const f=Object.keys(prods).filter(id=>Number(st.prods[id]||0)<Number(prods[id])).map(id=>(nom[id]||id)+" (tiene "+Number(st.prods[id]||0)+", van "+prods[id]+")");
+  return f.length?f.join(", "):"";
+}
+const PAGO_TXT={efectivo:"al contado",yape:"por Yape",fiado:"fiado"};
+function textoTr(t,N){
+  const n=u=>N[u]||(u==="almacen"?"Almacén":u);
+  return n(t.de)+" → "+n(t.para)+(t.total!=null&&t.pago?(" · S/"+Number(t.total).toFixed(2)+" "+(PAGO_TXT[t.pago]||t.pago)):"");
+}
+/* cuentas entre conductores: cargos (fiado) y abonos (cobros y pagos), sin los anulados */
+async function cuentasPares(filtro){
+  const{data}=await db.from("cuentas_mov").select("*").order("id",{ascending:true});
+  const movs=(data||[]).filter(m=>!m.anulado&&(!filtro||filtro(m)));
+  const P={};
+  movs.forEach(m=>{const k=m.deudor+"|"+m.acreedor,c=P[k]||(P[k]={deudor:m.deudor,acreedor:m.acreedor,cargos:[],saldo:0,a_favor:0});
+    const monto=Number(m.monto||0);
+    if(m.tipo==="cargo"){c.cargos.push({id:m.id,fecha:m.creado,detalle:m.detalle,monto,pagado:0,pendiente:monto,cobros:[],traspaso_id:m.traspaso_id||null});return;}
+    let resto=monto;
+    for(const g of c.cargos){if(resto<=0)break;if(g.pendiente<=0)continue;const x=Math.min(resto,g.pendiente);g.pagado=r2(g.pagado+x);g.pendiente=r2(g.pendiente-x);g.cobros.push({por:m.por,fecha:m.creado,monto:r2(x),pago:m.pago||null});resto-=x;}
+    if(resto>0.004)c.a_favor=r2(c.a_favor+resto);
+  });
+  return Object.values(P).map(c=>{c.saldo=r2(c.cargos.reduce((a,g)=>a+g.pendiente,0));c.cargos.forEach(g=>{g.estado=g.pendiente<=0.004?"pagado":(g.pagado>0?"parcial":"pendiente");});return c;});
+}
+async function saldoPar(deudor,acreedor){const cs=await cuentasPares(m=>m.deudor===deudor&&m.acreedor===acreedor);return cs.length?cs[0].saldo:0;}
+/* dinero de traspasos y cuentas que pasa por las manos de un conductor en su viaje.
+   Empleado: lo que él cobró o pagó por el dueño. Independiente: todo lo que le pagaron o pagó
+   (lo registre quien lo registre), porque es su plata. */
+async function dineroTr(u,inicio,fin){
+  const[{data:trs},{data:cm}]=await Promise.all([
+    db.from("traspasos").select("id,de,para,total,pago,estado,cruce,creado").eq("para",u).eq("estado","completado").gte("creado",inicio),
+    db.from("cuentas_mov").select("*").eq("tipo","abono").gte("creado",inicio)]);
+  const yo=await duenoDe(u),ind=yo===u;
+  const en=x=>!fin||new Date(x.creado)<=new Date(fin);
+  const compras=(trs||[]).filter(t=>t.cruce&&t.pago==="efectivo"&&en(t)).reduce((a,t)=>a+Number(t.total||0),0);
+  const mov=(cm||[]).filter(m=>!m.anulado&&(m.pago||"efectivo")==="efectivo"&&en(m)&&(ind?(m.deudor===u||m.acreedor===u):m.por===u));
+  const cobros=mov.filter(m=>m.acreedor===yo).reduce((a,m)=>a+Number(m.monto||0),0);
+  const pagos=mov.filter(m=>m.deudor===yo).reduce((a,m)=>a+Number(m.monto||0),0);
+  return {compras:r2(compras),cobros:r2(cobros),pagos:r2(pagos),neto:r2(cobros-pagos-compras)};
+}
+/* completar: moverla mercadería (y el dinero) cuando los dos confirmaron */
+async function completarTraspaso(t,N){
+  const pr=limpiaProds(t.prods);
+  if(t.cruce&&t.de!=="almacen"){const f=await faltaStock(t.de,pr);if(f)return {ok:false,error:"A quien entrega ya no le alcanza: "+f+". Revisen y vuelvan a confirmar."};}
+  if(t.cruce&&t.de==="almacen"){const f=await faltaStock("almacen",pr);if(f)return {ok:false,error:"En el almacén no alcanza: "+f};}
+  const menos={},mas={};Object.keys(pr).forEach(id=>{menos[id]=-pr[id];mas[id]=pr[id];});
+  let sal={costo:0,capas:{}};
+  if(Object.keys(pr).length){
+    sal=await moverStock(t.de,menos,"traspaso_envia",t.id);
+    await moverStock(t.para,mas,"traspaso_recibe",t.id,t.cruce?{costos:t.precios||{}}:{capas:sal.capas});
+  }
+  const upd={estado:"completado"};
+  if(t.cruce){
+    const{data:cat}=await db.from("catalogo").select("id,nombre").in("id",Object.keys(pr).length?Object.keys(pr):["-"]);
+    const nom={};(cat||[]).forEach(p=>{nom[p.id]=p.nombre;});
+    const its=Object.keys(pr).map(id=>({id,n:nom[id]||id,c:pr[id],pu:Number((t.precios||{})[id]||0)}));
+    const total=r2(t.total),fiado=t.pago==="fiado";
+    const{data:v}=await db.from("ventas").insert({tienda_id:null,tienda:"↔ Traspaso a "+(N[t.para]||t.para),conductor:t.de,items:its,total,
+      metodo:fiado?"credito":(t.pago==="yape"?"yape":"efectivo"),efectivo:t.pago==="efectivo"?total:0,credito:fiado?total:0,abono:0,
+      resumen:its.map(x=>x.n+" x"+x.c).join(", "),costo:r2(sal.costo),uid:"tr-"+t.id,traspaso_id:t.id}).select().single();
+    if(v)upd.venta_id=v.id;
+    if(fiado&&total>0){
+      const deudor=await duenoDe(t.para),acreedor=await duenoDe(t.de);
+      await db.from("cuentas_mov").insert({deudor,acreedor,tipo:"cargo",monto:total,detalle:"Traspaso #"+t.id+": "+its.map(x=>x.c+" "+x.n).join(", "),por:t.de,traspaso_id:t.id});
+    }
+  }
+  /* se confirmaron lejos el uno del otro → aviso */
+  if(t.pos_de&&t.pos_para&&t.pos_de.lat!=null&&t.pos_para.lat!=null){
+    const d=metrosEntre(Number(t.pos_de.lat),Number(t.pos_de.lon),Number(t.pos_para.lat),Number(t.pos_para.lon));upd.dist_m=d;
+    if(d>200)await evento("traspaso_lejos","📍 Traspaso confirmado lejos",textoTr(t,N)+": confirmaron a "+d+" m el uno del otro (más de 200 m). Revisa si de verdad se entregaron en persona.",String(t.id));
+  }
+  await db.from("traspasos").update(upd).eq("id",t.id);
+  Object.assign(t,upd);
+  const det=Object.keys(pr).map(id=>id+"×"+pr[id]).join(", ");
+  if(t.de==="almacen")await db.from("kardex").insert({conductor:"almacen",tipo:"almacen_salida",detalle:JSON.stringify(t.items)+" · entregado a "+t.para});
+  if(t.para==="almacen")await db.from("kardex").insert({conductor:"almacen",tipo:"almacen_retorno",detalle:JSON.stringify(t.items)+" · recibido de "+t.de});
+  await db.from("kardex").insert({conductor:t.para,tipo:"traspaso_in",detalle:"De "+(N[t.de]||t.de)+": "+det+(t.cruce?(" · S/"+Number(t.total).toFixed(2)+" "+(PAGO_TXT[t.pago]||"")):"")});
+  await db.from("kardex").insert({conductor:t.de,tipo:"traspaso_out",detalle:"Hacia "+(N[t.para]||t.para)+": "+det+(t.cruce?(" · S/"+Number(t.total).toFixed(2)+" "+(PAGO_TXT[t.pago]||"")):"")});
+  if(t.de!=="almacen")await avisoA(t.de,"✓ Traspaso completado con "+(N[t.para]||t.para)+": ambos confirmaron.");
+  if(t.para!=="almacen")await avisoA(t.para,"✓ Traspaso completado con "+(N[t.de]||t.de)+": ambos confirmaron. Ya está en tu carga.");
+  await evento("traspaso","↔ Traspaso completado",textoTr(t,N)+" — confirmado por ambos.",String(t.id));
+  return {ok:true};
+}
+
+/* 183 · los números del dueño nunca incluyen a los independientes */
+let INDEP={t:0,s:new Set()};
+async function independientes(){
+  if(Date.now()-INDEP.t<30000)return INDEP.s;
+  const{data}=await db.from("conductores").select("usuario,tipo");
+  INDEP={t:Date.now(),s:new Set((data||[]).filter(c=>tipoDe(c)==="independiente").map(c=>c.usuario))};
+  return INDEP.s;
+}
+/* cambiar de tipo solo entre viajes */
+async function enViaje(u){
+  const[{data:st},{data:tr},{data:cg}]=await Promise.all([
+    db.from("stock_conductor").select("cant").eq("conductor",u),
+    db.from("traspasos").select("id").or(`de.eq.${u},para.eq.${u}`).in("estado",TR_ACT),
+    db.from("cargas").select("id").eq("conductor",u).eq("estado","pendiente")]);
+  const uni=(st||[]).reduce((a,x)=>a+Number(x.cant||0),0),m=[];
+  if(uni>0)m.push("tiene "+uni+" unidades en su camión");
+  if((tr||[]).length)m.push("tiene traspasos sin terminar");
+  if((cg||[]).length)m.push("tiene una carga sin confirmar");
+  return m.join(", ");
+}
+/* «es la misma»: la tienda pendiente pasa sus ventas, visitas, créditos y pedidos a la existente */
+async function fusionarTienda(pid,did,por){
+  const[{data:Pt},{data:Dt}]=await Promise.all([db.from("tiendas").select("*").eq("id",pid).maybeSingle(),db.from("tiendas").select("*").eq("id",did).maybeSingle()]);
+  if(!Pt||!Dt)throw new Error("No encontré las dos tiendas");
+  if(Number(Pt.id)===Number(Dt.id))throw new Error("Es la misma tienda");
+  const mov={};
+  for(const tb of ["ventas","visitas","creditos_mov","pedidos"]){
+    const upd=(tb==="creditos_mov")?{tienda_id:Dt.id}:{tienda_id:Dt.id,tienda:Dt.nombre};
+    const{data,error}=await db.from(tb).update(upd).eq("tienda_id",Pt.id).select("id");
+    if(error)throw new Error("No se pudo pasar "+tb+": "+error.message);
+    mov[tb]=(data||[]).length;
+  }
+  const upD={sa:await saldoHistorial(Dt.id)};
+  const hab=Array.isArray(Dt.habilitados)?Dt.habilitados.slice():[];
+  if(Pt.conductor_reg&&Pt.conductor_reg!=="admin"&&!hab.includes(Pt.conductor_reg)){hab.push(Pt.conductor_reg);upD.habilitados=hab;}
+  const{error:e1}=await db.from("tiendas").update(upD).eq("id",Dt.id);if(e1)throw new Error(e1.message);
+  await db.from("tiendas").update({act:false,estado_reg:"fusionada",posible_dup:Dt.id,sa:0,notas:limpia("Unida con #"+Dt.id+" "+Dt.nombre+(Pt.notas?" · "+Pt.notas:""),200)}).eq("id",Pt.id);
+  await db.from("logs").insert({tipo:"tienda",detalle:"#"+Dt.id+" "+Dt.nombre+" · recibió lo de #"+Pt.id+" "+Pt.nombre+" (repetida): "+mov.ventas+" ventas, "+mov.visitas+" visitas, "+mov.creditos_mov+" movimientos de crédito, "+mov.pedidos+" pedidos · "+por});
+  return {mov,destino:Dt,origen:Pt};
+}
 // ═══ SIRVE LAS APPS DESDE EL MISMO SERVIDOR (sin Netlify) ═══
 function sirve(archivo){
   return (req,res)=>{
@@ -328,16 +883,16 @@ app.get("/version",(req,res)=>{
       "v5botones2","v5dias","window.centrarRegT","window.RT_DIAS","en-tiendas",
       "v5salida","cerrarMenuAbierto",
       "v5arreglos169","window.anotaRechazo","v5fingidas","window.enviarOp","id=\"tr3-est\"",
-      "v5precioamano","window.posFresca=posFresca","window.BUILD='2026-09-22-B'"],
+      "v5precioamano","window.posFresca=posFresca","v5lugares181","v5indep183","v5pedidos184","v5traspasos185","window.BUILD='2026-09-24-D'"],
     "admin-dashboard.html":["v5sinprestamo","v5pdprecios","v5dupids","v5catipo",
       "v5almmover","window.pkTipo","pkEtiqueta(p)","v5ritmo2","v5ritmocfg","window.repTP","window.nivelP",
       "v5ciclofiltro","window.TDS","window.EVENTOS=r.eventos","ritmo_sugerido",
       "v5diasP","v5diascfg","window.AT_DIAS","dias_sugeridos",
       "v5salidaP","salirDeTodo","function stDe(p)","cerrarEdicion()\" style=\"background:none\">Cerrar sin guardar",
       "v5arreglos176","window.pintaWA","window.ALM={stock:{},prods:[],movimientos:[]}","var _ir=window.ir;",
-      "v5picker179","window.pintaCatCosto","v5catcosto179"]
+      "v5picker179","window.pintaCatCosto","v5catcosto179","v5lugares181","v5indep183","v5pedidos184","v5traspasos185"]
   };
-  const out={servidor:{bloque:178,etag_desactivado:app.get("etag")===false,consultas_en_paralelo:true,hora:new Date().toISOString()},archivos:{}};
+  const out={servidor:{bloque:185,pedidos:{ia:!!anthropic,modelo_texto:MODELO_IA_PEDIDOS,modelo_fotos:MODELO_IA_FOTOS},lugares:(()=>{const G=geo();return G.falta?"FALTA distritos-peru.json":(G.dist.length+" distritos")})(),etag_desactivado:app.get("etag")===false,consultas_en_paralelo:true,hora:new Date().toISOString()},archivos:{}};
   Object.keys(marcas).forEach(f=>{
     try{
       const txt=fs.readFileSync(path.join(__dirname,f),"utf8");
@@ -357,8 +912,22 @@ app.get("/version",(req,res)=>{
 // Fuente de verdad del inventario de cada conductor. El teléfono guarda su
 // propia copia para trabajar sin señal, pero al reconectar manda lo pendiente
 // y vuelve a leer de aquí.
-async function moverStock(conductor,cambios,motivo,ref){
-  if(!conductor||!cambios||!Object.keys(cambios).length)return;
+/* 183 · COSTO PEPS POR LOTES. Cada entrada de mercadería (carga, traspaso, sobrante…) crea
+   un lote con su costo; cada salida (venta, merma, traspaso…) consume primero los lotes más
+   viejos. Así cada venta sabe cuánto costó lo vendido (ventas.costo). Si faltan lotes (stock
+   de antes de este cambio), lo que falta se valoriza con el costo de referencia. */
+async function costoRef(ids,conductor){
+  const[{data:cat},Pp,{data:c}]=await Promise.all([
+    db.from("catalogo").select("id,cat,costo").in("id",ids),getParams(),
+    (conductor&&conductor!=="almacen")?db.from("conductores").select("tipo,costos").eq("usuario",conductor).maybeSingle():Promise.resolve({data:null})]);
+  const cc=(Pp&&Pp.costos)||{},mio=(c&&tipoDe(c)==="independiente"&&c.costos&&typeof c.costos==="object")?c.costos:{};
+  const r={};
+  (cat||[]).forEach(p=>{r[p.id]=Number(mio[p.id])>0?Number(mio[p.id]):(Number(p.costo)>0?Number(p.costo):num(cc[p.cat],0,100000,0));});
+  ids.forEach(id=>{if(r[id]==null)r[id]=0;});
+  return r;
+}
+async function moverStock(conductor,cambios,motivo,ref,opt){
+  if(!conductor||!cambios||!Object.keys(cambios).length)return {costo:0,capas:{}};
   const ids=Object.keys(cambios).slice(0,300);
   const{data:act}=await db.from("stock_conductor").select("prod_id,cant,base").eq("conductor",conductor).in("prod_id",ids);
   const ahora={};(act||[]).forEach(r=>ahora[r.prod_id]={cant:Number(r.cant||0),base:Number(r.base||0)});
@@ -375,6 +944,49 @@ async function moverStock(conductor,cambios,motivo,ref){
   });
   if(filas.length)await db.from("stock_conductor").upsert(filas);
   if(movs.length)await db.from("stock_mov").insert(movs);
+  const out={costo:0,capas:{}};
+  try{
+    let R=null;const refC=async()=>{if(!R)R=await costoRef(ids,conductor);return R;};
+    const refTxt=ref?String(ref).slice(0,40):null,nuevos=[];
+    const pos=ids.filter(id=>num(cambios[id],-99999,99999)>0),neg=ids.filter(id=>num(cambios[id],-99999,99999)<0);
+    for(const id of pos){
+      let q=num(cambios[id],0,99999);
+      const cin=opt&&opt.capas&&Array.isArray(opt.capas[id])?opt.capas[id]:null;
+      if(cin)for(const k of cin){const x=Math.min(q,Number(k.cant||0));if(x>0){nuevos.push({conductor,prod_id:id,cant:x,cant_ini:x,costo:Number(k.costo||0),origen:motivo||"ajuste",ref:refTxt});q-=x;}}
+      if(q>0){const cu=(opt&&opt.costos&&opt.costos[id]!=null&&Number(opt.costos[id])>0)?Number(opt.costos[id]):(await refC())[id];
+        nuevos.push({conductor,prod_id:id,cant:q,cant_ini:q,costo:cu,origen:motivo||"ajuste",ref:refTxt});}
+    }
+    if(nuevos.length)await db.from("lotes").insert(nuevos);
+    if(neg.length){
+      const{data:ls}=await db.from("lotes").select("*").eq("conductor",conductor).in("prod_id",neg);
+      const lot=(ls||[]).filter(l=>Number(l.cant)>0).sort((a,b)=>(new Date(a.creado)-new Date(b.creado))||(a.id-b.id));
+      for(const id of neg){
+        let q=-num(cambios[id],-99999,0);const cap=[];
+        for(const l of lot){if(q<=0)break;if(l.prod_id!==id||Number(l.cant)<=0)continue;
+          const x=Math.min(q,Number(l.cant));l.cant=Math.round((Number(l.cant)-x)*1000)/1000;q=Math.round((q-x)*1000)/1000;
+          cap.push({cant:x,costo:Number(l.costo||0)});await db.from("lotes").update({cant:l.cant}).eq("id",l.id);}
+        if(q>0)cap.push({cant:q,costo:(await refC())[id]});
+        out.capas[id]=cap;out.costo+=cap.reduce((a,k)=>a+k.cant*k.costo,0);
+      }
+      out.costo=Math.round(out.costo*100)/100;
+    }
+  }catch(e){console.log("lotes:",e.message);}
+  return out;
+}
+/* 183 · valor al costo de lo que tiene alguien (lotes vivos; lo que no tiene lote, a referencia) */
+async function valorStock(conductor){
+  const st=await leerStock(conductor),ids=Object.keys(st.prods);
+  if(!ids.length)return {prods:{},valor:0,det:[]};
+  const[{data:ls},R,{data:cat}]=await Promise.all([db.from("lotes").select("prod_id,cant,costo").eq("conductor",conductor).in("prod_id",ids),costoRef(ids,conductor),db.from("catalogo").select("id,nombre").in("id",ids)]);
+  const nom={};(cat||[]).forEach(p=>nom[p.id]=p.nombre);
+  let valor=0;const det=[];
+  ids.forEach(id=>{
+    let q=Number(st.prods[id]||0),v=0;
+    (ls||[]).filter(l=>l.prod_id===id&&Number(l.cant)>0).forEach(l=>{const x=Math.min(q,Number(l.cant));v+=x*Number(l.costo||0);q-=x;});
+    if(q>0)v+=q*R[id];
+    v=Math.round(v*100)/100;valor+=v;det.push({id,n:nom[id]||id,cant:Number(st.prods[id]||0),valor:v});
+  });
+  return {prods:st.prods,valor:Math.round(valor*100)/100,det};
 }
 async function leerStock(conductor){
   const{data}=await db.from("stock_conductor").select("prod_id,cant,base").eq("conductor",conductor);
@@ -487,11 +1099,13 @@ app.post("/admin/cerrar-viaje",authA,async(req,res)=>{
       await moverStock("almacen",mas,"cierre_recibe",null);
     }
   }
+  const DT=await dineroTr(u,inicio,fin);   /* 185 */
   const resumen={
     conductor:u,nombre:yo.nombre||u,inicio,fin,
     dias:Math.max(1,Math.round((new Date(fin)-new Date(inicio))/86400000)),
     ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
-    efectivo_esperado:Math.round((efectivo+abonos-gastos-entregas)*100)/100,
+    efectivo_esperado:Math.round((efectivo+abonos-gastos-entregas+DT.neto)*100)/100,
+    traspasos_dinero:DT,   /* 185 · cobros y pagos de cuentas, compras al contado a independientes */
     entregas:{total:entregas,n:ent.length,detalle:ent},
     gastos:{total:gastos,detalle:gas},
     perdidas:(function(){
@@ -604,22 +1218,108 @@ async function resumenViaje(u){
   const gastos=sum(gas,g=>g.monto);
   const merm=perd.filter(p=>!/^ajuste/.test(p.tipo||""));   /* 177 */
   const mSum=(m)=>mov.filter(x=>x.motivo===m).reduce((s,x)=>s+Math.abs(Number(x.delta||0)),0);
+  const DT=await dineroTr(u,inicio,fin);   /* 185 */
   return{
     conductor:u,nombre:(yo&&yo.nombre)||u,en_turno:!!(yo&&yo.en_turno),inicio,fin,
     dias:Math.max(1,Math.round((new Date(fin)-new Date(inicio))/86400000)),
     ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
-    efectivo_esperado:Math.round((efectivo+abonos-gastos-entregas)*100)/100,
+    efectivo_esperado:Math.round((efectivo+abonos-gastos-entregas+DT.neto)*100)/100,
+    traspasos_dinero:DT,   /* 185 · cobros y pagos de cuentas, compras al contado a independientes */
     entregas:{total:entregas,n:ent.length,detalle:ent},
     gastos:{total:gastos,detalle:gas},
     perdidas:{total:sum(merm,p=>p.valor),costo:sum(merm,p=>p.costo),n:merm.length,detalle:merm,
       ajustes:{n:perd.length-merm.length}},
     mercaderia:{cargado:mSum("carga"),recibido_en_ruta:mSum("traspaso_recibe"),
       vendido:mSum("venta"),devuelto:mSum("traspaso_envia"),queda:quedan},
-    tiendas_atendidas:new Set(tds.map(v=>v.tienda)).size,
+    tiendas_atendidas:new Set(tds.map(v=>v.tienda).filter(n=>!/^↔/.test(String(n||"")))).size,
     traspasos:trs.map(t=>({id:t.id,de:t.de,para:t.para,estado:t.estado})),
     puede_liquidar:quedan===0
   };
 }
+/* ═══ 183 · CIERRE DE VIAJE DEL INDEPENDIENTE ═══
+   No liquida con el dueño. Cuenta lo que le sobró (lo que falta es pérdida; lo no útil,
+   merma; lo que sobra de más se ajusta y se avisa), ve su ganancia y el sobrante útil sigue
+   siendo suyo, a su costo (entra en su siguiente carga). */
+async function resumenIndep(u){
+  const{data:yo}=await db.from("conductores").select("turno_ini,nombre,en_turno").eq("usuario",u).maybeSingle();
+  const{data:ult}=await db.from("cierres_indep").select("fin").eq("conductor",u).order("id",{ascending:false}).limit(1).maybeSingle();
+  const inicio=(yo&&yo.turno_ini)||(ult&&ult.fin)||new Date(Date.now()-30*86400000).toISOString();
+  const fin=new Date().toISOString();
+  const[vts0,gas0,perd0,cm]=await Promise.all([
+    db.from("ventas").select("*").eq("conductor",u).gte("creado",inicio),
+    db.from("gastos").select("id,categoria,monto,detalle,rechazado,creado").eq("conductor",u).gte("creado",inicio),
+    db.from("perdidas").select("motivo,valor,costo,detalle,tipo,creado").eq("conductor",u).gte("creado",inicio),
+    db.from("creditos_mov").select("tipo,monto,tienda_id,acreedor,por").eq("acreedor",u).gte("creado",inicio)
+  ]).then(r=>r.map(x=>x.data||[]));
+  const vts=vts0.filter(v=>!v.anulada),gas=gas0.filter(g=>!g.rechazado),per=perd0.filter(p=>!/^ajuste/.test(p.tipo||""));
+  const sum=(a,f)=>Math.round(a.reduce((x,y)=>x+Number(f(y)||0),0)*100)/100;
+  const vendido=sum(vts,v=>v.total),costoV=sum(vts,v=>v.costo);
+  const efectivo=sum(vts,v=>v.metodo==="yape"?0:v.efectivo),yape=sum(vts.filter(v=>v.metodo==="yape"),v=>v.total);
+  const fiado=sum(cm.filter(m=>m.tipo==="cargo"),m=>m.monto),cobrado=sum(cm.filter(m=>m.tipo!=="cargo"),m=>m.monto);
+  const perdidas=sum(per,p=>p.costo),gastos=sum(gas,g=>g.monto);
+  const vs=await valorStock(u);
+  const DT=await dineroTr(u,inicio,fin);   /* 185 */
+  return {conductor:u,nombre:(yo&&yo.nombre)||u,en_viaje:!!(yo&&yo.en_turno),inicio,fin,traspasos_dinero:DT,
+    ventas:{n:vts.length,total:vendido,efectivo,yape,costo:costoV},
+    fiado,cobrado,perdidas:{costo:perdidas,n:per.length,detalle:per},gastos:{total:gastos,detalle:gas},
+    ganancia:Math.round((vendido-costoV-perdidas-gastos)*100)/100,
+    efectivo_esperado:Math.round((efectivo+cobrado-gastos+DT.neto)*100)/100,
+    sobrante:{valor:vs.valor,det:vs.det,unidades:Object.values(vs.prods).reduce((a,b)=>a+Number(b||0),0)}};
+}
+app.get("/conductor/cierre/resumen",authC,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  if(!(await independientes()).has(req.cond.u))return res.status(403).json({ok:false,error:"Solo para independientes"});
+  try{res.json({ok:true,resumen:await resumenIndep(req.cond.u)});}catch(e){res.status(500).json({ok:false,error:e.message});}
+});
+app.post("/conductor/cierre",authC,async(req,res)=>{
+  const u=req.cond.u;
+  if(!(await independientes()).has(u))return res.status(403).json({ok:false,error:"Solo para independientes (los empleados liquidan)"});
+  const{data:trA}=await db.from("traspasos").select("id").or(`de.eq.${u},para.eq.${u}`).in("estado",TR_ACT);
+  if((trA||[]).length)return res.status(409).json({ok:false,motivo:"traspaso_activo",error:"Tienes un traspaso sin terminar: termínalo o cancélalo antes de cerrar tu viaje."});
+  const st=await leerStock(u),ids=Object.keys(st.prods);
+  const conteo=(req.body.conteo&&typeof req.body.conteo==="object")?req.body.conteo:{};
+  const{data:cat}=await db.from("catalogo").select("id,nombre,precio,precios").in("id",ids.length?ids:["-"]);
+  const nom={},pv={};(cat||[]).forEach(p=>{nom[p.id]=p.nombre;pv[p.id]=Number(p.precio||0)||Number((p.precios&&Object.values(p.precios)[0])||0);});
+  const hechos=[],falt={},noUtil={},sobra={};
+  ids.forEach(id=>{
+    const sis=Number(st.prods[id]||0),c=conteo[id];
+    if(!c)return;
+    const cont=num(c.cant,0,99999,sis),nu=Math.min(cont,num(c.no_util,0,99999,0));
+    if(cont<sis)falt[id]=Math.round((sis-cont)*1000)/1000;
+    if(cont>sis)sobra[id]=Math.round((cont-sis)*1000)/1000;
+    if(nu>0)noUtil[id]={cant:nu,motivo:limpia(c.motivo,40)||"no útil al cerrar"};
+  });
+  const perdida=async(prods,motivo,tipo)=>{
+    const mv=await moverStock(u,Object.fromEntries(Object.keys(prods).map(id=>[id,-prods[id]])),tipo,"cierre");
+    const valor=Math.round(Object.keys(prods).reduce((a,id)=>a+prods[id]*(pv[id]||0),0)*100)/100;
+    const det=Object.keys(prods).map(id=>(nom[id]||id)+" ×"+prods[id]).join(", ");
+    await db.from("perdidas").insert({conductor:u,motivo,tipo:"merma",valor,costo:mv.costo,detalle:det,prods});
+    hechos.push(motivo+": "+det+" (S/"+mv.costo.toFixed(2)+" al costo)");
+  };
+  if(Object.keys(falt).length)await perdida(falt,"faltante al contar","faltante");
+  const porMot={};Object.keys(noUtil).forEach(id=>{const m=noUtil[id].motivo;(porMot[m]=porMot[m]||{})[id]=noUtil[id].cant;});
+  for(const m of Object.keys(porMot))await perdida(porMot[m],m,"merma");
+  if(Object.keys(sobra).length){
+    await moverStock(u,sobra,"ajuste","cierre");
+    const det=Object.keys(sobra).map(id=>(nom[id]||id)+" +"+sobra[id]).join(", ");
+    hechos.push("tenía de más: "+det);
+    await evento("cierre_sobra","⚖️ "+u+" contó más de lo que dice el sistema",det+". Se ajustó su stock al contar al cerrar su viaje: puede haber una venta o un traspaso sin registrar.","");
+  }
+  const resumen=await resumenIndep(u);
+  const cont=(req.body.efectivo_contado===undefined||req.body.efectivo_contado===null||req.body.efectivo_contado==="")?null:num(req.body.efectivo_contado,0,999999);
+  const dif=cont==null?null:Math.round((cont-resumen.efectivo_esperado)*100)/100;
+  const{data:ci,error}=await db.from("cierres_indep").insert({conductor:u,inicio:resumen.inicio,fin:resumen.fin,resumen,conteo:{faltante:falt,no_util:noUtil,sobra,hechos},efectivo_contado:cont,diferencia:dif,nota:limpia(req.body.nota,300)||null}).select().single();
+  if(error)return res.status(500).json({ok:false,error:"No se pudo guardar el cierre: "+error.message});
+  await db.from("conductores").update({en_turno:false,turno_hora:resumen.fin,turno_ini:null}).eq("usuario",u);
+  await db.from("logs").insert({tipo:"turno",detalle:u+" termina (cierre de independiente #"+ci.id+")"});
+  await db.from("kardex").insert({conductor:u,tipo:"cierre_indep",detalle:"Vendido S/"+resumen.ventas.total.toFixed(2)+" · ganancia S/"+resumen.ganancia.toFixed(2)+" · sobrante "+resumen.sobrante.unidades+" unid (S/"+resumen.sobrante.valor.toFixed(2)+" al costo)"});
+  await evento("cierre_indep","🏁 Cierre de viaje — "+resumen.nombre+" (independiente)","Vendió S/"+resumen.ventas.total.toFixed(2)+" · costo S/"+resumen.ventas.costo.toFixed(2)+" · pérdidas S/"+resumen.perdidas.costo.toFixed(2)+" · gastos S/"+resumen.gastos.total.toFixed(2)+" · ganancia S/"+resumen.ganancia.toFixed(2)+" · le sobraron "+resumen.sobrante.unidades+" unid (S/"+resumen.sobrante.valor.toFixed(2)+" al costo).",String(ci.id));
+  res.json({ok:true,id:ci.id,resumen,diferencia:dif,hechos});
+});
+app.get("/conductor/cierres",authC,async(req,res)=>{
+  const{data}=await db.from("cierres_indep").select("id,inicio,fin,resumen,efectivo_contado,diferencia").eq("conductor",req.cond.u).order("id",{ascending:false}).limit(30);
+  res.set("Cache-Control","no-store").json({ok:true,cierres:(data||[]).map(c=>({id:c.id,inicio:c.inicio,fin:c.fin,vendido:c.resumen&&c.resumen.ventas&&c.resumen.ventas.total,ganancia:c.resumen&&c.resumen.ganancia,sobrante:c.resumen&&c.resumen.sobrante&&c.resumen.sobrante.valor,diferencia:c.diferencia}))});
+});
 app.get("/conductor/resumen",authC,async(req,res)=>{
   res.set("Cache-Control","no-store");
   try{res.json({ok:true,resumen:await resumenViaje(req.cond.u)});}
@@ -636,6 +1336,7 @@ app.get("/admin/comprobantes",authA,async(req,res)=>{
   let rows=data||[];
   const cond=limpia(req.query.conductor,20),est=limpia(req.query.estado,12),met=limpia(req.query.metodo,12);
   if(cond&&cond!=="todos")rows=rows.filter(v=>v.conductor===cond);
+  {const IND=await independientes();if(!(cond&&IND.has(cond)))rows=rows.filter(v=>!IND.has(v.conductor));}   /* 183 · sus notas de venta no son tus boletas */
   if(est==="anuladas")rows=rows.filter(v=>v.anulada);
   else if(est==="vigentes")rows=rows.filter(v=>!v.anulada);
   if(met&&met!=="todos")rows=rows.filter(v=>String(v.metodo||"")===met);
@@ -659,9 +1360,11 @@ app.post("/admin/comprobantes/:id/anular",authA,async(req,res)=>{
   const{data:v}=await db.from("ventas").select("*").eq("id",req.params.id).maybeSingle();
   if(!v)return res.status(404).json({ok:false,error:"Venta no encontrada"});
   if(v.anulada)return res.status(409).json({ok:false,error:"Ya estaba anulada"});
+  if(v.traspaso_id)return res.status(409).json({ok:false,error:"Es la venta de un traspaso: anúlalo desde Traspasos (así vuelve también la mercadería)"});   /* 185 */
   await db.from("ventas").update({anulada:true,nota_boleta:"ANULADA: "+motivo,editada_en:new Date().toISOString()}).eq("id",v.id);
   if(Number(v.credito||0)>0&&v.tienda_id){
-    await moverDeuda(v.tienda_id,"abono",Number(v.credito),"Anulación de "+(v.boleta||("venta #"+v.id)),"admin");
+    const{data:cv}=await db.from("conductores").select("tipo").eq("usuario",v.conductor).maybeSingle();   /* 182 */
+    await moverDeuda(v.tienda_id,"abono",Number(v.credito),"Anulación de "+(v.boleta||v.nota_venta||("venta #"+v.id)),"admin",tipoDe(cv)==="independiente"?v.conductor:"dueno");
   }
   try{
     const dev={};
@@ -686,6 +1389,27 @@ app.post("/admin/eventos/:id/accion",authA,async(req,res)=>{
         const{error:eR}=await db.from("tiendas").update({act:false}).eq("id",ref);   /* 175 · antes "activa": columna inexistente, no desactivaba */
         if(eR)throw new Error(eR.message);
         hecho="Tienda desactivada: deja de aparecerle al conductor.";
+      }
+    }else if(ev.tipo==="tienda_pend"){   /* 181 */
+      const par=String(ref).split("|"),tid=Number(par[0])||0;
+      const{data:tp}=await db.from("tiendas").select("*").eq("id",tid).maybeSingle();
+      if(!tp)throw new Error("La tienda ya no existe");
+      if(accion==="misma"){
+        const destino=num(req.body.destino,0,1e12,0)||Number(par[1])||0;
+        if(!destino)throw new Error("Elige con qué tienda es la misma");
+        const r=await fusionarTienda(tid,destino,"el dueño desde la Bandeja");
+        if(tp.conductor_reg&&tp.conductor_reg!=="admin")await avisoA(tp.conductor_reg,"🏪 «"+tp.nombre+"» ya estaba registrada como «"+r.destino.nombre+"». Tus ventas pasaron a esa tienda y ya la ves en tu lista.");
+        hecho="Unida con «"+r.destino.nombre+"»: pasaron "+r.mov.ventas+" ventas, "+r.mov.visitas+" visitas y "+r.mov.creditos_mov+" movimientos de crédito.";
+      }else if(accion==="aceptar"||accion==="nueva"){
+        await db.from("tiendas").update({estado_reg:"ok",posible_dup:null,verificada:true,nueva:false}).eq("id",tid);
+        asegurarCodigos().catch(()=>{});   /* 184 */
+        if(tp.conductor_reg&&tp.conductor_reg!=="admin")await avisoA(tp.conductor_reg,"✓ La tienda «"+tp.nombre+"» fue aprobada.");
+        hecho="Aprobada como tienda nueva. La ven los conductores de ese lugar"+(esProtegida(await getParams(),tp.ubigeo)?" (zona protegida: los independientes solo si se la habilitas)":"")+".";
+      }else if(accion==="rechazar"){
+        await db.from("tiendas").update({estado_reg:"rechazada",act:false}).eq("id",tid);
+        const{data:vv}=await db.from("ventas").select("id").eq("tienda_id",tid);
+        if(tp.conductor_reg&&tp.conductor_reg!=="admin")await avisoA(tp.conductor_reg,"✗ La tienda «"+tp.nombre+"» no fue aprobada y deja de aparecer en tu lista.");
+        hecho="Rechazada: deja de aparecerle al conductor."+((vv||[]).length?(" Sus "+vv.length+" ventas quedan registradas."):"");
       }
     }else if(ev.tipo==="boleta"){
       if(accion==="aceptar"){
@@ -903,7 +1627,7 @@ app.post("/auth/login",authLimiter,async(req,res)=>{
   if(!c.pass_hash){falla(k);return res.status(401).json({ok:false,error:"Esta cuenta aún no tiene contraseña: usa \"Primera vez\""});}
   if(!(await bcrypt.compare(p,c.pass_hash))){falla(k);return res.status(401).json({ok:false,error:"Usuario o contraseña incorrectos"});}
   limpiaFallo(k);
-  res.json({ok:true,token:jwt.sign({u,tipo:c.tipo},SECRET,{expiresIn:"30d"}),nombre:c.nombre,tipo:c.tipo,camion:c.camion});
+  res.json({ok:true,token:jwt.sign({u,tipo:tipoDe(c)},SECRET,{expiresIn:"30d"}),nombre:c.nombre,tipo:tipoDe(c),camion:c.camion});
 });
 app.post("/auth/primera-vez",authLimiter,async(req,res)=>{
   const u=String(req.body.usuario||"").toLowerCase().trim(),p=String(req.body.pass||"");
@@ -916,7 +1640,7 @@ app.post("/auth/primera-vez",authLimiter,async(req,res)=>{
   if(c.pass_hash)return res.status(409).json({ok:false,error:"Este usuario ya tiene contraseña. Si la olvidaste, contacta al administrador."});
   await db.from("conductores").update({pass_hash:await bcrypt.hash(p,10)}).eq("usuario",u);
   await evento("usuario","👤 Usuario activado","@"+u+" ("+c.nombre+") creó su contraseña y ya puede entrar.",u);
-  res.json({ok:true,token:jwt.sign({u,tipo:c.tipo},SECRET,{expiresIn:"30d"}),nombre:c.nombre,tipo:c.tipo,camion:c.camion});
+  res.json({ok:true,token:jwt.sign({u,tipo:tipoDe(c)},SECRET,{expiresIn:"30d"}),nombre:c.nombre,tipo:tipoDe(c),camion:c.camion});
 });
 app.post("/auth/cambiar",authC,async(req,res)=>{
   const{data:c}=await db.from("conductores").select("*").eq("usuario",req.cond.u).single();
@@ -935,22 +1659,32 @@ app.get("/conductor/datos",authC,async(req,res)=>{
   const [tds, vHoy, peds, ultV, cols, avs, leidos, movHoy, yo, cg, trs, trsOut, trsOk, cat, cats] = await Promise.all([
     db.from("tiendas").select("*").eq("act",true),
     db.from("visitas").select("*").eq("fecha",hoy()),
-    db.from("pedidos").select("*").eq("fecha",hoy()).eq("conductor",u).eq("estado","pendiente"),
-    db.from("ventas").select("tienda_id,creado,total,resumen,items").order("creado",{ascending:false}).limit(400),
+    db.from("pedidos").select("*").in("estado",["pendiente"]).order("id",{ascending:true}).limit(500),   /* 184 · vigentes */
+    db.from("ventas").select("id,tienda_id,creado,total,resumen,items,conductor,anulada,nota_venta,boleta").order("creado",{ascending:false}).limit(400),
     db.from("conductores").select("usuario,nombre,tipo").eq("activo",true).neq("usuario",u),
     db.from("avisos").select("*").or(`para.eq.${u},para.eq.todos`).order("id",{ascending:false}).limit(20),
     db.from("avisos_leidos").select("aviso_id").eq("usuario",u),
     db.from("creditos_mov").select("tipo,monto,por,creado").eq("por",u).gte("creado",iniDia(hoy())),
-    db.from("conductores").select("lat,lon,gps_fuente,gps_hora,en_turno,turno_ini,lat_cel,lon_cel,cel_hora,modalidad").eq("usuario",u).maybeSingle(),
+    db.from("conductores").select("usuario,tipo,lugares,lat,lon,gps_fuente,gps_hora,en_turno,turno_ini,lat_cel,lon_cel,cel_hora,modalidad").eq("usuario",u).maybeSingle(),
     db.from("cargas").select("*").eq("conductor",u).eq("estado","pendiente").order("id",{ascending:false}).limit(1).maybeSingle(),
-    db.from("traspasos").select("*").eq("para",u).in("estado",["pendiente","parcial"]),
-    db.from("traspasos").select("*").eq("de",u).in("estado",["pendiente","parcial"]),
+    db.from("traspasos").select("*").eq("para",u).in("estado",TR_ACT),
+    db.from("traspasos").select("*").eq("de",u).in("estado",TR_ACT),
     db.from("traspasos").select("*").eq("estado","completado").gte("creado",lim3).or(`de.eq.${u},para.eq.${u}`),
     db.from("catalogo").select("id,cat,nombre,precio,precios,costo,activo,no_tipos").or("activo.is.null,activo.eq.true"),
     db.from("categorias").select("*").eq("activa",true).order("orden")
   ]).then(rs=>rs.map(x=>x&&x.data));
   const params=await getParams();await zonasVivas();
-          const tiendas=(tds||[]).map(t=>{
+  /* 181 · solo las tiendas de sus lugares (y en zona protegida, las habilitadas) */
+  const yoC=Object.assign({usuario:u},yo||{});
+  /* 182 · deudas por acreedor: todos ven lo que la tienda debe a cualquiera */
+  const[{data:cmAll},NOMA]=await Promise.all([db.from("creditos_mov").select("tienda_id,tipo,monto,acreedor"),nombresAcreedores()]);
+  const DEU={};(cmAll||[]).forEach(m=>{const d=DEU[m.tienda_id]||(DEU[m.tienda_id]={});const a=acreedorDe(m);d[a]=(d[a]||0)+(m.tipo==="cargo"?1:-1)*Number(m.monto||0);});
+  const MIA=tipoDe(yoC)==="independiente"?u:"dueno";
+  const deudaDe=tid=>{const d=DEU[tid]||{},det=[];let tot=0;Object.keys(d).forEach(a=>{const m=Math.max(0,Math.round(d[a]*100)/100);if(m>0){det.push({a,n:NOMA[a]||a,m});tot+=m;}});return {tot:Math.round(tot*100)/100,mia:Math.max(0,Math.round((d[MIA]||0)*100)/100),det};};
+          const PROX=[],NOMC={};(cols||[]).forEach(c=>{NOMC[c.usuario]=c.nombre||c.usuario;});   /* 184 */
+  const pedV=p=>({id:p.id,items:(Array.isArray(p.items)?p.items:[]).map(x=>({p:x.n||x.p||"",c:x.c,id:x.id})),hora:p.hora,nota:p.nota||"",
+    fecha:String(p.fecha||hoy()).slice(0,10),fecha_txt:fechaTxt(p.fecha||hoy()),atrasado:String(p.fecha||hoy()).slice(0,10)<hoy(),visita:!!p.visita,txt:txtItems(p.items,p.visita)});
+  const tiendas=(tds||[]).filter(t=>puedeVer(yoC,t,params)).map(t=>{
     const vs=(ultV||[]).filter(v=>v.tienda_id===t.id).slice(0,5);
     const RIT=ritmoDe(params,t.ritmo), UMB=RIT.umbral_repo;
     const vsAll=(ultV||[]).filter(v=>v.tienda_id===t.id);
@@ -958,21 +1692,27 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     const dr=diasRepo(vsAll,RIT,t.dr_ajuste,RIT.ciclo_dias,DIAS);
     const ultBaja=(vsAll.length&&Number(vsAll[0].total||0)<UMB)?Number(vsAll[0].total||0):null;
     const vo=(vHoy||[]).find(v=>v.tienda_id===t.id&&v.conductor!==u&&v.tipo==="venta");
-    const pd=(peds||[]).find(p=>(p.tienda_id&&p.tienda_id===t.id)||(p.tienda&&String(p.tienda).toLowerCase().trim()===String(t.nombre).toLowerCase().trim()));
+    /* 184 · el pedido vigente de la tienda: el mío (de hoy o atrasado), los próximos míos y el de otro conductor */
+    const vigT=(peds||[]).filter(p=>(p.tienda_id&&p.tienda_id===t.id)||(!p.tienda_id&&p.tienda&&String(p.tienda).toLowerCase().trim()===String(t.nombre).toLowerCase().trim()));
+    const pd=vigT.find(p=>p.conductor===u&&String(p.fecha||hoy()).slice(0,10)<=hoy());
+    const pdO=pd?null:vigT.find(p=>p.conductor&&p.conductor!==u&&String(p.fecha||hoy()).slice(0,10)<=hoy());
+    vigT.filter(p=>p.conductor===u&&String(p.fecha||"").slice(0,10)>hoy()).forEach(p=>PROX.push(Object.assign(pedV(p),{tienda:t.nombre,tienda_id:t.id})));
     return {n:t.nombre,z:t.zona||"—",tp:t.tipo||"bodega",d:t.dueno||"—",tel:t.tel||"—",
       e:vs.length&&fechaPE(vs[0].creado)===hoy()?"completada":"pendiente",
-      cr:!!t.cr,sa:Number(t.sa||0),li:Number(t.li||params.limite_credito||230),di:"—",
+      cod:t.codigo||undefined,precios:(t.precios&&typeof t.precios==="object"&&!Array.isArray(t.precios))?t.precios:{},cr:!!t.cr,sa:deudaDe(t.id).tot,sa_mio:deudaDe(t.id).mia,sa_det:deudaDe(t.id).det,li:(Number(t.li)||limiteLugar(params,t.ubigeo)),di:"—",ub:t.ubigeo||null,lugar:nombreLugar(t.ubigeo)||undefined,pend:(t.estado_reg==="pendiente")||undefined,
       no:t.notas||"",ab:true,lat:t.lat,lon:t.lon,dr,vip:!!t.vip,act:true,
       ritmo:RIT.id,ciclo:RIT.ciclo_dias,nivel:nivelDe(dr,RIT),
       ritmo_nom:RIT.nombre,ritmo_emo:RIT.emoji,umbral:RIT.umbral_repo,
       dias:DIAS,abre_hoy:ABRE,dias_txt:diasTexto(DIAS),
       nueva:!!t.nueva,verificada:!!t.verificada,foto:t.foto||null,id:t.id,
-      h:vs.map(v=>({f:new Date(v.creado).toLocaleDateString("es-PE"),p:v.resumen||"",m:Number(v.total)})),
+      h:vs.map(v=>({f:new Date(v.creado).toLocaleDateString("es-PE"),p:v.resumen||"",m:Number(v.total),id:v.id,c:v.conductor,num:v.nota_venta||v.boleta||undefined})),
       ultima_compra:(vs[0]&&Array.isArray(vs[0].items))?vs[0].items.filter(x=>x&&x.id).map(x=>({id:x.id,n:x.n,c:num(x.c,0,9999)})):[],
       compras:(vs||[]).slice(0,2).map(v=>({id:v.id,fecha:v.creado,total:Number(v.total||0),
         items:(Array.isArray(v.items)?v.items:[]).filter(x=>x&&x.id).map(x=>({id:x.id,n:x.n,c:num(x.c,0,9999),pu:num(x.pu,0,10000)}))})),
-      pedido:pd?{items:pd.items,hora:pd.hora,nota:pd.nota||""}:undefined,
+      pedido:pd?pedV(pd):undefined,
       pedidoHoy:!!pd,
+      pedido_otro:pdO?Object.assign(pedV(pdO),{de:NOMA[pdO.conductor]||NOMC[pdO.conductor]||pdO.conductor}):undefined,
+      pedido_prox:(()=>{const x=vigT.find(p=>p.conductor===u&&String(p.fecha||"").slice(0,10)>hoy());return x?pedV(x):undefined;})(),
       visitadaPor:vo?{n:vo.conductor,h:vo.hora}:undefined,
       bajoMonto:ultBaja,
       h_ini:t.hora_ini||"",h_fin:t.hora_fin||"",dias_no:t.dias_no||"",
@@ -985,7 +1725,7 @@ app.get("/conductor/datos",authC,async(req,res)=>{
     const fiadoHoy=(movHoy||[]).filter(m=>m.tipo==="cargo").reduce((s,m)=>s+Number(m.monto||0),0);
   const cobradoHoy=(movHoy||[]).filter(m=>m.tipo==="abono").reduce((s,m)=>s+Number(m.monto||0),0);
         console.log(`datos->${u}: categorias=${(cats||[]).length} productos=${(cat||[]).length} tiendas=${tiendas.length}`);
-  res.json({ok:true,params,ritmos:ritmosDe(params),turno_ini:(yo&&yo.turno_ini)||null,en_turno:!!(yo&&yo.en_turno),catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:x.tipo})),
+  res.json({ok:true,yo_tipo:tipoDe(yoC),yo_lugares:resumenLugares(yoC),mi_cuenta:MIA,proximos_pedidos:PROX.sort((a,b)=>a.fecha.localeCompare(b.fecha)),params,ritmos:ritmosDe(params),turno_ini:(yo&&yo.turno_ini)||null,en_turno:!!(yo&&yo.en_turno),catalogo:cat||[],categorias:cats||[],tiendas,avisos,colegas:(cols||[]).map(x=>({usuario:x.usuario,nombre:x.nombre,tipo:tipoDe(x)})),
     dia:{fiado:fiadoHoy,cobrado:cobradoHoy},
     gps_camion:(function(){
       const minResp=num(params.operacion&&params.operacion.min_gps_respaldo,1,120,10);
@@ -1020,6 +1760,10 @@ app.post("/ventas",authC,async(req,res)=>{
   if(rapida&&(metodo==="credito"||metodo==="mixto"||num(req.body.credito,0,999999)>0))
     return res.status(400).json({ok:false,error:"La venta rápida es solo al contado (efectivo o Yape)"});
   const _pv=await getParams();
+  if(t){   /* 181 */
+    const{data:yoV}=await db.from("conductores").select("usuario,tipo,lugares").eq("usuario",req.cond.u).maybeSingle();
+    if(yoV&&!puedeVer(yoV,t,_pv))return res.status(403).json({ok:false,error:"La tienda «"+t.nombre+"» no está habilitada para ti. Pídele al dueño que te la habilite."});
+  }
   if(_pv.catalogo_cfg&&_pv.catalogo_cfg.vender_sin_precio===false&&(Array.isArray(items)?items:[]).some(x=>!(Number(x&&x.pu)>0)))
     return res.status(400).json({ok:false,error:"Hay productos sin precio en la venta. Ponles precio en el catálogo o activa «Permitir vender productos sin precio»."});
   const resumen=(items||[]).map(x=>`${x.n} x${x.c}`).join(", ");
@@ -1028,8 +1772,19 @@ app.post("/ventas",authC,async(req,res)=>{
     if(uid){const{data:ya}=await db.from("ventas").select("id,boleta").eq("uid",uid).maybeSingle();if(ya)return res.json({ok:true,id:ya.id,boleta:ya.boleta,repetida:true});}
     return res.status(500).json({ok:false,error:"No se pudo guardar la venta en la base. Queda en el celular para reintentar."});
   }
+  /* 183 · el independiente no usa la serie B001 del dueño: su propia nota de venta */
+  const{data:yoNV}=await db.from("conductores").select("tipo").eq("usuario",req.cond.u).maybeSingle();
+  const esIndNV=tipoDe(yoNV)==="independiente";
+  if(esIndNV&&v){
+    try{
+      const{data:mias}=await db.from("ventas").select("nota_venta").eq("conductor",req.cond.u);
+      let n=0;(mias||[]).forEach(x=>{const m=String(x.nota_venta||"").match(/(\d+)$/);if(m)n=Math.max(n,parseInt(m[1],10));});
+      v.nota_venta="NV-"+req.cond.u.toUpperCase().slice(0,10)+"-"+String(n+1).padStart(5,"0");
+      await db.from("ventas").update({nota_venta:v.nota_venta}).eq("id",v.id);
+    }catch(e){console.error("nota de venta:",e.message);}
+  }
   // número de comprobante correlativo, asignado por el servidor
-  try{
+  if(!esIndNV)try{
     /* 177 · la base no acepta dos boletas iguales: si otra venta tomó el número, se pide el siguiente */
     let probado=0;
     for(let intento=0;intento<5&&v&&!v.boleta;intento++){
@@ -1044,7 +1799,7 @@ app.post("/ventas",authC,async(req,res)=>{
   }catch(e){console.error("boleta:",e.message);}
   // ¿venta después de haber liquidado? (cola que llegó tarde, o venta real fuera de viaje)
   let fueraDeTurno=false;
-  try{
+  if(!esIndNV)try{   /* 183 · el independiente no liquida con el dueño */
     const{data:yoT}=await db.from("conductores").select("en_turno,turno_ini").eq("usuario",req.cond.u).maybeSingle();
     fueraDeTurno=!(yoT&&yoT.en_turno);
     if(fueraDeTurno&&v){
@@ -1061,20 +1816,38 @@ app.post("/ventas",authC,async(req,res)=>{
   try{
     const salida={};
     (Array.isArray(req.body.items)?req.body.items:[]).forEach(it=>{if(it&&it.id)salida[it.id]=-(num(it.c,0,9999));});
-    if(Object.keys(salida).length)await moverStock(req.cond.u,salida,"venta",v&&v.id);
+    if(Object.keys(salida).length){const mv=await moverStock(req.cond.u,salida,"venta",v&&v.id);
+      if(v&&mv)await db.from("ventas").update({costo:mv.costo}).eq("id",v.id);}   /* 183 · costo PEPS de lo vendido */
   }catch(e){console.error("stock venta:",e.message);}
   if(t)await db.from("visitas").insert({tienda_id:t.id,tienda:t.nombre,conductor:req.cond.u,tipo:"venta",fecha:hoy(),hora:horaPE()});
+  /* 184 · la venta atiende el pedido vigente de esa tienda; los precios que cambió quedan para ella */
+  if(t){try{await atenderPedido(t,req.cond.u,v,items,false);}catch(e){console.error("pedido atendido:",e.message);}
+    try{await guardarAcordados(t,req.cond.u,req.body.precios_acordados,_pv);}catch(e){console.error("precio acordado:",e.message);}}
   if(t&&t.dr_ajuste)await db.from("tiendas").update({dr_ajuste:0}).eq("id",t.id);
   const fiado=num(req.body.credito,0,999999)||((metodo==="credito")?num(total,0,999999):0);
   const abono=num(req.body.abono,0,999999);
+  /* 182 · cuenta de quién: el empleado fía y cobra para el dueño; el independiente, para sí */
+  const{data:yoCr}=await db.from("conductores").select("usuario,tipo,nombre").eq("usuario",req.cond.u).maybeSingle();
+  const esInd=tipoDe(yoCr)==="independiente",ACR=esInd?req.cond.u:"dueno";
+  const totAntes=(t&&(fiado>0||abono>0))?(await saldosTienda(t.id)).total:0;
   if(abono>0&&t){
-    await moverDeuda(t.id,"abono",abono,"Cobro en visita #"+v.id,req.cond.u);
+    await moverDeuda(t.id,"abono",abono,"Cobro en visita #"+v.id,req.cond.u,ACR);
   }
-  if(fiado>0&&t&&!t.cr)await evento("credito_sin_permiso","⚠️ Venta al crédito en tienda sin crédito habilitado",
+  if(fiado>0&&t&&esInd){
+    await moverDeuda(t.id,"cargo",fiado,"Venta "+(metodo==="mixto"?"mixta":"a crédito")+" #"+v.id,req.cond.u,ACR);
+    /* el independiente puede pasar el límite (es su dinero), pero queda avisado y te llega */
+    const lim=Number(t.li)||limiteLugar(_pv,t.ubigeo),totDesp=Math.round((totAntes-Math.min(abono,totAntes)+fiado)*100)/100;
+    if(lim>0&&totDesp>lim){
+      await evento("credito_limite","💳 Fiado sobre el límite — "+t.nombre,
+        (yoCr&&yoCr.nombre||req.cond.u)+" (independiente) le fió S/"+fiado.toFixed(2)+". La tienda ya debía S/"+totAntes.toFixed(2)+" y ahora debe S/"+totDesp.toFixed(2)+" en total (límite S/"+lim.toFixed(2)+").",String(t.id));
+      avisarAdmin("💳 Fiado sobre el límite: "+req.cond.u+" fió S/"+fiado.toFixed(2)+" a "+t.nombre+" — debe S/"+totDesp.toFixed(2)+" en total (límite S/"+lim.toFixed(2)+")","credito_sin_permiso");
+    }
+  }
+  if(fiado>0&&t&&!esInd&&!t.cr)await evento("credito_sin_permiso","⚠️ Venta al crédito en tienda sin crédito habilitado",
     t.nombre+" · S/"+fiado.toFixed(2)+" · conductor "+req.cond.u,String(t.id));
-  if(fiado>0&&t){
-    const antes=await saldoHistorial(t.id);
-    const r=await moverDeuda(t.id,"cargo",fiado,"Venta "+(metodo==="mixto"?"mixta":"a crédito")+" #"+v.id,req.cond.u);
+  if(fiado>0&&t&&!esInd){
+    const antes=await saldoHistorial(t.id,"dueno");
+    const r=await moverDeuda(t.id,"cargo",fiado,"Venta "+(metodo==="mixto"?"mixta":"a crédito")+" #"+v.id,req.cond.u,"dueno");
     /* 175 · Configuración → Crédito: aviso por cada venta fiada y aviso al pasar un monto */
     const cc=_pv.credito_cfg||{};
     if(cc.fiar_sin_permiso===false){
@@ -1101,7 +1874,7 @@ app.post("/ventas",authC,async(req,res)=>{
   }catch(e){}
   try{await db.from("kardex").insert({conductor:req.cond.u,tipo:"venta_detalle",
     detalle:(t?t.nombre:"Venta rápida")+" · S/"+Number(total||0).toFixed(2)+" ("+(metodo||"efectivo")+")"+(fiado>0?" · fiado S/"+fiado.toFixed(2):"")});}catch(e){}
-  res.json({ok:true,id:v.id,boleta:v.boleta||null});
+  res.json({ok:true,id:v.id,boleta:v.boleta||v.nota_venta||null,nota_venta:v.nota_venta||undefined});
 });
 /* 175 · Reportar robo o incidente: llega a la Bandeja del dueño */
 app.post("/conductor/incidente",authC,async(req,res)=>{
@@ -1119,6 +1892,7 @@ app.post("/visitas",authC,async(req,res)=>{
   const motivoV=limpia(req.body.motivo,60)||null;
   const esCerrada=!motivoV||/cerrad/i.test(motivoV);
   await db.from("visitas").insert({tienda_id:t?t.id:null,tienda:req.body.tienda,conductor:req.cond.u,tipo:(["venta","fallida","no_quiso","registro"].includes(req.body.tipo)?req.body.tipo:"fallida"),fecha:hoy(),hora:horaPE(),motivo:motivoV});
+  if(t&&req.body.tipo==="no_quiso"){try{await atenderPedido(t,req.cond.u,null,[],true);}catch(e){console.error("pedido visita:",e.message);}}   /* 184 */
   if((req.body.tipo||"")==="fallida"){
     const cerradaHoy=t&&!abreHoy(t.dias_atiende);
     await evento("visita","🚫 Visita fallida — "+req.body.tienda,
@@ -1151,12 +1925,35 @@ app.post("/visitas",authC,async(req,res)=>{
 app.post("/tiendas",authC,async(req,res)=>{
   const b=req.body;
   const _pmsC=await getParams(), _diasC=diasNorm(b.dias);
+  /* 181 · el lugar sale del GPS. Queda PENDIENTE (solo la ve quien la registró, hasta que
+     el dueño decida) si: está fuera de sus lugares, parece repetida de otra tienda (se
+     compara con todas, también las que él no ve), o un independiente la registra en zona
+     protegida. Al conductor no se le muestran datos de la otra tienda. */
+  const latN=(b.lat==null?null:num(b.lat,-90,90)),lonN=(b.lon==null?null:num(b.lon,-180,180));
+  const ub=(latN!=null&&lonN!=null)?ubicarGPS(latN,lonN):null;
+  const{data:yoR}=await db.from("conductores").select("usuario,tipo,lugares").eq("usuario",req.cond.u).maybeSingle();
+  const cR=Object.assign({usuario:req.cond.u},yoR||{});
+  const dup=await buscarRepetida(b.n,latN,lonN,_pmsC);
+  const motivos=[];
+  if(!habilitadoEn(cR,ub))motivos.push(ub?("está fuera de sus lugares ("+nombreLugar(ub)+")"):"no tiene ubicación GPS");
+  if(dup)motivos.push("parece la misma que «"+dup.t.nombre+"» (#"+dup.t.id+(dup.m!=null?(", a "+dup.m+" m"):"")+")");
+  if(tipoDe(cR)==="independiente"&&esProtegida(_pmsC,ub))motivos.push("está en zona protegida ("+nombreLugar(ub)+")");
+  const pend=motivos.length>0;
   const{data:t,error}=await db.from("tiendas").insert({nombre:b.n,zona:b.z,tipo:b.tp,ritmo:ritmoDe(_pmsC,b.ritmo).id,
-    dias_atiende:_diasC,dueno:b.d,tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),foto:fotoOK(b.foto)?b.foto:null,cr:false,sa:0,li:0,vip:false,act:true,nueva:true,verificada:false,conductor_reg:req.cond.u}).select().single();
+    dias_atiende:_diasC,dueno:b.d,tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:limpia(b.dias_no,30),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),foto:fotoOK(b.foto)?b.foto:null,cr:false,sa:0,li:0,vip:false,act:true,nueva:true,verificada:false,conductor_reg:req.cond.u,
+    ubigeo:ub,estado_reg:pend?"pendiente":"ok",posible_dup:dup?dup.t.id:null}).select().single();
   if(error)return res.status(500).json({ok:false,error:error.message});
-  await evento("tienda_nueva","🆕 Tienda nueva por verificar — "+b.n,"Registrada por "+req.cond.u+" en "+(b.z||"—")+". Contado habilitado; crédito bloqueado hasta que la verifiques.",t.id);
-  avisarAdmin("🆕 Tienda nueva por verificar: "+b.n+" ("+(b.z||"—")+") — registrada por "+req.cond.u,"tienda_nueva");
-  res.json({ok:true,id:t.id});
+  if(pend){
+    await evento("tienda_pend","⏳ Tienda por aprobar — "+b.n,
+      "Registrada por "+req.cond.u+" ("+tipoDe(cR)+") en "+(nombreLugar(ub)||"un lugar sin ubicar")+". Queda pendiente porque "+motivos.join("; ")+". Mientras tanto solo la ve quien la registró y le puede vender.",
+      String(t.id)+(dup?("|"+dup.t.id):""));
+    avisarAdmin("⏳ Tienda por aprobar: "+b.n+" — registrada por "+req.cond.u+". "+motivos.join("; "),"tienda_nueva");
+  }else{
+    await evento("tienda_nueva","🆕 Tienda nueva por verificar — "+b.n,"Registrada por "+req.cond.u+" en "+(nombreLugar(ub)||b.z||"—")+". Contado habilitado; crédito bloqueado hasta que la verifiques.",t.id);
+    avisarAdmin("🆕 Tienda nueva por verificar: "+b.n+" ("+(nombreLugar(ub)||b.z||"—")+") — registrada por "+req.cond.u,"tienda_nueva");
+  }
+  asegurarCodigos().catch(()=>{});   /* 184 */
+  res.json({ok:true,id:t.id,pendiente:pend||undefined,lugar:nombreLugar(ub)||undefined});
 });
 app.post("/conductor/dias-sugeridos",authC,async(req,res)=>{
   /* Mismo criterio que el ciclo: el conductor propone, el dueño aprueba.
@@ -1194,58 +1991,284 @@ app.post("/conductor/ritmo-sugerido",authC,async(req,res)=>{
   res.json({ok:true});
 });
 app.post("/correcciones",authC,async(req,res)=>{
+  /* 183 · el independiente corrige su propia venta: se aplica al momento, queda el antes y
+     el después, y el dueño recibe el aviso. El empleado propone y el dueño decide (como antes). */
+  if((await independientes()).has(req.cond.u)){
+    const ref=limpia(req.body.referencia,40),nuevo=num(req.body.monto_correcto,0,999999);
+    const{data:mias}=await db.from("ventas").select("*").eq("conductor",req.cond.u);
+    const v=(mias||[]).find(x=>!x.anulada&&(x.nota_venta===ref||x.boleta===ref||String(x.id)===ref||String(x.uid)===ref));
+    if(!v)return res.status(404).json({ok:false,error:"No encontré esa venta tuya ("+ref+")"});
+    const antes=Number(v.total||0),dif=Math.round((nuevo-antes)*100)/100;
+    const upd={total:nuevo,editada_en:new Date().toISOString(),nota_boleta:limpia("Corregida por "+req.cond.u+": S/"+antes.toFixed(2)+" → S/"+nuevo.toFixed(2)+" · "+(req.body.motivo||""),300)};
+    if(v.metodo==="credito"){upd.credito=Math.max(0,Number(v.credito||0)+dif);
+      if(v.tienda_id&&dif)await moverDeuda(v.tienda_id,dif>0?"cargo":"abono",Math.abs(dif),"Corrección de "+(v.nota_venta||("venta #"+v.id)),req.cond.u,req.cond.u);}
+    else if(v.metodo!=="yape")upd.efectivo=Math.max(0,Number(v.efectivo||0)+dif);
+    await db.from("ventas").update(upd).eq("id",v.id);
+    await db.from("correcciones").insert({tienda:req.body.tienda||v.tienda,referencia:ref,monto_correcto:nuevo,motivo:limpia(req.body.motivo,200),conductor:req.cond.u,estado:"aplicada"});
+    await db.from("kardex").insert({conductor:req.cond.u,tipo:"correccion",detalle:(v.nota_venta||("#"+v.id))+" "+v.tienda+": S/"+antes.toFixed(2)+" → S/"+nuevo.toFixed(2)+" — "+(req.body.motivo||"")});
+    await evento("correccion_indep","✎ Venta corregida por un independiente — "+req.cond.u,(v.nota_venta||("#"+v.id))+" · "+v.tienda+": S/"+antes.toFixed(2)+" → S/"+nuevo.toFixed(2)+". Motivo: "+(req.body.motivo||"—"),String(v.id));
+    return res.json({ok:true,aplicada:true,antes,despues:nuevo});
+  }
   const{data:c}=await db.from("correcciones").insert({tienda:req.body.tienda,referencia:req.body.referencia,monto_correcto:Number(req.body.monto_correcto)||0,motivo:req.body.motivo,conductor:req.cond.u,estado:"pendiente"}).select().single();
   await evento("correccion","✎ Corrección propuesta — "+req.body.tienda,req.body.referencia+" → S/"+Number(req.body.monto_correcto||0).toFixed(2)+". Motivo: "+req.body.motivo+" (por "+req.cond.u+")",c.id);
   res.json({ok:true,id:c.id});
 });
+/* ═══ 185 · TRASPASOS: crear (pedir u ofrecer), aceptar, confirmar, rechazar, cancelar ═══ */
+const quienEs=u=>(u==="almacen"||USR_RE.test(String(u||"")));
+async function vistaTr(t,yo,N){
+  const pr=limpiaProds(t.prods);
+  const{data:cat}=await db.from("catalogo").select("id,nombre").in("id",Object.keys(pr).length?Object.keys(pr):["-"]);
+  const nom={};(cat||[]).forEach(p=>{nom[p.id]=p.nombre;});
+  const soyDe=t.de===yo,soyPara=t.para===yo,otro=soyDe?t.para:t.de;
+  return {id:t.id,estado:t.estado,modo:t.modo||"pedir",cruce:!!t.cruce,de:t.de,para:t.para,de_n:N[t.de]||t.de_nombre||t.de,para_n:N[t.para]||t.para,
+    otro,otro_n:N[otro]||otro,rol:soyDe?"entrega":(soyPara?"recibe":null),iniciador:t.iniciador||t.para,
+    items:Object.keys(pr).map(id=>({id,n:nom[id]||id,c:pr[id],pu:t.precios&&t.precios[id]!=null?Number(t.precios[id]):undefined})),
+    precio_modo:t.precio_modo||null,total:t.total!=null?Number(t.total):null,pago:t.pago||null,
+    conf_de:!!t.conf_de,conf_para:!!t.conf_para,yo_confirme:soyDe?!!t.conf_de:!!t.conf_para,otro_confirmo:soyDe?!!t.conf_para:!!t.conf_de,
+    nota:t.nota||"",creado:t.creado,dist_m:t.dist_m||null,anul_motivo:t.anul_motivo||null};
+}
 app.post("/traspasos",authC,async(req,res)=>{
-  const prodsT=limpiaProds(req.body.prods||req.body.items);
-  const itemsT=await porCategoria(prodsT);
-  const{data:t}=await db.from("traspasos").insert({de:req.body.de,de_nombre:req.body.de_nombre||req.body.de,para:req.cond.u,prods:prodsT,items:itemsT,estado:"pendiente"}).select().single();
-  await avisoA(req.body.de,"↔ "+req.cond.u+" te solicita traspaso: "+Object.entries(req.body.items||{}).map(([k,v])=>k+"×"+v).join(", ")+". Si aceptas, entrégalo y él lo confirmará en su app.");
-  await evento("traspaso","↔ Solicitud de traspaso",req.cond.u+" pidió a "+(req.body.de_nombre||req.body.de)+". Se mueve solo cuando el receptor confirme.",t.id);
-  res.json({ok:true,id:t.id});
-});
-app.post("/traspasos/estado",authC,async(req,res)=>{
-  const{data:t}=await db.from("traspasos").select("*").eq("id",req.body.id).maybeSingle();
-  if(!t)return res.status(404).json({ok:false});
-  const yo=req.cond.u, esDe=(t.de===yo), esPara=(t.para===yo);
-  if(!esDe&&!esPara)return res.status(403).json({ok:false,error:"No es tu traspaso"});
-  if(req.body.accion==="rechazar"){
-    await db.from("traspasos").update({estado:"rechazado"}).eq("id",t.id);
-    await avisoA(esDe?t.para:t.de,"✗ "+yo+" rechazó el traspaso.");
-    await evento("traspaso","↔ Traspaso rechazado",(t.de_nombre||t.de)+" → "+t.para+" (rechazó "+yo+")",t.id);
-    return res.json({ok:true,estado:"rechazado"});
-  }
-  const upd={};
-  if(esDe)upd.conf_de=true; if(esPara)upd.conf_para=true;
-  const cDe=upd.conf_de||t.conf_de, cPara=upd.conf_para||t.conf_para;
-  upd.estado=(cDe&&cPara)?"completado":"parcial";
-  // cuando ambos confirman, la mercadería cambia de manos en el inventario
-  if(upd.estado==="completado"&&t.estado!=="completado"){
-    const pr=limpiaProds(t.prods);
-    if(Object.keys(pr).length){
-      const menos={},mas={};
-      Object.keys(pr).forEach(id=>{menos[id]=-pr[id];mas[id]=pr[id];});
-      await moverStock(t.de,menos,"traspaso_envia",t.id);
-      await moverStock(t.para,mas,"traspaso_recibe",t.id);
+  const yo=req.cond.u,b=req.body||{},modo=b.modo==="ofrecer"?"ofrecer":"pedir";
+  const de=modo==="ofrecer"?yo:String(b.de||""),para=modo==="ofrecer"?String(b.para||""):yo;
+  if(!quienEs(de)||!quienEs(para)||de===para)return res.status(400).json({ok:false,error:"Elige con quién es el traspaso"});
+  if(de!=="almacen"){const{data:x}=await db.from("conductores").select("usuario").eq("usuario",de).maybeSingle();if(!x)return res.status(400).json({ok:false,error:"Ese conductor no existe"});}
+  if(para!=="almacen"){const{data:x}=await db.from("conductores").select("usuario").eq("usuario",para).maybeSingle();if(!x)return res.status(400).json({ok:false,error:"Ese conductor no existe"});}
+  const prodsT=limpiaProds(b.prods||b.items);
+  if(!Object.keys(prodsT).length)return res.status(400).json({ok:false,error:"Elige al menos un producto"});
+  const cruce=(await duenoDe(de))!==(await duenoDe(para));
+  const fila={de,de_nombre:b.de_nombre||de,para,prods:prodsT,items:await porCategoria(prodsT),estado:"pendiente",modo,iniciador:yo,cruce,nota:limpia(b.nota,200)||null};
+  if(modo==="ofrecer"){
+    const f=await faltaStock(yo,prodsT);if(f)return res.status(409).json({ok:false,error:"No tienes suficiente: "+f});
+    if(cruce){
+      if(!["efectivo","yape","fiado"].includes(b.pago))return res.status(400).json({ok:false,error:"Elige la forma de pago: contado, Yape o fiado"});
+      try{const p=await preciosTr(yo,prodsT,b.precio_modo,b.precios);Object.assign(fila,{precio_modo:b.precio_modo,precios:p.precios,total:p.total,pago:b.pago});}
+      catch(e){return res.status(400).json({ok:false,error:e.message});}
     }
   }
-  await db.from("traspasos").update(upd).eq("id",t.id);
-  if(cDe&&cPara){
-    const det=JSON.stringify(t.items);
-    if(t.de==="almacen")await db.from("kardex").insert({conductor:"almacen",tipo:"almacen_salida",detalle:det+" · entregado a "+t.para});
-    if(t.para==="almacen")await db.from("kardex").insert({conductor:"almacen",tipo:"almacen_retorno",detalle:det+" · recibido de "+t.de});
-    await db.from("kardex").insert({conductor:t.para,tipo:"traspaso_in",detalle:"De "+(t.de_nombre||t.de)+": "+det});
-    await db.from("kardex").insert({conductor:t.de,tipo:"traspaso_out",detalle:"Hacia "+t.para+": "+det});
-    await avisoA(t.de,"✓ Traspaso completado con "+t.para+": ambos confirmaron.");
-    await avisoA(t.para,"✓ Traspaso completado con "+(t.de_nombre||t.de)+": ambos confirmaron. Ya está en tu carga.");
-    await evento("traspaso","↔ Traspaso completado",(t.de_nombre||t.de)+" → "+t.para+" — confirmado por ambos.",t.id);
-  }else{
-    const falta=cDe?t.para:t.de;
-    await avisoA(falta,"↔ "+yo+" ya confirmó su parte del traspaso. Falta la tuya para que la mercadería se mueva.");
+  const{data:t,error}=await db.from("traspasos").insert(fila).select().single();
+  if(error||!t)return res.status(500).json({ok:false,error:"No se pudo crear el traspaso"+(error?(": "+error.message):"")});
+  const N=await nombresTr(),otro=modo==="ofrecer"?para:de;
+  const lista=Object.keys(prodsT).map(k=>k+"×"+prodsT[k]).join(", ");
+  if(otro!=="almacen")await avisoA(otro,"↔ "+(N[yo]||yo)+(modo==="ofrecer"?" te ofrece ":" te pide ")+"mercadería"+(t.total!=null?(" por S/"+Number(t.total).toFixed(2)+" "+(PAGO_TXT[t.pago]||"")):"")+": "+lista+". Ábrelo en ↔ Traspasos.");
+  await evento("traspaso","↔ Traspaso "+(modo==="ofrecer"?"ofrecido":"pedido")+(otro==="almacen"?" al almacén":""),textoTr(t,N)+(otro==="almacen"?". Te toca a ti responder desde Traspasos.":". Se mueve solo cuando los dos confirmen."),String(t.id));
+  res.json({ok:true,id:t.id,cruce,total:t.total});
+});
+/* aceptar: el que no lo inició. Si es cruce y le toca entregar, pone precio y forma de pago */
+async function aceptarTr(t,yo,b,esDueno){
+  if(t.estado!=="pendiente")return {s:409,error:"Ese traspaso ya no está pendiente"};
+  if(t.iniciador===yo&&!esDueno)return {s:403,error:"Lo iniciaste tú: espera que el otro lo acepte"};
+  const upd={aceptado_en:new Date().toISOString()},pr=limpiaProds(t.prods);
+  if(t.cruce&&(t.modo||"pedir")==="pedir"){
+    const f=await faltaStock(t.de,pr);if(f)return {s:409,error:(t.de==="almacen"?"En el almacén no alcanza: ":"No tienes suficiente: ")+f};
+    if(!["efectivo","yape","fiado"].includes(b.pago))return {s:400,error:"Elige la forma de pago: contado, Yape o fiado"};
+    try{const p=await preciosTr(t.de,pr,b.precio_modo,b.precios);Object.assign(upd,{precio_modo:b.precio_modo,precios:p.precios,total:p.total,pago:b.pago});}
+    catch(e){return {s:400,error:e.message};}
   }
-  res.json({ok:true,estado:upd.estado});
+  const pago=upd.pago||t.pago;
+  /* fiado de mercadería del dueño a un independiente: lo aprueba el dueño (salvo que lo haya puesto él) */
+  const necesita=t.cruce&&pago==="fiado"&&(await duenoDe(t.de))==="dueno"&&(await duenoDe(t.para))!=="dueno"&&!esDueno&&t.iniciador!=="almacen";
+  upd.estado=necesita?"por_aprobar":"aceptado";
+  await db.from("traspasos").update(upd).eq("id",t.id);Object.assign(t,upd);
+  const N=await nombresTr();
+  if(necesita){
+    await evento("traspaso_fiado","💳 Aprobar fiado de mercadería",textoTr(t,N)+": "+(N[t.de]||t.de)+" quiere entregar tu mercadería fiada a un independiente. Apruébalo o recházalo en Traspasos.",String(t.id));
+    avisarAdmin("💳 Aprobar fiado: "+textoTr(t,N)+". Revísalo en el panel → Traspasos.","credito_sin_permiso");
+  }
+  const otro=t.iniciador===t.de?t.de:t.para;
+  if(otro!=="almacen")await avisoA(otro,"↔ "+(N[yo]||yo)+" aceptó el traspaso"+(t.total!=null?(" por S/"+Number(t.total).toFixed(2)+" "+(PAGO_TXT[t.pago]||"")):"")+(necesita?". Falta que el dueño apruebe el fiado.":". Al entregarse, confirmen los dos."));
+  return {estado:t.estado,total:t.total};
+}
+app.post("/traspasos/:id/aceptar",authC,async(req,res)=>{
+  const{data:t}=await db.from("traspasos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Traspaso no encontrado"});
+  const yo=req.cond.u;if(t.de!==yo&&t.para!==yo)return res.status(403).json({ok:false,error:"No es tu traspaso"});
+  const r=await aceptarTr(t,yo,req.body||{},false);
+  if(r.s)return res.status(r.s).json({ok:false,error:r.error});
+  res.json({ok:true,estado:r.estado,total:r.total});
+});
+/* confirmar la entrega o la recepción (con la ubicación), rechazar o cancelar */
+async function confirmarTr(t,yo,b){
+  const esDe=t.de===yo,esPara=t.para===yo;
+  if(["completado","rechazado","cancelado","anulado"].includes(t.estado))return {estado:t.estado};
+  if(t.cruce&&!["aceptado","parcial"].includes(t.estado))
+    return {s:409,error:t.estado==="por_aprobar"?"Falta que el dueño apruebe el fiado":"Primero hay que aceptarlo (precio y forma de pago) en ↔ Traspasos"};
+  const upd={},ahora=new Date().toISOString();
+  const pos=(b.lat!=null&&b.lon!=null&&isFinite(Number(b.lat))&&isFinite(Number(b.lon)))?{lat:Number(b.lat),lon:Number(b.lon)}:null;
+  if(esDe){upd.conf_de=true;upd.conf_de_en=ahora;if(pos)upd.pos_de=pos;}
+  if(esPara){upd.conf_para=true;upd.conf_para_en=ahora;if(pos)upd.pos_para=pos;}
+  const cDe=upd.conf_de||t.conf_de,cPara=upd.conf_para||t.conf_para;
+  await db.from("traspasos").update(Object.assign({},upd,{estado:(cDe&&cPara)?t.estado:"parcial"})).eq("id",t.id);
+  Object.assign(t,upd);
+  const N=await nombresTr();
+  if(cDe&&cPara){
+    const r=await completarTraspaso(t,N);
+    if(!r.ok){await db.from("traspasos").update({estado:"parcial",[esDe?"conf_de":"conf_para"]:false}).eq("id",t.id);return {s:409,error:r.error};}
+    return {estado:"completado"};
+  }
+  const falta=cDe?t.para:t.de;
+  if(falta!=="almacen")await avisoA(falta,"↔ "+(N[yo]||yo)+" ya confirmó su parte del traspaso. Falta la tuya para que la mercadería"+(t.cruce?" y el dinero":"")+" se muevan.");
+  else await evento("traspaso","↔ Falta tu confirmación en el almacén",textoTr(t,N)+": "+(N[yo]||yo)+" ya confirmó. Confírmalo en Traspasos cuando lo entregues o recibas.",String(t.id));
+  return {estado:"parcial"};
+}
+app.post("/traspasos/estado",authC,async(req,res)=>{
+  const{data:t}=await db.from("traspasos").select("*").eq("id",req.body.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Traspaso no encontrado"});
+  const yo=req.cond.u,esDe=(t.de===yo),esPara=(t.para===yo);
+  if(!esDe&&!esPara)return res.status(403).json({ok:false,error:"No es tu traspaso"});
+  const acc=req.body.accion||(req.body.estado==="rechazado"?"rechazar":"confirmar");
+  if(acc==="rechazar"||acc==="cancelar"){
+    if(["completado","rechazado","cancelado","anulado"].includes(t.estado))return res.json({ok:true,estado:t.estado});
+    const est=acc==="cancelar"?"cancelado":"rechazado";
+    await db.from("traspasos").update({estado:est}).eq("id",t.id);
+    const N=await nombresTr(),otro=esDe?t.para:t.de;
+    if(otro!=="almacen")await avisoA(otro,"✗ "+(N[yo]||yo)+(est==="cancelado"?" canceló":" rechazó")+" el traspaso.");
+    await evento("traspaso","↔ Traspaso "+est,textoTr(t,N)+" ("+est+" por "+(N[yo]||yo)+")",String(t.id));
+    return res.json({ok:true,estado:est});
+  }
+  const r=await confirmarTr(t,yo,req.body||{});
+  if(r.s)return res.status(r.s).json({ok:false,error:r.error});
+  res.json({ok:true,estado:r.estado});
+});
+/* todo lo del conductor: traspasos activos, historial, cuentas, con quién puede hacer traspasos y precios sugeridos */
+app.get("/conductor/traspasos",authC,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  const yo=req.cond.u,hace14=new Date(Date.now()-14*86400000).toISOString();
+  const[{data:act},{data:hist},{data:cs},N,st,alm,mio]=await Promise.all([
+    db.from("traspasos").select("*").or(`de.eq.${yo},para.eq.${yo}`).in("estado",TR_ACT).order("id",{ascending:false}),
+    db.from("traspasos").select("*").or(`de.eq.${yo},para.eq.${yo}`).in("estado",["completado","anulado","rechazado","cancelado"]).gte("creado",hace14).order("id",{ascending:false}).limit(40),
+    db.from("conductores").select("usuario,nombre,tipo,activo,en_turno"),nombresTr(),leerStock(yo),leerStock("almacen"),duenoDe(yo)]);
+  const act2=[];for(const t of (act||[]))act2.push(await vistaTr(t,yo,N));
+  const his2=[];for(const t of (hist||[]))his2.push(await vistaTr(t,yo,N));
+  /* cuentas: el independiente ve las suyas; el empleado, las del dueño (cobra o paga por él) */
+  const cu=await cuentasPares(m=>m.deudor===mio||m.acreedor===mio);
+  const cuentas=cu.filter(c=>c.saldo>0.004||c.a_favor>0.004).map(c=>({deudor:c.deudor,acreedor:c.acreedor,deudor_n:N[c.deudor]||c.deudor,acreedor_n:N[c.acreedor]||c.acreedor,saldo:c.saldo,
+    me_deben:c.acreedor===mio,otro:c.acreedor===mio?c.deudor:c.acreedor,cargos:c.cargos.filter(g=>g.pendiente>0).map(g=>({fecha:g.fecha,detalle:g.detalle,monto:g.monto,pendiente:g.pendiente}))}));
+  const ids=Object.keys(st.prods).filter(id=>Number(st.prods[id])>0);
+  const uno={};ids.forEach(id=>{uno[id]=1;});
+  const[cst,sug]=await Promise.all([costoPEPS(yo,uno),precioSugerido(ids)]);
+  res.json({ok:true,yo,mi_dueno:mio,activos:act2,historial:his2,cuentas,
+    colegas:(cs||[]).filter(c=>c.usuario!==yo&&c.activo!==false).map(c=>({u:c.usuario,n:c.nombre||c.usuario,tipo:tipoDe(c),en_viaje:!!c.en_turno})),
+    mi_stock:ids.map(id=>({id,cant:Number(st.prods[id]),costo:cst[id]||0,precio:sug[id]||0})),
+    almacen:Object.keys(alm.prods).filter(id=>Number(alm.prods[id])>0).map(id=>({id,cant:Number(alm.prods[id])}))});
+});
+/* sugerencia de precios al aceptar un pedido de otro (a costo: PEPS; a precio: catálogo) */
+app.post("/conductor/traspasos/precios",authC,async(req,res)=>{
+  const prods=limpiaProds(req.body.prods);const ids=Object.keys(prods);
+  const[cst,sug]=await Promise.all([costoPEPS(req.cond.u,prods),precioSugerido(ids)]);
+  res.json({ok:true,costo:cst,precio:sug});
+});
+/* cuentas entre conductores: cobrar o pagar (el empleado lo hace por el dueño) */
+app.post("/conductor/cuentas/mov",authC,async(req,res)=>{
+  const yo=req.cond.u,con=String(req.body.con||""),tipo=req.body.tipo==="pago"?"pago":"cobro";
+  if(!quienEs(con)||con===yo)return res.status(400).json({ok:false,error:"Elige con quién"});
+  const mio=await duenoDe(yo),suyo=await duenoDe(con);
+  if(mio===suyo)return res.status(400).json({ok:false,error:"Entre ustedes no hay cuenta: la mercadería es del mismo dueño"});
+  const deudor=tipo==="cobro"?suyo:mio,acreedor=tipo==="cobro"?mio:suyo;
+  const saldo=await saldoPar(deudor,acreedor);
+  let monto=r2(num(req.body.monto,0,999999,0));
+  if(!(monto>0))return res.status(400).json({ok:false,error:"Escribe el monto"});
+  if(saldo<=0)return res.status(409).json({ok:false,error:tipo==="cobro"?"No les debe nada":"No le deben nada"});
+  if(monto>saldo)monto=saldo;
+  const pago=req.body.pago==="yape"?"yape":"efectivo";
+  const N=await nombresTr();
+  await db.from("cuentas_mov").insert({deudor,acreedor,tipo:"abono",monto,detalle:(tipo==="cobro"?"Cobro de ":"Pago a ")+(N[con]||con)+" ("+(pago==="yape"?"Yape":"efectivo")+")",por:yo,pago});
+  if(con!=="almacen")await avisoA(con,"💵 "+(N[yo]||yo)+(tipo==="cobro"?" registró que le pagaste S/":" registró que te pagó S/")+monto.toFixed(2)+" ("+(pago==="yape"?"Yape":"efectivo")+").");
+  await evento("cuenta_mov","💵 Cuentas entre conductores",(N[yo]||yo)+(tipo==="cobro"?" cobró S/":" pagó S/")+monto.toFixed(2)+(tipo==="cobro"?" a ":" a ")+(N[con]||con)+" ("+(pago==="yape"?"Yape":"efectivo")+"). "+(N[deudor]||deudor)+" le debe ahora S/"+r2(saldo-monto).toFixed(2)+" a "+(N[acreedor]||acreedor)+".","");
+  res.json({ok:true,monto,saldo:r2(saldo-monto)});
+});
+/* ═══ 185 · TRASPASOS: panel ═══ */
+app.get("/admin/traspasos",authA,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  const hace14=new Date(Date.now()-14*86400000).toISOString();
+  const[{data:act},{data:hist},N]=await Promise.all([
+    db.from("traspasos").select("*").in("estado",TR_ACT).order("id",{ascending:false}).limit(200),
+    db.from("traspasos").select("*").in("estado",["completado","anulado"]).gte("creado",hace14).order("id",{ascending:false}).limit(150),nombresTr()]);
+  const V=async(l)=>{const o=[];for(const t of (l||[]))o.push(await vistaTr(t,"almacen",N));return o;};
+  const cu=await cuentasPares(null);
+  res.json({ok:true,activos:await V(act),historial:await V(hist),
+    cuentas:cu.filter(c=>c.saldo>0.004||c.a_favor>0.004).map(c=>Object.assign({deudor_n:N[c.deudor]||c.deudor,acreedor_n:N[c.acreedor]||c.acreedor},c)),
+    independientes:[...(await independientes())].map(u=>({u,n:N[u]||u}))});
+});
+app.post("/admin/traspasos/:id/aprobar",authA,async(req,res)=>{
+  const{data:t}=await db.from("traspasos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Traspaso no encontrado"});
+  if(t.estado!=="por_aprobar")return res.status(409).json({ok:false,error:"Ese traspaso no espera aprobación"});
+  const si=req.body.aprobar===true,N=await nombresTr();
+  await db.from("traspasos").update({estado:si?"aceptado":"rechazado"}).eq("id",t.id);
+  for(const u of [t.de,t.para])if(u!=="almacen")await avisoA(u,si?"✓ El dueño aprobó el fiado del traspaso: ya pueden entregarse y confirmar.":"✗ El dueño no aprobó el fiado del traspaso. Si quieren, háganlo al contado.");
+  await db.from("logs").insert({tipo:"admin",detalle:(si?"Aprobó":"Rechazó")+" el fiado del traspaso #"+t.id+" ("+textoTr(t,N)+")"});
+  res.json({ok:true,estado:si?"aceptado":"rechazado"});
+});
+app.post("/admin/traspasos/:id/aceptar",authA,async(req,res)=>{
+  const{data:t}=await db.from("traspasos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Traspaso no encontrado"});
+  if(t.de!=="almacen"&&t.para!=="almacen")return res.status(400).json({ok:false,error:"Solo los traspasos con el almacén se aceptan desde el panel"});
+  const r=await aceptarTr(t,"almacen",req.body||{},true);
+  if(r.s)return res.status(r.s).json({ok:false,error:r.error});
+  res.json({ok:true,estado:r.estado,total:r.total});
+});
+app.post("/admin/traspasos/:id/confirmar",authA,async(req,res)=>{
+  const{data:t}=await db.from("traspasos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Traspaso no encontrado"});
+  if(t.de!=="almacen"&&t.para!=="almacen")return res.status(400).json({ok:false,error:"Solo confirmas el lado del almacén"});
+  const r=await confirmarTr(t,"almacen",{});
+  if(r.s)return res.status(r.s).json({ok:false,error:r.error});
+  res.json({ok:true,estado:r.estado});
+});
+app.post("/admin/traspasos/:id/rechazar",authA,async(req,res)=>{
+  const{data:t}=await db.from("traspasos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Traspaso no encontrado"});
+  if(!TR_ACT.includes(t.estado))return res.status(409).json({ok:false,error:"Ese traspaso ya terminó"});
+  await db.from("traspasos").update({estado:"rechazado"}).eq("id",t.id);
+  for(const u of [t.de,t.para])if(u!=="almacen")await avisoA(u,"✗ El dueño rechazó el traspaso #"+t.id+".");
+  res.json({ok:true});
+});
+/* el almacén con un independiente: le vendes o le compras */
+app.post("/admin/traspasos/nuevo",authA,async(req,res)=>{
+  const b=req.body||{},con=String(b.con||"");
+  if(!(await independientes()).has(con))return res.status(400).json({ok:false,error:"Elige un independiente (con tus empleados usa Almacén → enviar o pedir)"});
+  const prods=limpiaProds(b.prods);if(!Object.keys(prods).length)return res.status(400).json({ok:false,error:"Elige al menos un producto"});
+  const vendes=b.direccion!=="comprar",de=vendes?"almacen":con,para=vendes?con:"almacen";
+  if(!["efectivo","yape","fiado"].includes(b.pago))return res.status(400).json({ok:false,error:"Elige la forma de pago"});
+  if(vendes){const f=await faltaStock("almacen",prods);if(f)return res.status(409).json({ok:false,error:"En el almacén no alcanza: "+f});}
+  let p;try{p=await preciosTr(de,prods,b.precio_modo,b.precios);}catch(e){return res.status(400).json({ok:false,error:e.message});}
+  const{data:t,error}=await db.from("traspasos").insert({de,de_nombre:de==="almacen"?"Almacén":de,para,prods,items:await porCategoria(prods),estado:"pendiente",
+    modo:vendes?"ofrecer":"pedir",iniciador:"almacen",cruce:true,precio_modo:b.precio_modo,precios:p.precios,total:p.total,pago:b.pago,nota:limpia(b.nota,200)||null}).select().single();
+  if(error||!t)return res.status(500).json({ok:false,error:"No se pudo crear"+(error?(": "+error.message):"")});
+  await avisoA(con,"🏬 El almacén "+(vendes?"te ofrece":"te quiere comprar")+" mercadería por S/"+p.total.toFixed(2)+" "+(PAGO_TXT[b.pago]||"")+". Acéptalo en ↔ Traspasos.");
+  res.json({ok:true,id:t.id,total:p.total});
+});
+/* solo el dueño anula un traspaso completado: vuelve la mercadería y se deshace el dinero */
+app.post("/admin/traspasos/:id/anular",authA,async(req,res)=>{
+  const motivo=limpia(req.body.motivo,200);
+  if(!motivo||motivo.length<4)return res.status(400).json({ok:false,error:"Escribe el motivo"});
+  const{data:t}=await db.from("traspasos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Traspaso no encontrado"});
+  if(t.estado!=="completado")return res.status(409).json({ok:false,error:"Solo se anula un traspaso completado"});
+  const pr=limpiaProds(t.prods),f=await faltaStock(t.para,pr);
+  if(f)return res.status(409).json({ok:false,error:(t.para==="almacen"?"En el almacén":"Quien recibió")+" ya no tiene todo: "+f+". Coordínalo antes de anular."});
+  const menos={},mas={};Object.keys(pr).forEach(id=>{menos[id]=-pr[id];mas[id]=pr[id];});
+  const sal=await moverStock(t.para,menos,"traspaso_anulado",t.id);
+  await moverStock(t.de,mas,"traspaso_anulado",t.id,{capas:sal.capas});
+  if(t.venta_id)await db.from("ventas").update({anulada:true,nota_boleta:"ANULADA: traspaso anulado — "+motivo,editada_en:new Date().toISOString()}).eq("id",t.venta_id);
+  await db.from("cuentas_mov").update({anulado:true}).eq("traspaso_id",t.id);
+  await db.from("traspasos").update({estado:"anulado",anulado_en:new Date().toISOString(),anulado_por:"admin",anul_motivo:motivo}).eq("id",t.id);
+  const N=await nombresTr();
+  for(const u of [t.de,t.para])if(u!=="almacen")await avisoA(u,"↩️ El dueño anuló el traspaso "+textoTr(t,N)+": la mercadería vuelve a "+(N[t.de]||t.de)+(t.cruce?" y se deshace el cobro":"")+". Motivo: "+motivo);
+  await db.from("logs").insert({tipo:"admin",detalle:"Anuló el traspaso #"+t.id+" ("+textoTr(t,N)+"): "+motivo});
+  res.json({ok:true});
+});
+app.post("/admin/cuentas/mov",authA,async(req,res)=>{
+  const deudor=String(req.body.deudor||""),acreedor=String(req.body.acreedor||"");
+  if(deudor!=="dueno"&&acreedor!=="dueno")return res.status(400).json({ok:false,error:"Desde el panel registras lo que te pagan o lo que pagas tú"});
+  const saldo=await saldoPar(deudor,acreedor);let monto=r2(num(req.body.monto,0,999999,0));
+  if(!(monto>0))return res.status(400).json({ok:false,error:"Escribe el monto"});
+  if(saldo<=0)return res.status(409).json({ok:false,error:"No hay deuda en esa cuenta"});
+  if(monto>saldo)monto=saldo;
+  const N=await nombresTr(),pago=req.body.pago==="yape"?"yape":"efectivo",otro=deudor==="dueno"?acreedor:deudor;
+  await db.from("cuentas_mov").insert({deudor,acreedor,tipo:"abono",monto,detalle:(deudor==="dueno"?"Pagaste a ":"Te pagó ")+(N[otro]||otro)+" ("+(pago==="yape"?"Yape":"efectivo")+")",por:"admin",pago});
+  if(otro!=="almacen")await avisoA(otro,"💵 El dueño registró "+(deudor==="dueno"?"que te pagó S/":"que le pagaste S/")+monto.toFixed(2)+".");
+  res.json({ok:true,monto,saldo:r2(saldo-monto)});
 });
 app.post("/cargas/confirmar",authC,async(req,res)=>{
   const{data:c}=await db.from("cargas").select("*").eq("id",req.body.id).maybeSingle();
@@ -1254,7 +2277,7 @@ app.post("/cargas/confirmar",authC,async(req,res)=>{
     await db.from("kardex").insert({conductor:req.cond.u,tipo:"carga_inicial",detalle:JSON.stringify(req.body.items||c.items)});
     // el detalle por producto entra al stock del camión
     const prodsCarga=(req.body.prods&&typeof req.body.prods==="object")?req.body.prods:(c.prods||null);
-    if(prodsCarga)await moverStock(req.cond.u,prodsCarga,"carga",c.id);
+    if(prodsCarga)await moverStock(req.cond.u,prodsCarga,"carga",c.id,{costos:(c.detalle&&c.detalle.costos)||null});   /* 183 · lotes con el costo de la carga */
     // el turno queda abierto también al aceptar, por si se cerró o la
     // asignación no llegó a abrirlo. Si ya estaba abierto no se toca el inicio.
     const{data:yoC}=await db.from("conductores").select("en_turno,turno_ini").eq("usuario",req.cond.u).maybeSingle();
@@ -1311,7 +2334,9 @@ app.post("/perdidas",authC,async(req,res)=>{
   });
   /* 175 · si el dueño pidió aprobar los ajustes de conteo, el stock se mueve recién al aceptar */
   const esperaOK=tipo==="ajuste"&&!!(params.mermas_cfg&&params.mermas_cfg.ajuste_requiere_ok);
-  if(!esperaOK)await moverStock(req.cond.u,Object.fromEntries(ids.map(id=>[id,-prods[id]])),tipo,null);
+  let costoPEPS=null;
+  if(!esperaOK){const mv=await moverStock(req.cond.u,Object.fromEntries(ids.map(id=>[id,-prods[id]])),tipo,null);if(mv&&mv.costo>0)costoPEPS=mv.costo;}   /* 183 */
+  if(costoPEPS!=null)costo=costoPEPS;
   const fila={conductor:req.cond.u,motivo,tipo:esperaOK?"ajuste_pendiente":tipo,
     valor:Math.round(valor*100)/100,costo:Math.round(costo*100)/100,
     detalle:detalle.join(", ")+(req.body.nota?(" · "+limpia(req.body.nota,120)):""),
@@ -1388,6 +2413,7 @@ app.post("/gastos/:id/anular",authC,async(req,res)=>{
 });
 /* 175 · entrega parcial de efectivo al dueño durante el viaje (antes el botón no mandaba nada) */
 app.post("/conductor/entrega",authC,async(req,res)=>{
+  if((await independientes()).has(req.cond.u))return res.status(403).json({ok:false,error:"Los independientes no entregan efectivo al dueño: su dinero es suyo."});   /* 183 */
   const monto=num(req.body.monto,0,999999);
   if(!monto)return res.status(400).json({ok:false,error:"Escribe cuánto entregaste"});
   const{data:e,error}=await db.from("entregas").insert({conductor:req.cond.u,monto,nota:limpia(req.body.nota,160)||null}).select().single();
@@ -1397,6 +2423,9 @@ app.post("/conductor/entrega",authC,async(req,res)=>{
 });
 app.post("/liquidaciones",authC,async(req,res)=>{
   const u=req.cond.u;
+  if((await independientes()).has(u))return res.status(403).json({ok:false,error:"Los independientes no liquidan con el dueño: cierran su viaje desde «Cerrar mi viaje»."});   /* 183 */
+  {const{data:trA}=await db.from("traspasos").select("id").or(`de.eq.${u},para.eq.${u}`).in("estado",TR_ACT);
+   if((trA||[]).length)return res.status(409).json({ok:false,motivo:"traspaso_activo",error:"Tienes un traspaso sin terminar: termínalo o cancélalo antes de cerrar tu viaje."});}
   // ── 1) el camión debe estar vacío ──
   const st=await leerStock(u);
   const quedan=Object.keys(st.prods).reduce((s,k)=>s+Number(st.prods[k]||0),0);
@@ -1438,11 +2467,13 @@ app.post("/liquidaciones",authC,async(req,res)=>{
   const cargado=mov.filter(m=>m.motivo==="carga").reduce((s,m)=>s+Number(m.delta||0),0);
   const vendidoUnid=mov.filter(m=>m.motivo==="venta").reduce((s,m)=>s+Math.abs(Number(m.delta||0)),0);
 
+  const DT=await dineroTr(u,inicio,fin);   /* 185 */
   const resumen={
     conductor:u,nombre:(yo&&yo.nombre)||u,inicio,fin,
     dias:Math.max(1,Math.round((new Date(fin)-new Date(inicio))/86400000)),
     ventas:{n:vts.length,total:sum(vts,v=>v.total),efectivo,yape,fiado,abonos},
-    efectivo_esperado:Math.round((efectivo+abonos-gastos-entregas)*100)/100,
+    efectivo_esperado:Math.round((efectivo+abonos-gastos-entregas+DT.neto)*100)/100,
+    traspasos_dinero:DT,   /* 185 · cobros y pagos de cuentas, compras al contado a independientes */
     entregas:{total:entregas,n:ent.length,detalle:ent},
     gastos:{total:gastos,detalle:gas},
     perdidas:(function(){
@@ -1502,7 +2533,7 @@ app.post("/avisos/leido",authC,async(req,res)=>{await db.from("avisos_leidos").u
 
 // ════════ ADMINISTRADOR ════════
 app.get("/admin/datos",authA,async(req,res)=>{
-  const{data:us}=await db.from("conductores").select("usuario,nombre,tipo,camion,activo,pass_hash,gps_id,en_turno,turno_hora");
+  const{data:us}=await db.from("conductores").select("usuario,nombre,tipo,camion,activo,pass_hash,gps_id,en_turno,turno_hora,lugares,costos");
   // quién está en turno según los logs (respaldo si la columna aún no existe)
   const turnoDe={};
   try{
@@ -1514,7 +2545,7 @@ app.get("/admin/datos",authA,async(req,res)=>{
   }catch(e){}
   const{data:evs}=await db.from("eventos").select("*").eq("visto",false).order("id",{ascending:false}).limit(50);
   const{data:tds}=await db.from("tiendas").select("*").order("id");
-  const{data:pds}=await db.from("pedidos").select("*").eq("fecha",hoy()).order("id",{ascending:false});
+  const{data:pds}=await db.from("pedidos").select("*").in("estado",["por_confirmar","pendiente","devuelto"]).order("id",{ascending:false}).limit(400);   /* 184 */
   const{data:vAd}=await db.from("ventas").select("tienda_id,creado,total").order("creado",{ascending:false}).limit(1200);
   const _pms=await getParams();
   const _vpt={};(vAd||[]).forEach(v=>{if(v.tienda_id)(_vpt[v.tienda_id]=_vpt[v.tienda_id]||[]).push(v);});
@@ -1527,16 +2558,17 @@ app.get("/admin/datos",authA,async(req,res)=>{
   res.json({ok:true,
     resumen:{tiendas:(tds||[]).length,conductores:(us||[]).length,
       en_turno:(us||[]).filter(x=>(x.en_turno!==undefined&&x.en_turno!==null)?x.en_turno:turnoDe[x.usuario]).length,
-      pedidos_hoy:(pds||[]).filter(p=>(p.fecha?String(p.fecha).slice(0,10):fechaPE(p.creado))===hoy()).length,
-      pedidos_pendientes:(pds||[]).filter(p=>p.estado!=="entregado").length},
-    usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:u.tipo,camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||"",en_turno:(u.en_turno!==undefined&&u.en_turno!==null)?!!u.en_turno:!!turnoDe[u.usuario]})),
+      pedidos_hoy:(pds||[]).filter(p=>p.estado!=="por_confirmar"&&String(p.fecha||hoy()).slice(0,10)<=hoy()).length,
+      pedidos_pendientes:(pds||[]).filter(p=>p.estado==="por_confirmar").length,
+      pedidos_atrasados:(pds||[]).filter(p=>p.estado!=="por_confirmar"&&String(p.fecha||hoy()).slice(0,10)<hoy()).length},
+    usuarios:(us||[]).map(u=>({usuario:u.usuario,nombre:u.nombre,tipo:tipoDe(u),lugares:lugaresDe(u),lugares_txt:resumenLugares(u),costos:(tipoDe(u)==="independiente"&&u.costos&&typeof u.costos==="object")?u.costos:{},camion:u.camion,activo:u.activo,estado:u.pass_hash?"con contraseña":"sin contraseña",gps_id:u.gps_id||"",en_turno:(u.en_turno!==undefined&&u.en_turno!==null)?!!u.en_turno:!!turnoDe[u.usuario]})),
     /* La bandeja agrupada necesita id, creado y visto; antes solo llegaban
        tipo, titulo, desc y ref, así que no podía ni ordenar ni accionar. */
     eventos:(evs||[]).map(e=>({id:e.id,tipo:e.tipo,titulo:e.titulo,
       desc:e.descripcion,descripcion:e.descripcion,
       creado:e.creado,visto:!!e.visto,
-      ref:(e.tipo==="tienda_nueva"||e.tipo==="correccion"||e.tipo==="ritmo_sugerido"||e.tipo==="dias_sugeridos")?e.ref:String(e.id)})),
-    tiendas:(tds||[]).map(t=>{const R=_ritT(t),d=_diasT(t);return {id:t.id,n:t.nombre,z:t.zona,d,sa:Number(t.sa||0),cr:!!t.cr,li:Number(t.li||0),vip:!!t.vip,act:t.act,nueva:!!t.nueva,verificada:!!t.verificada,conductor:t.conductor_reg,lat:t.lat,lon:t.lon,tel:t.tel,due:t.dueno,
+      ref:(e.tipo==="tienda_nueva"||e.tipo==="tienda_pend"||e.tipo==="correccion"||e.tipo==="ritmo_sugerido"||e.tipo==="dias_sugeridos")?e.ref:String(e.id)})),
+    tiendas:(tds||[]).map(t=>{const R=_ritT(t),d=_diasT(t);return {id:t.id,cod:t.codigo||null,precios:(t.precios&&typeof t.precios==="object"&&!Array.isArray(t.precios))?t.precios:{},n_apodos:(t.apodos&&typeof t.apodos==="object")?Object.keys(t.apodos).length:0,ub:t.ubigeo||null,lugar:nombreLugar(t.ubigeo),prot:esProtegida(_pms,t.ubigeo),hab:Array.isArray(t.habilitados)?t.habilitados:[],est:t.estado_reg||"ok",dup:t.posible_dup||null,lug_manual:!!t.lug_manual,li_lugar:limiteLugar(_pms,t.ubigeo),n:t.nombre,z:t.zona,d,sa:Number(t.sa||0),cr:!!t.cr,li:Number(t.li||0),vip:!!t.vip,act:t.act,nueva:!!t.nueva,verificada:!!t.verificada,conductor:t.conductor_reg,lat:t.lat,lon:t.lon,tel:t.tel,due:t.dueno,
       ritmo:R.id,ciclo:R.ciclo_dias,nivel:nivelDe(d,R),ritmo_nom:R.nombre,ritmo_emo:R.emoji,
       dias:diasNorm(t.dias_atiende),abre_hoy:abreHoy(t.dias_atiende),dias_txt:diasTexto(t.dias_atiende),
       h_ini:t.hora_ini||"",h_fin:t.hora_fin||"",
@@ -1544,14 +2576,14 @@ app.get("/admin/datos",authA,async(req,res)=>{
     ritmos:ritmosDe(_pms),
     dia_hoy:diaIdx(),dia_hoy_nom:DIA_NOM[diaIdx()],
     peso_cerrada:num((_pms.dias_cfg||{}).peso_cerrada,0,1,0.15),
-    pedidos_hoy:(pds||[]).map(p=>({tienda:p.tienda,conductor:p.conductor,items:p.items,nota:p.nota,hora:p.hora})),
+    pedidos_hoy:(pds||[]).filter(p=>p.estado!=="por_confirmar").map(p=>({id:p.id,tienda:p.tienda,conductor:p.conductor,items:p.items,nota:p.nota,hora:p.hora,fecha:p.fecha})),
     params:await getParams()});
 });
 app.post("/admin/conductores",authA,async(req,res)=>{
   const u=String(req.body.usuario||"").toLowerCase().trim();
   if(!USR_RE.test(u))return res.status(400).json({ok:false,error:"Usuario inválido: 3-20 caracteres, minúsculas/números/_"});
   if(!req.body.nombre)return res.status(400).json({ok:false,error:"Faltan datos"});
-  const{error}=await db.from("conductores").insert({usuario:u,nombre:req.body.nombre,tipo:(req.body.tipo==="paso"?"paso":"fijo"),camion:req.body.camion||"—",activo:true,pass_hash:null});
+  const{error}=await db.from("conductores").insert({usuario:u,nombre:req.body.nombre,tipo:tipoNorm(req.body.tipo),camion:req.body.camion||"—",activo:true,pass_hash:null,lugares:{}});
   if(error)return res.status(409).json({ok:false,error:"Ese usuario ya existe"});
   res.json({ok:true});
 });
@@ -1560,33 +2592,366 @@ app.post("/admin/conductores/:u/editar",authA,async(req,res)=>{
   if(req.body.nombre)upd.nombre=limpia(req.body.nombre,60);
   if(req.body.camion!=null)upd.camion=limpia(req.body.camion,20);
   if(req.body.gps_id!=null)upd.gps_id=limpia(req.body.gps_id,40)||null;
-  if(req.body.tipo)upd.tipo=(req.body.tipo==="paso"?"paso":"fijo");
-  if(!Object.keys(upd).length)return res.status(400).json({ok:false,error:"Nada que cambiar"});
+  if(req.body.tipo){   /* 181 · solo entre viajes */
+    const nt=tipoNorm(req.body.tipo);
+    const{data:ac}=await db.from("conductores").select("tipo").eq("usuario",req.params.u).maybeSingle();
+    if(ac&&tipoDe(ac)!==nt){
+      const ocupado=await enViaje(req.params.u);
+      if(ocupado)return res.status(409).json({ok:false,error:"No se puede cambiar el tipo en pleno viaje: "+ocupado+". Hazlo cuando cierre su viaje."});
+    }
+    if(!ac||tipoDe(ac)!==nt||ac.tipo!==nt){upd.tipo=nt;INDEP.t=0;}
+  }
+  if(!Object.keys(upd).length)return res.json({ok:true,sin_cambios:true});
   await db.from("conductores").update(upd).eq("usuario",req.params.u);
   await db.from("logs").insert({tipo:"admin",detalle:"Editó al conductor @"+req.params.u+": "+Object.keys(upd).join(", ")});
   res.json({ok:true});
+});
+/* ═══ 181 · Lugares desde el panel ═══ */
+app.get("/admin/lugares",authA,async(req,res)=>{
+  const G=geo(),P=await getParams();
+  res.set("Cache-Control","no-store").json({ok:true,falta:!!G.falta,fuente:G.fuente||"",
+    dep:Object.keys(G.dep).sort().map(k=>[k,G.dep[k]]),prov:Object.keys(G.prov).sort().map(k=>[k,G.prov[k]]),
+    dist:(G.dist||[]).map(d=>[d[0],d[1]]).sort((a,b)=>a[0]<b[0]?-1:1),
+    protegidas:protegidas(P),limite_lugar:(P.limite_lugar&&typeof P.limite_lugar==="object")?P.limite_lugar:{},limite_credito:num(P.limite_credito,0,100000,230)});
+});
+app.post("/admin/lugares/config",authA,async(req,res)=>{
+  const kv=await getParams(),b=req.body||{},cambios=[];
+  if(Array.isArray(b.protegidas)){
+    const pr=[...new Set(b.protegidas.map(String))].filter(lugarValido).slice(0,50);
+    kv.protegidas=pr;cambios.push("zonas protegidas: "+(pr.length?pr.map(nombreLugar).join(" · "):"ninguna"));
+  }
+  if(b.limite_lugar&&typeof b.limite_lugar==="object"){
+    const m={};Object.keys(b.limite_lugar).slice(0,80).forEach(p=>{if(lugarValido(p))m[p]=num(b.limite_lugar[p],0,100000,0);});
+    kv.limite_lugar=m;cambios.push("límites de crédito por lugar: "+(Object.keys(m).length?Object.keys(m).map(p=>nombreLugar(p)+" S/"+m[p]).join(" · "):"ninguno"));
+  }
+  if(!cambios.length)return res.status(400).json({ok:false,error:"Nada que guardar"});
+  const{error}=await db.from("params").upsert({id:1,kv});
+  if(error)return res.status(500).json({ok:false,error:error.message});
+  await db.from("logs").insert({tipo:"admin",detalle:"Lugares: "+cambios.join(" · ")});
+  res.json({ok:true,protegidas:protegidas(kv),limite_lugar:kv.limite_lugar||{}});
+});
+app.post("/admin/conductores/:u/lugares",authA,async(req,res)=>{
+  const{data:c}=await db.from("conductores").select("usuario,nombre,tipo,lugares").eq("usuario",req.params.u).maybeSingle();
+  if(!c)return res.status(404).json({ok:false,error:"Conductor no encontrado"});
+  const lim=a=>[...new Set((Array.isArray(a)?a:[]).map(String))].filter(lugarValido).slice(0,300);
+  const L={inc:lim(req.body.inc),exc:lim(req.body.exc)};
+  const{error}=await db.from("conductores").update({lugares:L}).eq("usuario",c.usuario);
+  if(error)return res.status(500).json({ok:false,error:error.message});
+  const txt=resumenLugares(Object.assign({},c,{lugares:L}));
+  await db.from("logs").insert({tipo:"admin",detalle:"Lugares de @"+c.usuario+": "+txt});
+  await avisoA(c.usuario,"📍 Tus lugares de venta cambiaron: "+txt+". Sincroniza para ver tus tiendas.");
+  res.json({ok:true,lugares:L,resumen:txt});
+});
+app.post("/admin/tiendas/:id/lugar",authA,async(req,res)=>{
+  const{data:t}=await db.from("tiendas").select("*").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
+  let ub,man;
+  if(req.body.auto){ub=ubicarGPS(t.lat,t.lon);man=false;}
+  else{ub=String(req.body.ubigeo||"");if(!(ub.length===6&&lugarValido(ub)))return res.status(400).json({ok:false,error:"Elige un distrito"});man=true;}
+  await db.from("tiendas").update({ubigeo:ub,lug_manual:man}).eq("id",t.id);
+  await db.from("logs").insert({tipo:"tienda",detalle:"#"+t.id+" "+t.nombre+" · Lugar: "+(nombreLugar(t.ubigeo)||"—")+" → "+(nombreLugar(ub)||"sin ubicar")+(man?" (corregido a mano)":" (por GPS)")});
+  asegurarCodigos().catch(()=>{});   /* 184 · si aún no tenía código */
+  res.json({ok:true,ubigeo:ub,lugar:nombreLugar(ub),lug_manual:man});
+});
+app.post("/admin/tiendas/:id/habilitados",authA,async(req,res)=>{
+  const{data:t}=await db.from("tiendas").select("id,nombre,habilitados").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
+  const{data:cs}=await db.from("conductores").select("usuario,tipo");
+  const ok=new Set((cs||[]).map(c=>c.usuario));
+  const us=[...new Set((Array.isArray(req.body.usuarios)?req.body.usuarios:[]).map(String))].filter(u=>ok.has(u)).slice(0,50);
+  await db.from("tiendas").update({habilitados:us}).eq("id",t.id);
+  await db.from("logs").insert({tipo:"tienda",detalle:"#"+t.id+" "+t.nombre+" · La ven (habilitada a mano): "+(us.join(", ")||"nadie")});
+  res.json({ok:true,habilitados:us});
+});
+app.post("/admin/lugares/recalcular",authA,async(req,res)=>{
+  const n=await recalcularLugares(!!req.body.todas);
+  const cods=await asegurarCodigos();   /* 184 */
+  res.json({ok:true,actualizadas:n,codigos:cods});
+});
+/* 183 · costos propios de un independiente (lo que le cobra el proveedor a él). Tu catálogo no cambia. */
+app.post("/admin/conductores/:u/costos",authA,async(req,res)=>{
+  const{data:c}=await db.from("conductores").select("usuario,tipo,costos").eq("usuario",req.params.u).maybeSingle();
+  if(!c)return res.status(404).json({ok:false,error:"Conductor no encontrado"});
+  if(tipoDe(c)!=="independiente")return res.status(400).json({ok:false,error:"Solo los independientes tienen costos propios"});
+  const m=Object.assign({},(c.costos&&typeof c.costos==="object")?c.costos:{});
+  const nu=(req.body.costos&&typeof req.body.costos==="object")?req.body.costos:{};
+  Object.keys(nu).slice(0,300).forEach(k=>{const id=limpia(k,40);if(!id)return;const v=num(nu[k],0,100000,0);if(v>0)m[id]=v;else delete m[id];});
+  const{error}=await db.from("conductores").update({costos:m}).eq("usuario",c.usuario);
+  if(error)return res.status(500).json({ok:false,error:error.message});
+  res.json({ok:true,costos:m});
+});
+app.get("/admin/independientes",authA,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  const{data:cs}=await db.from("conductores").select("*");
+  const ind=(cs||[]).filter(c=>tipoDe(c)==="independiente");
+  const N=await nombresAcreedores();
+  const out=[];
+  for(const c of ind){
+    const[r,{data:ci},{data:cm},{data:tr}]=await Promise.all([resumenIndep(c.usuario),
+      db.from("cierres_indep").select("id,inicio,fin,resumen,efectivo_contado,diferencia,conteo").eq("conductor",c.usuario).order("id",{ascending:false}).limit(20),
+      db.from("creditos_mov").select("tienda_id,tipo,monto").eq("acreedor",c.usuario),
+      db.from("traspasos").select("*").or(`de.eq.${c.usuario},para.eq.${c.usuario}`).order("id",{ascending:false}).limit(20)]);
+    const deu={};(cm||[]).forEach(m=>{deu[m.tienda_id]=(deu[m.tienda_id]||0)+(m.tipo==="cargo"?1:-1)*Number(m.monto||0);});
+    const ids=Object.keys(deu).filter(k=>deu[k]>0.004);
+    const{data:tds}=ids.length?await db.from("tiendas").select("id,nombre").in("id",ids.map(Number)):{data:[]};
+    const fresco=h=>h&&(Date.now()-new Date(h).getTime())<30*60000;
+    out.push({usuario:c.usuario,nombre:c.nombre,activo:c.activo,en_viaje:!!c.en_turno,lugares_txt:resumenLugares(c),
+      ubicacion:c.en_turno?((fresco(c.cel_hora)&&c.lat_cel)?{lat:c.lat_cel,lon:c.lon_cel,hora:c.cel_hora}:((fresco(c.gps_hora)&&c.lat)?{lat:c.lat,lon:c.lon,hora:c.gps_hora}:null)):null,
+      viaje:r,cierres:(ci||[]).map(x=>({id:x.id,inicio:x.inicio,fin:x.fin,vendido:x.resumen&&x.resumen.ventas&&x.resumen.ventas.total,costo:x.resumen&&x.resumen.ventas&&x.resumen.ventas.costo,ganancia:x.resumen&&x.resumen.ganancia,perdidas:x.resumen&&x.resumen.perdidas&&x.resumen.perdidas.costo,sobrante:x.resumen&&x.resumen.sobrante&&x.resumen.sobrante.valor,diferencia:x.diferencia,hechos:x.conteo&&x.conteo.hechos})),
+      costos:(c.costos&&typeof c.costos==="object")?c.costos:{},
+      credito:{total:Math.round(ids.reduce((a,k)=>a+deu[k],0)*100)/100,tiendas:(tds||[]).map(t=>({id:t.id,n:t.nombre,m:Math.round(deu[t.id]*100)/100})).sort((a,b)=>b.m-a.m)},
+      traspasos:(tr||[]).map(t=>({id:t.id,de:N[t.de]||t.de,para:N[t.para]||t.para,estado:t.estado,items:t.items,creado:t.creado}))});
+  }
+  res.json({ok:true,independientes:out});
 });
 app.post("/admin/conductores/:u/reset",authA,async(req,res)=>{await db.from("conductores").update({pass_hash:null}).eq("usuario",req.params.u);
   await db.from("logs").insert({tipo:"admin",detalle:"Reseteó contraseña de @"+req.params.u});res.json({ok:true});});
 app.post("/admin/conductores/:u/activo",authA,async(req,res)=>{await db.from("conductores").update({activo:!!req.body.activo}).eq("usuario",req.params.u);res.json({ok:true});});
 app.post("/avisos",authA,async(req,res)=>{await avisoA((req.body.para==="todos"||USR_RE.test(req.body.para||""))?req.body.para:"todos",String(req.body.txt||""));res.json({ok:true});});
+/* ═══ 184 · PEDIDOS: panel ═══ */
+const vistaPedido=(p,T,N,conds,P,vig)=>{
+  const t=p.tienda_id?T[p.tienda_id]:null,f=p.fecha?String(p.fecha).slice(0,10):null;
+  const o={id:p.id,estado:p.estado,origen:p.origen||"panel",texto:p.texto||null,
+    tienda_id:p.tienda_id||null,tienda:t?t.nombre:(p.tienda||""),codigo:(t&&t.codigo)||null,tipo:(t&&t.tipo)||null,lugar:t?nombreLugar(t.ubigeo):"",tel:(t&&t.tel)||null,
+    conductor:p.conductor||null,conductor_n:p.conductor?(N[p.conductor]||p.conductor):null,
+    fecha:f,fecha_txt:fechaTxt(f),lo_antes:!!p.lo_antes,visita:!!p.visita,items:Array.isArray(p.items)?p.items:[],nota:p.nota||"",hora:p.hora||"",
+    creado:p.creado,confirmado_en:p.confirmado_en||null,atrasado:PED_VIG.includes(p.estado)&&!!f&&f<hoy(),
+    no_pude:p.no_pude||null,atendido_por:p.atendido_por||null,atendido_por_n:p.atendido_por?(N[p.atendido_por]||p.atendido_por):null,
+    atendido_en:p.atendido_en||null,vendido:p.vendido||null,detectado:p.detectado||null,
+    no_abre:!!(t&&f&&!abreEl(t.dias_atiende,diaDe(f)))};
+  if(p.estado!=="atendido"&&p.estado!=="entregado")o.sugeridos=sugeridosDe(t,conds,P);
+  if(p.estado==="por_confirmar"){const v=(vig||[]).find(x=>x.tienda_id&&x.tienda_id===p.tienda_id);o.reemplaza=v?v.id:null;}
+  return o;
+};
+app.get("/admin/pedidos",authA,async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  await revisarAtrasados();   /* los atrasados llegan a la Bandeja también al abrir Pedidos */
+  const ini=hoy().slice(0,8)+"01",hace14=new Date(Date.now()-14*86400000).toISOString(),hace7=Date.now()-7*86400000;
+  const[{data:act},{data:hist},{data:tds},{data:cs},P,{data:mes}]=await Promise.all([
+    db.from("pedidos").select("*").in("estado",["por_confirmar","pendiente","devuelto"]).order("id",{ascending:false}).limit(400),
+    db.from("pedidos").select("*").in("estado",["atendido","entregado"]).gte("creado",hace14).order("id",{ascending:false}).limit(200),
+    db.from("tiendas").select("id,nombre,codigo,tipo,ubigeo,tel,dueno,estado_reg,conductor_reg,habilitados,act,dias_atiende"),
+    db.from("conductores").select("usuario,nombre,tipo,lugares,activo"),
+    getParams(),
+    db.from("pedidos").select("origen,estado").gte("creado",iniDia(ini))]);
+  const T=Object.fromEntries((tds||[]).map(t=>[t.id,t])),N={};(cs||[]).forEach(c=>{N[c.usuario]=c.nombre||c.usuario;});
+  const vig=(act||[]).filter(p=>p.estado!=="por_confirmar");
+  const V=p=>vistaPedido(p,T,N,cs,P,vig);
+  const stats={};(mes||[]).forEach(p=>{const o=p.origen||"panel";stats[o]=(stats[o]||0)+1;});
+  res.json({ok:true,hoy:hoy(),ia:!!anthropic,
+    por_confirmar:(act||[]).filter(p=>p.estado==="por_confirmar").map(V),
+    vigentes:vig.map(V).sort((a,b)=>String(a.fecha||"").localeCompare(String(b.fecha||""))||(a.id-b.id)),
+    atendidos:(hist||[]).filter(p=>new Date(p.atendido_en||p.creado).getTime()>=hace7).map(V),
+    stats});
+});
+app.get("/admin/tiendas/:id/sugeridos",authA,async(req,res)=>{
+  const[{data:t},{data:cs},P]=await Promise.all([db.from("tiendas").select("*").eq("id",req.params.id).maybeSingle(),db.from("conductores").select("usuario,nombre,tipo,lugares,activo"),getParams()]);
+  if(!t)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
+  const{data:vg}=await db.from("pedidos").select("id,fecha,items,visita,conductor,estado").eq("tienda_id",t.id).in("estado",["pendiente","devuelto","por_confirmar"]).order("id",{ascending:false});
+  res.json({ok:true,codigo:t.codigo||null,tipo:t.tipo||"bodega",sugeridos:sugeridosDe(t,cs,P),vigente:(vg||[])[0]||null});
+});
+/* el dueño registra un pedido: nace confirmado y le llega al conductor */
 app.post("/pedidos",authA,async(req,res)=>{
-  let t=await tiendaPorNombre(req.body.tienda||"");
-  if(!t&&req.body.tienda){const{data:aprox}=await db.from("tiendas").select("id,nombre").ilike("nombre","%"+String(req.body.tienda).slice(0,20)+"%").limit(1);t=(aprox||[])[0]||null;}
-  await db.from("pedidos").insert({tienda_id:t?t.id:null,tienda:req.body.tienda,conductor:req.body.conductor,items:(Array.isArray(req.body.items)?req.body.items.slice(0,60):[]).map(x=>({p:String(x.p||"").slice(0,60),c:num(x.c,1,999)})),nota:req.body.nota||"",hora:req.body.hora||horaPE(),fecha:hoy(),estado:"pendiente"});
-  /* Si la tienda hoy no atiende, el pedido se registra igual —puede ser para
-     recoger, o el dato de días puede estar mal— pero se avisa, para no mandar
-     al conductor a una puerta cerrada. */
-  let aviso=null;
-  if(t&&!abreHoy(t.dias_atiende)){
-    aviso="⚠️ "+t.nombre+" no atiende los "+DIA_NOM[diaIdx()]+" según sus días cargados. El pedido queda registrado igual.";
-    const _pp=await getParams();
-    if(((_pp.dias_cfg||{}).avisar_pedido)!==false)
-      await evento("pedido_dia","📅 Pedido para un día que no atiende — "+t.nombre,
-        "Se registró un pedido para hoy "+DIA_NOM[diaIdx()]+", pero esa tienda tiene marcado que no atiende ese día ("+diasTexto(t.dias_atiende)+"). Revisa si los días están bien cargados.",
-        String(t.id));
+  const b=req.body||{},C=await catalogoPed();
+  let t=null;
+  if(b.tienda_id){const{data:x}=await db.from("tiendas").select("*").eq("id",b.tienda_id).maybeSingle();t=x||null;}
+  if(!t&&b.tienda){t=await tiendaPorNombre(b.tienda||"");
+    if(!t){const{data:aprox}=await db.from("tiendas").select("*").ilike("nombre","%"+String(b.tienda).slice(0,20)+"%").limit(1);t=(aprox||[])[0]||null;}}
+  const libre=!t?limpia(b.tienda,80):"";
+  if(!t&&!libre)return res.status(400).json({ok:false,error:"Elige la tienda"});
+  const conductor=limpia(b.conductor,30);
+  if(!conductor)return res.status(400).json({ok:false,error:"Elige el conductor que lo atiende"});
+  const{data:cd}=await db.from("conductores").select("usuario").eq("usuario",conductor).maybeSingle();
+  if(!cd)return res.status(400).json({ok:false,error:"Ese conductor no existe"});
+  const visita=b.visita===true,items=visita?[]:itemsPed(b.items,C);
+  if(!visita&&!items.length)return res.status(400).json({ok:false,error:"Añade al menos un producto (o marca «que pase el camión»)"});
+  const lo_antes=b.lo_antes===true||!fechaOK(b.fecha);
+  const fecha=lo_antes?hoy():String(b.fecha);
+  const origen=["panel","whatsapp","llamada","link","foto"].includes(b.origen)?b.origen:"panel";
+  const{data:p,error}=await db.from("pedidos").insert({tienda_id:t?t.id:null,tienda:t?t.nombre:libre,conductor:null,items,visita,lo_antes,
+    nota:limpia(b.nota,200),hora:limpia(b.hora,10)||horaPE(),fecha,estado:"por_confirmar",origen,por:"admin"}).select().single();
+  if(error||!p)return res.status(500).json({ok:false,error:"No se pudo guardar el pedido"+(error?(": "+error.message):"")});
+  const r=await activarPedido(p,conductor);
+  res.json({ok:true,id:p.id,fecha:p.fecha,reemplazados:r.reemplazados,aviso:r.aviso});
+});
+app.post("/admin/pedidos/:id/confirmar",authA,async(req,res)=>{
+  const b=req.body||{};
+  const{data:p}=await db.from("pedidos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!p)return res.status(404).json({ok:false,error:"Pedido no encontrado"});
+  if(p.estado!=="por_confirmar")return res.status(409).json({ok:false,error:"Ese pedido ya no está por confirmar"});
+  const C=await catalogoPed();
+  const tid=num(b.tienda_id,0,1e12,0)||p.tienda_id;
+  const{data:t}=tid?await db.from("tiendas").select("*").eq("id",tid).maybeSingle():{data:null};
+  if(!t)return res.status(400).json({ok:false,error:"Elige de qué tienda es el pedido"});
+  if(t.estado_reg==="rechazada"||t.estado_reg==="fusionada"||t.act===false)return res.status(400).json({ok:false,error:"Esa tienda no está activa"});
+  const conductor=limpia(b.conductor,30);
+  const{data:cd}=conductor?await db.from("conductores").select("usuario").eq("usuario",conductor).maybeSingle():{data:null};
+  if(!cd)return res.status(400).json({ok:false,error:"Elige el conductor que lo atiende"});
+  const visita=(b.visita!==undefined)?b.visita===true:!!p.visita;
+  const items=visita?[]:itemsPed(b.items!==undefined?b.items:p.items,C);
+  if(!visita&&!items.length)return res.status(400).json({ok:false,error:"El pedido no tiene productos reconocidos: usa Editar"});
+  const lo_antes=(b.lo_antes!==undefined)?b.lo_antes===true:!!p.lo_antes;
+  const fecha=(!lo_antes&&fechaOK(b.fecha))?String(b.fecha):(p.fecha?String(p.fecha).slice(0,10):hoy());
+  const upd={tienda_id:t.id,tienda:t.nombre,items,visita,lo_antes,fecha,nota:(b.nota!==undefined)?limpia(b.nota,200):(p.nota||"")};
+  await db.from("pedidos").update(upd).eq("id",p.id);
+  Object.assign(p,upd);
+  /* apodos: lo que el dueño corrigió («choco» = Chocochispas) queda para esa tienda */
+  if(b.apodos&&typeof b.apodos==="object"&&!Array.isArray(b.apodos)){
+    const ap=Object.assign({},(t.apodos&&typeof t.apodos==="object"&&!Array.isArray(t.apodos))?t.apodos:{});let n=0;
+    Object.keys(b.apodos).slice(0,60).forEach(k=>{const kk=claveApodo(k),id=limpia(b.apodos[k],40);if(kk.length>=2&&C.por[id]){ap[kk]=id;n++;}});
+    const ks=Object.keys(ap);if(ks.length>300)ks.slice(0,ks.length-300).forEach(k=>delete ap[k]);
+    if(n)await db.from("tiendas").update({apodos:ap}).eq("id",t.id);
   }
-  res.json({ok:true,aviso});
+  const r=await activarPedido(p,conductor);
+  res.json({ok:true,id:p.id,fecha:p.fecha,reemplazados:r.reemplazados,aviso:r.aviso});
+});
+app.post("/admin/pedidos/:id/descartar",authA,async(req,res)=>{
+  const{data:p}=await db.from("pedidos").select("id,estado").eq("id",req.params.id).maybeSingle();
+  if(!p)return res.status(404).json({ok:false,error:"Pedido no encontrado"});
+  if(p.estado!=="por_confirmar")return res.status(409).json({ok:false,error:"Solo se descarta un pedido por confirmar"});
+  await db.from("pedidos").update({estado:"descartado"}).eq("id",p.id);
+  res.json({ok:true});
+});
+app.post("/admin/pedidos/:id/asignar",authA,async(req,res)=>{
+  const{data:p}=await db.from("pedidos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!p)return res.status(404).json({ok:false,error:"Pedido no encontrado"});
+  if(!PED_VIG.includes(p.estado))return res.status(409).json({ok:false,error:"Ese pedido ya no está vigente"});
+  const conductor=limpia(req.body.conductor,30);
+  const{data:cd}=conductor?await db.from("conductores").select("usuario").eq("usuario",conductor).maybeSingle():{data:null};
+  if(!cd)return res.status(400).json({ok:false,error:"Elige el conductor"});
+  const antes=p.estado==="pendiente"?p.conductor:null;
+  await db.from("pedidos").update({estado:"pendiente",conductor}).eq("id",p.id);
+  if(antes&&antes!==conductor)await avisoA(antes,"↩️ El pedido de «"+(p.tienda||"")+"» se le pasó a otro conductor: ya no te toca.");
+  if(antes!==conductor)await avisoA(conductor,"📩 Pedido para "+fechaTxt(p.fecha)+" — «"+(p.tienda||"")+"»: "+txtItems(p.items,p.visita)+(p.nota?(" · "+p.nota):""));
+  res.json({ok:true});
+});
+app.post("/admin/pedidos/:id/cancelar",authA,async(req,res)=>{
+  const{data:p}=await db.from("pedidos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!p)return res.status(404).json({ok:false,error:"Pedido no encontrado"});
+  if(!PED_VIG.includes(p.estado))return res.status(409).json({ok:false,error:"Ese pedido ya no está vigente"});
+  await db.from("pedidos").update({estado:"cancelado",nota:limpia((p.nota?p.nota+" · ":"")+"Cancelado: "+(req.body.motivo||"por el dueño"),200)}).eq("id",p.id);
+  if(p.estado==="pendiente"&&p.conductor)await avisoA(p.conductor,"✕ Se canceló el pedido de «"+(p.tienda||"")+"». Ya no hace falta llevarlo.");
+  res.json({ok:true});
+});
+/* camino 1: pegar o dictar (o foto). La IA (o la lectura simple) arma el pedido y queda «por confirmar» */
+app.post("/admin/pedidos/interpretar",authA,async(req,res)=>{
+  const texto=String(req.body.texto==null?"":req.body.texto).replace(/[<>`]/g,"").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g," ").trim().slice(0,4000);
+  const img=String(req.body.imagen||"");
+  const m=img?img.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/):null;
+  if(img&&!m)return res.status(400).json({ok:false,error:"Imagen inválida (usa una foto JPG o PNG)"});
+  if(!texto&&!m)return res.status(400).json({ok:false,error:"Pega el mensaje, escribe lo que te dijeron o sube la foto"});
+  if(m&&!anthropic)return res.json({ok:false,error:"Para leer fotos hace falta ANTHROPIC_API_KEY en Railway. Mientras tanto, escribe el pedido."});
+  const origen=["whatsapp","llamada","foto"].includes(req.body.origen)?req.body.origen:(m?"foto":"whatsapp");
+  const C=await catalogoPed();
+  const{data:tds0}=await db.from("tiendas").select("id,nombre,codigo,dueno,tel,apodos,estado_reg,act,tipo");
+  const tds=(tds0||[]).filter(t=>t.act!==false&&!["rechazada","fusionada"].includes(t.estado_reg||"ok"));
+  const fija=num(req.body.tienda_id,0,1e12,0)?tds.find(t=>t.id===Number(req.body.tienda_id))||null:null;
+  let det=null,falloIA=null;
+  if(anthropic){try{det=await leerPedidoIA(texto,m,C,fija?[fija]:tds);det.metodo="ia";}catch(e){falloIA=e.message;console.log("IA pedido:",e.message);}}
+  if(!det){
+    if(!texto)return res.json({ok:false,error:"No se pudo leer la foto"+(falloIA?(": "+falloIA):"")});
+    det=leerPedidoSimple(texto,C,fija?[fija]:tds);det.metodo="simple";if(falloIA)det.dudas="La IA falló ("+falloIA+"). "+det.dudas;
+  }
+  const t=fija||(det.tienda_id?tds.find(x=>x.id===det.tienda_id)||null:null);
+  const ap=(t&&t.apodos&&typeof t.apodos==="object")?t.apodos:{};
+  det.lineas=(det.lineas||[]).map(l=>{const k=claveApodo(l.texto);return (k&&ap[k]&&C.por[ap[k]])?Object.assign({},l,{id:ap[k],apodo:true}):l;});
+  const items=[];det.lineas.forEach(l=>{if(l.id&&C.por[l.id]){const e=items.find(x=>x.id===l.id);if(e)e.c=Math.min(999,e.c+l.c);else items.push({id:l.id,n:C.por[l.id].nombre,c:l.c});}});
+  const f=(fechaOK(det.fecha)&&det.fecha>=hoy())?det.fecha:hoy();
+  const{data:p,error}=await db.from("pedidos").insert({tienda_id:t?t.id:null,tienda:t?t.nombre:(det.tienda_texto||""),items,visita:!!det.visita&&!items.length,
+    fecha:f,lo_antes:!fechaOK(det.fecha),nota:limpia(det.nota,200),texto:texto||"(foto)",hora:horaPE(),estado:"por_confirmar",origen,por:"admin",
+    detectado:{metodo:det.metodo,lineas:det.lineas,tienda_texto:det.tienda_texto||"",dudas:det.dudas||""}}).select().single();
+  if(error||!p)return res.status(500).json({ok:false,error:"No se pudo guardar"+(error?(": "+error.message):"")});
+  res.json({ok:true,id:p.id,metodo:det.metodo,tienda:t?t.nombre:null,lineas:det.lineas.length,reconocidas:det.lineas.filter(l=>l.id).length});
+});
+/* link de pedido: clave larga al azar, un solo uso, vence a las 2 horas */
+app.post("/admin/tiendas/:id/link-pedido",authA,async(req,res)=>{
+  const{data:t}=await db.from("tiendas").select("*").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
+  if(t.estado_reg&&t.estado_reg!=="ok")return res.status(400).json({ok:false,error:"Primero aprueba la tienda"});
+  const clave=cryptoR.randomBytes(18).toString("base64url");
+  const vence=new Date(Date.now()+2*3600000).toISOString();
+  const{error}=await db.from("pedido_links").insert({clave,tienda_id:t.id,vence});
+  if(error)return res.status(500).json({ok:false,error:"No se pudo crear el link: "+error.message});
+  const base=String(process.env.URL_PUBLICA||(req.protocol+"://"+req.get("host"))).replace(/\/+$/,"");
+  const url=base+"/p/"+clave,P=await getParams();
+  const neg=(P.negocio&&P.negocio.nombre)||"tu distribuidor";
+  const msg="Hola"+(t.dueno?(" "+t.dueno):"")+", para hacer tu pedido a "+neg+" entra aquí: "+url+" (sirve una sola vez y dura 2 horas)";
+  const tel=telPE(t.tel);
+  res.json({ok:true,url,msg,vence,wa:tel?("https://wa.me/"+tel+"?text="+encodeURIComponent(msg)):null,sin_tel:!tel});
+});
+/* precios acordados: el dueño los ve y los quita (la tienda vuelve al precio de su tipo) */
+app.post("/admin/tiendas/:id/precios",authA,async(req,res)=>{
+  const{data:t}=await db.from("tiendas").select("id,nombre,precios").eq("id",req.params.id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,error:"Tienda no encontrada"});
+  let pr=Object.assign({},(t.precios&&typeof t.precios==="object"&&!Array.isArray(t.precios))?t.precios:{});
+  if(req.body.todos===true)pr={};
+  else (Array.isArray(req.body.quitar)?req.body.quitar:[]).forEach(id=>{delete pr[String(id)];});
+  await db.from("tiendas").update({precios:pr}).eq("id",t.id);
+  await db.from("logs").insert({tipo:"admin",detalle:"Precios acordados de «"+t.nombre+"»: "+(req.body.todos===true?"quitó todos":("quitó "+(req.body.quitar||[]).length)) });
+  res.json({ok:true,precios:pr});
+});
+/* ═══ 184 · LINK DE PEDIDO: la página que abre la tienda (sin sesión, sin precios) ═══ */
+const PAGINA_PEDIDO="<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<meta name=\"robots\" content=\"noindex,nofollow\"><title>Hacer mi pedido</title>\n<style>\n:root{--bg:#F6F3EC;--card:#fff;--tx:#1F2420;--mu:#6B7068;--bd:#E2DDD2;--ac:#1D4ED8;--acl:#EBF1FE;--ok:#2F6B4F;--okl:#EAF5EE;--wa:#B97A1F;--wal:#FBF3E4}\n@media (prefers-color-scheme:dark){:root{--bg:#141714;--card:#1E221E;--tx:#EDEDE8;--mu:#A2A79E;--bd:#343A33;--ac:#7FA3FF;--acl:#1F2A44;--ok:#7FC79E;--okl:#1D2D23;--wa:#E0B060;--wal:#33291A}}\n*{box-sizing:border-box}\nbody{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;padding:16px 16px 120px}\n.w{max-width:520px;margin:0 auto}\nh1{font-size:20px;margin:6px 0 2px}\n.sub{color:var(--mu);font-size:13px;margin-bottom:14px}\n.c{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:12px}\n.op{display:block;width:100%;text-align:left;background:var(--card);border:2px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:10px;color:var(--tx);font:inherit;cursor:pointer}\n.op b{display:block;font-size:16px;margin-bottom:3px}.op span{color:var(--mu);font-size:13px}\n.op:active{border-color:var(--ac)}\n.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px;-webkit-overflow-scrolling:touch}\n.chip{flex:none;border:1.5px solid var(--bd);background:var(--card);color:var(--tx);border-radius:18px;padding:8px 12px;font:600 13px system-ui;cursor:pointer}\n.chip.on{border-color:var(--ac);background:var(--acl);color:var(--ac)}\n.fila{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--bd)}\n.fila:last-child{border-bottom:none}\n.fila .n{flex:1;font-size:14.5px}\n.fila .n.si{font-weight:800}\n.bq{width:40px;height:40px;border-radius:11px;border:1.5px solid var(--bd);background:var(--card);color:var(--tx);font:800 20px system-ui;cursor:pointer}\n.bq.mas{border-color:var(--ac);background:var(--acl);color:var(--ac)}\n.q{min-width:30px;text-align:center;font-weight:800;font-size:16px}\n.barra{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--bd);padding:12px 16px calc(12px + env(safe-area-inset-bottom))}\n.barra .w{display:flex;gap:10px;align-items:center}\n.btn{flex:1;border:none;border-radius:12px;padding:14px;font:800 15px system-ui;background:var(--ac);color:#fff;cursor:pointer}\n.btn.sec{background:none;border:1.5px solid var(--bd);color:var(--tx);flex:none;padding:14px 16px}\n.btn:disabled{opacity:.45}\n.dia{display:inline-block;border:1.5px solid var(--bd);border-radius:12px;padding:10px 12px;margin:0 6px 8px 0;background:var(--card);color:var(--tx);font:600 14px system-ui;cursor:pointer}\n.dia.on{border-color:var(--ac);background:var(--acl);color:var(--ac)}\n.dia small{display:block;font-weight:500;font-size:11px;color:var(--mu)}\n.ok{background:var(--okl);border-color:transparent;color:var(--ok)}\n.aviso{background:var(--wal);color:var(--wa);border-radius:12px;padding:12px;font-size:13.5px}\n.li{padding:7px 0;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between}\n.li:last-child{border-bottom:none}\ninput[type=search]{width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--bd);background:var(--card);color:var(--tx);font-size:16px;margin-bottom:8px}\n</style></head>\n<body><div class=\"w\" id=\"app\"><div class=\"c\">Cargando…</div></div>\n<div class=\"barra\" id=\"barra\" style=\"display:none\"><div class=\"w\" id=\"barra-w\"></div></div>\n<script>\n(function(){\nvar D=null,MODO=null,PASO='elegir',Q={},CAT=0,CUANDO=null,BUSCA='',ENVIANDO=false;\nvar $=function(id){return document.getElementById(id)};\nfunction esc(s){return String(s==null?'':s).replace(/[&<>\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]})}\nvar base=location.pathname.replace(/\\/+$/,'');\nfunction barra(h){var b=$('barra');if(!h){b.style.display='none';return;}$('barra-w').innerHTML=h;b.style.display='block';}\nfunction pinta(h){$('app').innerHTML=h;window.scrollTo(0,0);}\nfunction cab(){return '<h1>Pedido para '+esc(D.tienda)+'</h1><div class=\"sub\">'+esc(D.negocio||'')+'</div>';}\nfunction prods(){var o=[];(D.cats||[]).forEach(function(c){(c.prods||[]).forEach(function(p){o.push({id:p.id,n:p.n,cat:c})})});return o;}\nfunction elegidos(){return prods().filter(function(p){return Q[p.id]>0});}\nfunction total(){return elegidos().reduce(function(a,p){return a+Q[p.id]},0);}\nfunction listaPedido(items,visita){\n if(visita)return '<div class=\"li\"><span>🚚 Que pase el camión: eliges al verlo</span></div>';\n return (items||[]).map(function(x){return '<div class=\"li\"><span>'+esc(x.n)+'</span><b>'+x.c+'</b></div>'}).join('');\n}\nfunction cuandoTxt(f,asap){if(asap)return 'Lo antes posible';var d=(D.dias||[]).find(function(x){return x.f===f});return d?d.n:f;}\nfunction render(){\n if(!D)return;\n if(D.estado==='vencido'){barra(null);return pinta(cab()+'<div class=\"c aviso\">Este link ya venció (dura 2 horas). Pídele uno nuevo a tu distribuidor.</div>');}\n if(D.estado==='usado'){barra(null);var p=D.pedido||{};\n  return pinta(cab()+'<div class=\"c ok\"><b>✅ Pedido enviado</b><div style=\"font-size:13px;margin-top:3px\">Tu distribuidor lo revisa y te lo lleva. Este link ya no se puede usar otra vez.</div></div>'\n   +'<div class=\"c\"><div style=\"font-size:12px;color:var(--mu);margin-bottom:6px\">Para: '+esc(cuandoTxt(p.fecha,p.lo_antes))+'</div>'+listaPedido(p.items,p.visita)+'</div>');}\n if(PASO==='elegir'){barra(null);\n  return pinta(cab()+'<div class=\"sub\">¿Cómo quieres pedir?</div>'\n   +'<button class=\"op\" onclick=\"PED.modo(\\'visita\\')\"><b>🚚 Que pase el camión</b><span>Eliges los productos cuando llegue.</span></button>'\n   +'<button class=\"op\" onclick=\"PED.modo(\\'productos\\')\"><b>📝 Escoger productos ahora</b><span>Marca lo que necesitas y cuántos.</span></button>');}\n if(PASO==='productos'){\n  var cs=D.cats||[];if(CAT>=cs.length)CAT=0;var c=cs[CAT]||{prods:[]};\n  var lista=BUSCA?prods().filter(function(p){return p.n.toLowerCase().indexOf(BUSCA.toLowerCase())>=0}):(c.prods||[]).map(function(p){return {id:p.id,n:p.n}});\n  pinta(cab()+'<input type=\"search\" placeholder=\"Buscar producto…\" value=\"'+esc(BUSCA)+'\" oninput=\"PED.busca(this.value)\" id=\"busca\">'\n   +(BUSCA?'':'<div class=\"chips\">'+cs.map(function(x,i){return '<button class=\"chip'+(i===CAT?' on':'')+'\" onclick=\"PED.cat('+i+')\">'+esc((x.emoji||'')+' '+x.nom)+'</button>'}).join('')+'</div>')\n   +'<div class=\"c\" style=\"padding:4px 14px\">'+(lista.length?lista.map(function(p){var q=Q[p.id]||0;\n     return '<div class=\"fila\"><div class=\"n'+(q?' si':'')+'\">'+esc(p.n)+'</div><button class=\"bq\" onclick=\"PED.q(\\''+p.id+'\\',-1)\" aria-label=\"menos\">−</button><span class=\"q\">'+q+'</span><button class=\"bq mas\" onclick=\"PED.q(\\''+p.id+'\\',1)\" aria-label=\"más\">+</button></div>'}).join(''):'<div style=\"padding:12px 0;color:var(--mu)\">No hay productos con ese nombre.</div>')+'</div>');\n  if(BUSCA){var b=$('busca');if(b){b.focus();b.setSelectionRange(b.value.length,b.value.length);}}\n  var n=elegidos().length;\n  barra('<button class=\"btn sec\" onclick=\"PED.volver()\">Atrás</button><button class=\"btn\" '+(n?'':'disabled')+' onclick=\"PED.revisar()\">'+(n?('Continuar · '+n+' producto'+(n>1?'s':'')):'Elige productos')+'</button>');\n  return;}\n if(PASO==='revisar'){\n  pinta(cab()+'<div class=\"c\"><b>¿Es todo?</b><div style=\"margin-top:8px\">'+listaPedido(elegidos().map(function(p){return {n:p.n,c:Q[p.id]}}))+'</div></div>');\n  barra('<button class=\"btn sec\" onclick=\"PED.paso(\\'productos\\')\">Añadir más</button><button class=\"btn\" onclick=\"PED.paso(\\'cuando\\')\">Sí, es todo</button>');return;}\n if(PASO==='cuando'){\n  pinta(cab()+'<div class=\"c\"><b>¿Para cuándo?</b><div style=\"margin-top:10px\">'\n   +'<button class=\"dia'+(CUANDO==='asap'?' on':'')+'\" onclick=\"PED.cuando(\\'asap\\')\">Lo antes posible</button>'\n   +(D.dias||[]).map(function(d){return '<button class=\"dia'+(CUANDO===d.f?' on':'')+'\" onclick=\"PED.cuando(\\''+d.f+'\\')\">'+esc(d.n)+(d.cerrado?'<small>no atiendes</small>':'')+'</button>'}).join('')\n   +'</div></div>'+(MODO==='visita'?'<div class=\"c\">'+listaPedido([],true)+'</div>':'<div class=\"c\">'+listaPedido(elegidos().map(function(p){return {n:p.n,c:Q[p.id]}}))+'</div>'));\n  barra('<button class=\"btn sec\" onclick=\"PED.paso(\\''+(MODO==='visita'?'elegir':'revisar')+'\\')\">Atrás</button><button class=\"btn\" '+(CUANDO&&!ENVIANDO?'':'disabled')+' onclick=\"PED.enviar()\">'+(ENVIANDO?'Enviando…':'Confirmar pedido')+'</button>');return;}\n}\nwindow.PED={\n modo:function(m){MODO=m;CUANDO=null;PASO=(m==='visita')?'cuando':'productos';render();},\n cat:function(i){CAT=i;render();},\n busca:function(v){BUSCA=v;render();},\n q:function(id,d){Q[id]=Math.max(0,Math.min(999,(Q[id]||0)+d));if(!Q[id])delete Q[id];render();},\n volver:function(){PASO='elegir';render();},\n revisar:function(){PASO='revisar';render();},\n paso:function(p){PASO=p;render();},\n cuando:function(c){CUANDO=c;render();},\n enviar:async function(){\n  if(ENVIANDO||!CUANDO)return;ENVIANDO=true;render();\n  var items={};elegidos().forEach(function(p){items[p.id]=Q[p.id]});\n  try{\n   var r=await fetch(base+'/enviar',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({modo:MODO,items:MODO==='visita'?{}:items,cuando:CUANDO})});\n   var j=await r.json();\n   if(j&&j.ok){D.estado='usado';D.pedido=j.pedido;ENVIANDO=false;render();return;}\n   ENVIANDO=false;alert((j&&j.error)||'No se pudo enviar. Inténtalo de nuevo.');\n   if(j&&(j.estado==='usado'||j.estado==='vencido'))cargar();else render();\n  }catch(e){ENVIANDO=false;alert('Sin conexión. Revisa tu internet e inténtalo de nuevo.');render();}\n }\n};\nasync function cargar(){\n try{var r=await fetch(base+'/datos',{cache:'no-store'});var j=await r.json();\n  if(!j||!j.ok){pinta('<div class=\"c aviso\">Este link no existe. Pídele uno nuevo a tu distribuidor.</div>');return;}\n  D=j;render();\n }catch(e){pinta('<div class=\"c aviso\">Sin conexión. Revisa tu internet y vuelve a abrir el link.</div>');}\n}\ncargar();\n})();\n</script></body></html>\n";
+async function linkDe(clave){
+  clave=String(clave||"");if(!/^[A-Za-z0-9_-]{16,64}$/.test(clave))return null;
+  const{data}=await db.from("pedido_links").select("*").eq("clave",clave).maybeSingle();
+  return data||null;
+}
+app.get("/p/:clave",(req,res)=>{res.set("Cache-Control","no-store");res.set("X-Robots-Tag","noindex");res.type("html").send(PAGINA_PEDIDO);});
+app.get("/p/:clave/datos",async(req,res)=>{
+  res.set("Cache-Control","no-store");
+  const L=await linkDe(req.params.clave);
+  if(!L)return res.status(404).json({ok:false,estado:"no_existe"});
+  const[{data:t},P]=await Promise.all([db.from("tiendas").select("id,nombre,tipo,dias_atiende").eq("id",L.tienda_id).maybeSingle(),getParams()]);
+  if(!t)return res.status(404).json({ok:false,estado:"no_existe"});
+  const base={ok:true,tienda:t.nombre,negocio:(P.negocio&&P.negocio.nombre)||""};
+  if(L.usado_en){
+    const{data:p}=L.pedido_id?await db.from("pedidos").select("items,visita,fecha,lo_antes").eq("id",L.pedido_id).maybeSingle():{data:null};
+    return res.json(Object.assign(base,{estado:"usado",pedido:p?{items:(p.items||[]).map(x=>({n:x.n||x.p,c:x.c})),visita:!!p.visita,fecha:p.fecha?String(p.fecha).slice(0,10):null,lo_antes:!!p.lo_antes}:null}));
+  }
+  if(new Date(L.vence).getTime()<Date.now())return res.json(Object.assign(base,{estado:"vencido"}));
+  const C=await catalogoPed(),tipo=t.tipo||"bodega";
+  const cats=C.cats.map(c=>({id:c.id,nom:String(c.nom||"").replace(/^[^\wáéíóúñÁÉÍÓÚÑ]+\s*/,""),emoji:c.emoji||"",
+    prods:C.prods.filter(p=>p.cat===c.id&&!(Array.isArray(p.no_tipos)&&p.no_tipos.includes(tipo))).map(p=>({id:p.id,n:p.nombre}))})).filter(c=>c.prods.length);
+  const dias=[];for(let i=0;i<7;i++){const f=sumarDias(hoy(),i);dias.push({f,n:i===0?"Hoy":(i===1?"Mañana":(DIA_NOM[diaDe(f)].charAt(0).toUpperCase()+DIA_NOM[diaDe(f)].slice(1)+" "+Number(f.slice(8,10)))),cerrado:!abreEl(t.dias_atiende,diaDe(f))||undefined});}
+  res.json(Object.assign(base,{estado:"nuevo",vence:L.vence,cats,dias}));
+});
+app.post("/p/:clave/enviar",async(req,res)=>{
+  const L=await linkDe(req.params.clave);
+  if(!L)return res.status(404).json({ok:false,estado:"no_existe",error:"Este link no existe"});
+  if(L.usado_en)return res.status(409).json({ok:false,estado:"usado",error:"Este link ya se usó"});
+  if(new Date(L.vence).getTime()<Date.now())return res.status(410).json({ok:false,estado:"vencido",error:"Este link ya venció. Pide uno nuevo."});
+  const{data:t}=await db.from("tiendas").select("id,nombre,tipo,codigo").eq("id",L.tienda_id).maybeSingle();
+  if(!t)return res.status(404).json({ok:false,estado:"no_existe",error:"Este link no existe"});
+  const visita=req.body.modo==="visita",C=await catalogoPed(),tipo=t.tipo||"bodega";
+  const its=[];
+  if(!visita&&req.body.items&&typeof req.body.items==="object")Object.keys(req.body.items).slice(0,150).forEach(id=>{
+    const p=C.por[id];if(!p||(Array.isArray(p.no_tipos)&&p.no_tipos.includes(tipo)))return;
+    const c=Math.round(num(req.body.items[id],0,999,0));if(c>0)its.push({id,n:p.nombre,c});});
+  if(!visita&&!its.length)return res.status(400).json({ok:false,error:"Elige al menos un producto"});
+  const cu=String(req.body.cuando||"");
+  const asap=cu==="asap"||!fechaOK(cu)||cu<hoy();
+  const fecha=asap?hoy():(cu>sumarDias(hoy(),30)?sumarDias(hoy(),30):cu);
+  /* un solo uso: se marca antes de crear el pedido; si otro envío ganó, este no sigue */
+  const ahora=new Date().toISOString();
+  const{data:marc}=await db.from("pedido_links").update({usado_en:ahora}).eq("id",L.id).is("usado_en",null).select();
+  if(!marc||!marc.length)return res.status(409).json({ok:false,estado:"usado",error:"Este link ya se usó"});
+  const{data:p,error}=await db.from("pedidos").insert({tienda_id:t.id,tienda:t.nombre,items:its,visita,fecha,lo_antes:asap,hora:horaPE(),estado:"por_confirmar",origen:"link",por:"tienda"}).select().single();
+  if(error||!p){await db.from("pedido_links").update({usado_en:null}).eq("id",L.id);return res.status(500).json({ok:false,error:"No se pudo enviar el pedido. Inténtalo de nuevo."});}
+  await db.from("pedido_links").update({pedido_id:p.id}).eq("id",L.id);
+  await evento("pedido_nuevo","📩 Pedidos por confirmar",t.nombre+(t.codigo?(" ("+t.codigo+")"):"")+" pidió por link para "+(asap?"lo antes posible":fechaTxt(fecha))+": "+txtItems(its,visita)+". Confírmalo en Pedidos.",String(p.id));
+  res.json({ok:true,pedido:{items:its.map(x=>({n:x.n,c:x.c})),visita,fecha,lo_antes:asap}});
+});
+/* ═══ 184 · PEDIDOS: conductor ═══ */
+app.post("/conductor/pedidos/:id/no-pude",authC,async(req,res)=>{
+  const{data:p}=await db.from("pedidos").select("*").eq("id",req.params.id).maybeSingle();
+  if(!p)return res.status(404).json({ok:false,error:"Pedido no encontrado"});
+  if(p.estado!=="pendiente"||p.conductor!==req.cond.u)return res.json({ok:true,ya:true});
+  const motivo=limpia(req.body.motivo,120)||"sin motivo";
+  const{data:yo}=await db.from("conductores").select("nombre").eq("usuario",req.cond.u).maybeSingle();
+  await db.from("pedidos").update({estado:"devuelto",conductor:null,no_pude:{por:req.cond.u,motivo,en:new Date().toISOString()}}).eq("id",p.id);
+  await evento("pedido_no_pude","↩️ Pedidos que no se pudieron entregar",((yo&&yo.nombre)||req.cond.u)+" no pudo entregar el pedido de «"+(p.tienda||"")+"» ("+txtItems(p.items,p.visita)+"): "+motivo+". Reasígnalo en Pedidos.",String(p.id));
+  res.json({ok:true});
 });
 app.post("/admin/cargas/leer",authA,async(req,res)=>{
   if(!anthropic)return res.json({ok:false,error:"Falta ANTHROPIC_API_KEY en Railway para leer imágenes."});
@@ -1625,9 +2990,11 @@ app.post("/cargas",authA,async(req,res)=>{
   let valorCosto=0;const sinCosto=[];
   if(prods){
     const ids=Object.keys(prods);
-    const[{data:cps},pC]=await Promise.all([db.from("catalogo").select("id,cat,costo").in("id",ids),getParams()]);
+    const[{data:cps},pC,{data:cI}]=await Promise.all([db.from("catalogo").select("id,cat,costo").in("id",ids),getParams(),db.from("conductores").select("tipo,costos").eq("usuario",cond).maybeSingle()]);
     const cc=(pC&&pC.costos)||{},snap={};
-    (cps||[]).forEach(p=>{const cu=Number(p.costo||0)>0?Number(p.costo):num(cc[p.cat],0,100000,0);snap[p.id]=cu;
+    /* 183 · al independiente se le carga con SUS costos (lo que le cobra el proveedor a él) */
+    const mioC=(cI&&tipoDe(cI)==="independiente"&&cI.costos&&typeof cI.costos==="object")?cI.costos:{};
+    (cps||[]).forEach(p=>{const cu=Number(mioC[p.id])>0?Number(mioC[p.id]):(Number(p.costo||0)>0?Number(p.costo):num(cc[p.cat],0,100000,0));snap[p.id]=cu;
       if(!cu)sinCosto.push(p.id);valorCosto+=cu*num(prods[p.id],0,9999);});
     valorCosto=Math.round(valorCosto*100)/100;
     detalle=Object.assign({},detalle,{costos:snap,valor_costo:valorCosto,sin_costo:sinCosto});
@@ -1732,10 +3099,26 @@ app.post("/admin/tiendas/:id/editar",authA,async(req,res)=>{
     if(Number(ant[k])!==v){upd[k]=v;cambios.push(k+": "+(ant[k]??"—")+" → "+v);} }});
   if(req.body.vip!=null&&!!ant.vip!==!!req.body.vip){upd.vip=!!req.body.vip;cambios.push("VIP: "+(req.body.vip?"sí":"no"));}
   if(req.body.act!=null&&!!ant.act!==!!req.body.act){upd.act=!!req.body.act;cambios.push("Activa: "+(req.body.act?"sí":"no"));}
+  if((upd.lat!==undefined||upd.lon!==undefined)&&!ant.lug_manual){   /* 181 · se movió: vuelve a calcular su distrito */
+    const ub=ubicarGPS(upd.lat!==undefined?upd.lat:ant.lat,upd.lon!==undefined?upd.lon:ant.lon);
+    if(ub!==ant.ubigeo){upd.ubigeo=ub;cambios.push("Lugar: "+(nombreLugar(ant.ubigeo)||"—")+" → "+(nombreLugar(ub)||"sin ubicar"));}
+  }
   if(!cambios.length)return res.json({ok:true,sin_cambios:true});
   await db.from("tiendas").update(upd).eq("id",req.params.id);
   await db.from("logs").insert({tipo:"tienda",detalle:"#"+req.params.id+" "+(ant.nombre||"")+" · "+cambios.join(" · ")});
   res.json({ok:true,cambios:cambios.length});
+});
+/* 182 · deudas de una tienda, por acreedor y deuda por deuda (PEPS) */
+app.get("/admin/tiendas/:id/deudas",authA,async(req,res)=>{
+  const[cs,N]=await Promise.all([deudasDetalle(Number(req.params.id)),nombresAcreedores()]);
+  res.set("Cache-Control","no-store").json({ok:true,cuentas:cs.map(c=>Object.assign({nombre:N[c.acreedor]||c.acreedor},c))});
+});
+app.get("/conductor/tiendas/:id/deudas",authC,async(req,res)=>{
+  const{data:t}=await db.from("tiendas").select("*").eq("id",req.params.id).maybeSingle();
+  const{data:yo}=await db.from("conductores").select("usuario,tipo,lugares").eq("usuario",req.cond.u).maybeSingle();
+  if(!t||!yo||!puedeVer(yo,t,await getParams()))return res.status(403).json({ok:false,error:"Esa tienda no está habilitada para ti"});
+  const[cs,N]=await Promise.all([deudasDetalle(t.id),nombresAcreedores()]);
+  res.set("Cache-Control","no-store").json({ok:true,mi_cuenta:tipoDe(yo)==="independiente"?yo.usuario:"dueno",cuentas:cs.map(c=>Object.assign({nombre:N[c.acreedor]||c.acreedor},c))});
 });
 app.get("/admin/tiendas/:id/historial",authA,async(req,res)=>{
   const{data}=await db.from("logs").select("*").eq("tipo","tienda").ilike("detalle","#"+req.params.id+" %").order("id",{ascending:false}).limit(40);
@@ -1743,7 +3126,7 @@ app.get("/admin/tiendas/:id/historial",authA,async(req,res)=>{
 });
 app.post("/tiendas/:id/verificar",authA,async(req,res)=>{
   try{await db.from("eventos").update({visto:true}).eq("tipo","tienda_nueva").eq("ref",String(req.params.id));}catch(e){}await db.from("tiendas").update({verificada:true,nueva:false}).eq("id",req.params.id);res.json({ok:true});});
-app.post("/tiendas/:id/credito",authA,async(req,res)=>{await db.from("tiendas").update({cr:!!req.body.habilitado,li:num(req.body.limite,0,100000)||230}).eq("id",req.params.id);
+app.post("/tiendas/:id/credito",authA,async(req,res)=>{const{data:_tc}=await db.from("tiendas").select("ubigeo").eq("id",req.params.id).maybeSingle();await db.from("tiendas").update({cr:!!req.body.habilitado,li:num(req.body.limite,0,100000)||limiteLugar(await getParams(),_tc&&_tc.ubigeo)}).eq("id",req.params.id);
   await db.from("logs").insert({tipo:"admin",detalle:"Crédito tienda #"+req.params.id+" → S/"+num(req.body.limite,0,100000)});res.json({ok:true});});
 app.post("/admin/tiendas",authA,async(req,res)=>{
   const b=req.body;
@@ -1751,7 +3134,7 @@ app.post("/admin/tiendas",authA,async(req,res)=>{
   const _pmsN=await getParams();
   const _diasN=diasNorm(b.dias);
   const fila={nombre:b.n,zona:b.z||"",tipo:b.tp||"bodega",ritmo:ritmoDe(_pmsN,b.ritmo).id,
-    dias_atiende:_diasN,dueno:b.d||"",tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:diasNoTexto(_diasN),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),cr:!!b.cr,sa:0,li:Number(b.li)||0,vip:false,act:true,nueva:false,verificada:true,conductor_reg:"admin"};
+    dias_atiende:_diasN,dueno:b.d||"",tel:String(b.tel||"").replace(/\D/g,"").slice(0,15),notas:b.no||"",hora_ini:limpia(b.h_ini,5),hora_fin:limpia(b.h_fin,5),dias_no:diasNoTexto(_diasN),lat:(b.lat==null?null:num(b.lat,-90,90)),lon:(b.lon==null?null:num(b.lon,-180,180)),cr:!!b.cr,sa:0,li:Number(b.li)||(b.cr?limiteLugar(_pmsN,(b.lat!=null&&b.lon!=null)?ubicarGPS(b.lat,b.lon):null):0),vip:false,act:true,nueva:false,verificada:true,conductor_reg:"admin",ubigeo:(b.lat!=null&&b.lon!=null)?ubicarGPS(b.lat,b.lon):null};
   if(b.conductor){fila.conductor_asig=b.conductor;fila.asig_fecha=hoy();} // reservada: no vence
   const{data:t,error}=await db.from("tiendas").insert(fila).select().single();
   if(error)return res.status(500).json({ok:false,error:error.message});
@@ -1898,24 +3281,29 @@ app.get("/admin/utilidad",authA,async(req,res)=>{
   const d=String(req.query.desde||"").slice(0,10)||hoy();
   const h=String(req.query.hasta||"").slice(0,10)||hoy();
   const cond=limpia(req.query.conductor,20);
-  let qv=db.from("ventas").select("items,total,creado,conductor").gte("creado",iniDia(d)).lte("creado",finDia(h));
+  let qv=db.from("ventas").select("items,total,creado,conductor,costo,anulada").gte("creado",iniDia(d)).lte("creado",finDia(h));
   if(cond&&cond!=="todos")qv=qv.eq("conductor",cond);
-  const [vts,prods,params]=await Promise.all([
+  const IND=await independientes();   /* 183 · sin independientes; con el costo PEPS de cada venta */
+  const [vts0,prods,params]=await Promise.all([
     qv,
     db.from("catalogo").select("id,cat,nombre,costo"),
     getParams()
   ]).then(r=>[r[0].data||[],r[1].data||[],r[2]]);
+  const vts=vts0.filter(v=>!v.anulada&&(IND.has(cond)||!IND.has(v.conductor)));
   const costoProd={},catDe={},nomDe={};
   prods.forEach(p=>{costoProd[p.id]=Number(p.costo||0);catDe[p.id]=p.cat;nomDe[p.id]=p.nombre;});
   const costoCat=params.costos||{};
   let venta=0,costo=0,sinCosto=0;
   const porCat={};
   vts.forEach(v=>{
-    (Array.isArray(v.items)?v.items:[]).forEach(it=>{
-      if(!it||!it.id)return;
+    const its=(Array.isArray(v.items)?v.items:[]).filter(it=>it&&it.id);
+    /* si la venta trae su costo PEPS, se reparte entre sus productos según el costo de referencia */
+    const refV=its.reduce((a,it)=>{const c0=costoProd[it.id]>0?costoProd[it.id]:num(costoCat[catDe[it.id]||"—"],0,10000);return a+num(it.c,0,9999)*c0;},0);
+    const fac=(v.costo!=null&&Number(v.costo)>=0&&refV>0)?Number(v.costo)/refV:1;
+    its.forEach(it=>{
       const q=num(it.c,0,9999),pu=num(it.pu,0,10000);
       const cat=catDe[it.id]||"—";
-      const cu=costoProd[it.id]>0?costoProd[it.id]:num(costoCat[cat],0,10000);
+      const cu=(costoProd[it.id]>0?costoProd[it.id]:num(costoCat[cat],0,10000))*fac;
       if(!cu)sinCosto+=q;
       venta+=q*pu;costo+=q*cu;
       const r0=porCat[cat]||(porCat[cat]={venta:0,costo:0,unid:0});
@@ -2047,6 +3435,7 @@ app.get("/admin/diagnostico",authA,async(req,res)=>{
    producto por producto. Antes: la pantalla "Depositar al almacén" no mandaba nada, y
    este envío (por categoría) solo anotaba un contador aparte que no era el stock real. */
 app.post("/almacen",authC,async(req,res)=>{
+  if((await independientes()).has(req.cond.u))return res.status(403).json({ok:false,error:"Un independiente le vende al almacén por traspaso, no lo deja gratis."});   /* 183 */
   const prods=limpiaProds(req.body.prods);
   if(!Object.keys(prods).length)return res.status(400).json({ok:false,error:"Elige los productos que dejas (esta versión de la app es antigua: actualízala)"});
   const st=await leerStock(req.cond.u);
@@ -2056,8 +3445,8 @@ app.post("/almacen",authC,async(req,res)=>{
     const nom={};(cat||[]).forEach(p=>nom[p.id]=p.nombre);
     return res.status(409).json({ok:false,error:"No tienes tanto en el camión: "+falta.map(id=>(nom[id]||id)+" (tienes "+Number(st.prods[id]||0)+")").join(", ")});
   }
-  await moverStock(req.cond.u,Object.fromEntries(Object.keys(prods).map(id=>[id,-prods[id]])),"traspaso_envia","almacen");
-  await moverStock("almacen",prods,"traspaso_recibe",req.cond.u);
+  const salA=await moverStock(req.cond.u,Object.fromEntries(Object.keys(prods).map(id=>[id,-prods[id]])),"traspaso_envia","almacen");
+  await moverStock("almacen",prods,"traspaso_recibe",req.cond.u,{capas:salA.capas});   /* 183 */
   const cats=await porCategoria(prods);
   const det=Object.keys(cats).map(k=>k+" "+cats[k]).join(", ");
   await db.from("kardex").insert({conductor:req.cond.u,tipo:"almacen_retorno",detalle:JSON.stringify(cats)+" · dejado por "+req.cond.u+(req.body.nota?" · "+limpia(req.body.nota,120):"")});
@@ -2068,6 +3457,7 @@ app.post("/admin/almacen/enviar",authA,async(req,res)=>{
   const para=String(req.body.conductor||"");
   const prodsA=limpiaProds(req.body.prods||req.body.items);
   if(!Object.keys(prodsA).length||!USR_RE.test(para))return res.status(400).json({ok:false,error:"Faltan datos"});
+  if((await independientes()).has(para))return res.status(400).json({ok:false,error:"Es independiente: véndele desde Traspasos, con precio y forma de pago"});   /* 185 */
   const items=await porCategoria(prodsA);
   const{data:t}=await db.from("traspasos").insert({de:"almacen",de_nombre:"Almacén",para,prods:prodsA,items,conf_de:true,estado:"parcial"}).select().single();
   await avisoA(para,"🏬 El almacén te envía: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confírmalo al recibirlo.");
@@ -2077,13 +3467,15 @@ app.post("/admin/almacen/pedir",authA,async(req,res)=>{
   const de=String(req.body.conductor||"");
   const prodsR=limpiaProds(req.body.prods||req.body.items);
   if(!Object.keys(prodsR).length||!USR_RE.test(de))return res.status(400).json({ok:false,error:"Faltan datos"});
+  if((await independientes()).has(de))return res.status(400).json({ok:false,error:"Es independiente: cómprale desde Traspasos, con precio y forma de pago"});   /* 185 */
   const items=await porCategoria(prodsR);
   const{data:t}=await db.from("traspasos").insert({de,de_nombre:de,para:"almacen",prods:prodsR,items,conf_para:true,estado:"parcial"}).select().single();
   await avisoA(de,"🏬 Debes entregar al almacén: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confirma cuando lo dejes.");
   res.json({ok:true,id:t.id});
 });
 app.get("/admin/creditos",authA,async(req,res)=>{
-  const{data:mov}=await db.from("creditos_mov").select("*").order("id",{ascending:false}).limit(200);
+  const{data:mov0}=await db.from("creditos_mov").select("*").order("id",{ascending:false}).limit(400);
+  const mov=(mov0||[]).filter(m=>acreedorDe(m)==="dueno").slice(0,200);   /* 182 · solo tu cuenta */
   const{data:tds}=await db.from("tiendas").select("id,nombre,sa,li,cr");
   const map={};(tds||[]).forEach(t=>map[t.id]=t.nombre);
   res.json({ok:true,
@@ -2093,7 +3485,8 @@ app.get("/admin/creditos",authA,async(req,res)=>{
       const p=await getParams();const DV=num((p.credito_cfg&&p.credito_cfg.dias_vencida)||p.deuda_dias,1,365,30);
       const cons=(tds||[]).filter(t=>Number(t.sa||0)>0).sort((a,b)=>Number(b.sa)-Number(a.sa));
       for(const t of cons){
-        const{data:ms}=await db.from("creditos_mov").select("tipo,monto,creado").eq("tienda_id",t.id).order("creado",{ascending:true});
+        const{data:ms0}=await db.from("creditos_mov").select("tipo,monto,creado,acreedor").eq("tienda_id",t.id).order("creado",{ascending:true});
+        const ms=(ms0||[]).filter(m=>acreedorDe(m)==="dueno");
         let pag=(ms||[]).filter(m=>m.tipo!=="cargo").reduce((s,m)=>s+Number(m.monto||0),0),desde=null;
         for(const m of (ms||[]).filter(m=>m.tipo==="cargo")){if(pag>=Number(m.monto||0)){pag-=Number(m.monto||0);continue;}desde=m.creado;break;}
         t.dias=desde?Math.floor((Date.now()-new Date(desde).getTime())/86400000):0;
@@ -2270,7 +3663,8 @@ cron.schedule("0 * * * *",async()=>{
     const hLima=Number(new Date().toLocaleString("en-US",{hour:"2-digit",hour12:false,timeZone:"America/Lima"}))%24;
     if(hLima!==HI)return;
     const{data:vs0}=await db.from("ventas").select("*").gte("creado",iniDia(hoy()));
-    const vs=(vs0||[]).filter(v=>!v.anulada);
+    const IND=await independientes();   /* 183 */
+    const vs=(vs0||[]).filter(v=>!v.anulada&&!IND.has(v.conductor));
     const tot=(vs||[]).reduce((s,v)=>s+Number(v.total||0),0);
     const por={};(vs||[]).forEach(v=>{por[v.conductor]=(por[v.conductor]||0)+Number(v.total||0)});
     let analisis="";
