@@ -334,9 +334,10 @@ app.get("/version",(req,res)=>{
       "v5ciclofiltro","window.TDS","window.EVENTOS=r.eventos","ritmo_sugerido",
       "v5diasP","v5diascfg","window.AT_DIAS","dias_sugeridos",
       "v5salidaP","salirDeTodo","function stDe(p)","cerrarEdicion()\" style=\"background:none\">Cerrar sin guardar",
-      "v5arreglos176","window.pintaWA","window.ALM={stock:{},prods:[],movimientos:[]}","var _ir=window.ir;"]
+      "v5arreglos176","window.pintaWA","window.ALM={stock:{},prods:[],movimientos:[]}","var _ir=window.ir;",
+      "v5picker179","window.pintaCatCosto","v5catcosto179"]
   };
-  const out={servidor:{etag_desactivado:app.get("etag")===false,consultas_en_paralelo:true,hora:new Date().toISOString()},archivos:{}};
+  const out={servidor:{bloque:178,etag_desactivado:app.get("etag")===false,consultas_en_paralelo:true,hora:new Date().toISOString()},archivos:{}};
   Object.keys(marcas).forEach(f=>{
     try{
       const txt=fs.readFileSync(path.join(__dirname,f),"utf8");
@@ -1617,11 +1618,25 @@ app.post("/cargas",authA,async(req,res)=>{
   const items=catsOK(req.body.items);
   if(!items)return res.status(400).json({ok:false,error:"La carga no tiene productos"});
   const prods=(req.body.prods&&typeof req.body.prods==="object"&&Object.keys(req.body.prods).length)?req.body.prods:null;
-  let{data:nc,error:eIns}=await db.from("cargas").insert({conductor:cond,items,prods,detalle:req.body.detalle||null,estado:"pendiente"}).select().single();
+  /* 178 · la carga se valoriza al COSTO de compra (lo que pagaste al proveedor), no al
+     precio de venta: la ganancia sale después, de lo que se venda. Se guarda el costo de
+     ese momento para que un cambio de costo posterior no cambie cargas pasadas. */
+  let detalle=(req.body.detalle&&typeof req.body.detalle==="object"&&!Array.isArray(req.body.detalle))?req.body.detalle:{};
+  let valorCosto=0;const sinCosto=[];
+  if(prods){
+    const ids=Object.keys(prods);
+    const[{data:cps},pC]=await Promise.all([db.from("catalogo").select("id,cat,costo").in("id",ids),getParams()]);
+    const cc=(pC&&pC.costos)||{},snap={};
+    (cps||[]).forEach(p=>{const cu=Number(p.costo||0)>0?Number(p.costo):num(cc[p.cat],0,100000,0);snap[p.id]=cu;
+      if(!cu)sinCosto.push(p.id);valorCosto+=cu*num(prods[p.id],0,9999);});
+    valorCosto=Math.round(valorCosto*100)/100;
+    detalle=Object.assign({},detalle,{costos:snap,valor_costo:valorCosto,sin_costo:sinCosto});
+  }
+  let{data:nc,error:eIns}=await db.from("cargas").insert({conductor:cond,items,prods,detalle,estado:"pendiente"}).select().single();
   let aviso="";
   if(eIns&&/prods/.test(eIns.message||"")){
     // la columna prods todavía no existe en la base: guardar sin el detalle y avisarlo
-    const r2=await db.from("cargas").insert({conductor:cond,items,detalle:req.body.detalle||null,estado:"pendiente"}).select().single();
+    const r2=await db.from("cargas").insert({conductor:cond,items,detalle,estado:"pendiente"}).select().single();
     nc=r2.data;eIns=r2.error;
     aviso="Falta ejecutar el SQL en Supabase (columna prods en cargas). La carga se guardó SIN el detalle por producto, así que el conductor no verá el stock producto por producto.";
   }
@@ -1630,7 +1645,7 @@ app.post("/cargas",authA,async(req,res)=>{
   await db.from("conductores").update({en_turno:true,turno_hora:new Date().toISOString(),turno_ini:new Date().toISOString()}).eq("usuario",cond);
   await db.from("logs").insert({tipo:"turno",detalle:cond+" inicia (carga asignada)"});
   await avisoA(cond,"📦 Tienes una carga asignada: "+Object.keys(items).map(k=>k+" "+items[k]).join(", ")+". Confírmala antes de salir.");
-  res.json({ok:true,id:nc.id,aviso:aviso||undefined,con_detalle:!!prods&&!aviso});
+  res.json({ok:true,id:nc.id,aviso:aviso||undefined,con_detalle:!!prods&&!aviso,valor_costo:valorCosto,sin_costo:sinCosto.length});
 });
 app.post("/admin/cargas/:id/reasignar",authA,async(req,res)=>{
   const cond=String(req.body.conductor||"").trim();
@@ -1807,6 +1822,31 @@ app.post("/admin/categorias/:id/borrar",authA,async(req,res)=>{
   await db.from("categorias").update({activa:false}).eq("id",req.params.id);
   await db.from("logs").insert({tipo:"admin",detalle:"Desactivó categoría: "+req.params.id});
   res.json({ok:true});
+});
+/* 178 · Costo de compra (lo que te cobra el proveedor), producto por producto o toda
+   una categoría de un golpe, desde la pantalla de carga. */
+app.post("/admin/catalogo/costos",authA,async(req,res)=>{
+  const c=(req.body.costos&&typeof req.body.costos==="object")?req.body.costos:{};
+  const ids=Object.keys(c).slice(0,300).map(k=>limpia(k,40)).filter(Boolean);
+  const cat=req.body.categoria&&typeof req.body.categoria==="object"?req.body.categoria:null;
+  if(!ids.length&&!cat)return res.status(400).json({ok:false,error:"No hay costos para guardar"});
+  let n=0;const fallas=[];
+  if(ids.length){
+    const{data:ex}=await db.from("catalogo").select("id").in("id",ids);
+    const hay=new Set((ex||[]).map(p=>p.id));
+    for(const id of ids){
+      if(!hay.has(id)){fallas.push(id);continue;}
+      const{error}=await db.from("catalogo").update({costo:num(c[id],0,100000,0)}).eq("id",id);
+      if(error)fallas.push(id);else n++;
+    }
+  }
+  if(cat&&cat.id){
+    const kv=await getParams();kv.costos=kv.costos||{};
+    kv.costos[limpia(cat.id,30)]=num(cat.costo,0,100000,0);
+    const{error:eP}=await db.from("params").upsert({id:1,kv});
+    if(eP)return res.status(500).json({ok:false,error:"No se pudo guardar el costo de la categoría: "+eP.message});
+  }
+  res.json({ok:!fallas.length,actualizados:n,error:fallas.length?("No se pudo guardar el costo de: "+fallas.join(", ")):undefined});
 });
 app.post("/admin/catalogo/producto",authA,async(req,res)=>{
   const p=req.body||{};
@@ -1997,8 +2037,11 @@ app.get("/admin/diagnostico",authA,async(req,res)=>{
   }
   const{data:ult}=await db.from("tiendas").select("id,nombre,zona,lat,lon,nueva,verificada,conductor_reg,conductor_asig,creado").order("id",{ascending:false}).limit(10);
   const{data:pds}=await db.from("pedidos").select("id,tienda,tienda_id,conductor,fecha,estado").order("id",{ascending:false}).limit(10);
-  const{data:cgs}=await db.from("cargas").select("id,conductor,estado,items,creado").order("id",{ascending:false}).limit(20);
-  res.json({ok:true,conteos:out,ultimas_tiendas:ult||[],ultimos_pedidos:pds||[],ultimas_cargas:cgs||[],gps_error:GPS_ULTIMO_ERROR||null});
+  const{data:cgs}=await db.from("cargas").select("id,conductor,estado,items,detalle,creado").order("id",{ascending:false}).limit(20);
+  /* 178 · cada carga con su valor al costo (sin mandar todo el detalle) */
+  const cgv=(cgs||[]).map(c=>{const d=c.detalle||{};const x=Object.assign({},c);delete x.detalle;
+    if(d.valor_costo!=null){x.valor_costo=d.valor_costo;x.sin_costo=(d.sin_costo||[]).length;}return x;});
+  res.json({ok:true,conteos:out,ultimas_tiendas:ult||[],ultimos_pedidos:pds||[],ultimas_cargas:cgv,gps_error:GPS_ULTIMO_ERROR||null});
 });
 /* 175 · El conductor deja mercadería en el almacén: pasa de SU stock al del almacén,
    producto por producto. Antes: la pantalla "Depositar al almacén" no mandaba nada, y

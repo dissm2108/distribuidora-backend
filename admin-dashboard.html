@@ -2081,12 +2081,12 @@ if(typeof verCargas==='function'){var _vc=verCargas;window.verCargas=async funct
  var conds=(typeof USRS!=='undefined'?USRS:[]).filter(function(u){return u.activo});
  b.innerHTML=cg.length?cg.map(function(c){
   var it=c.items||{},cats=(typeof CATC!=='undefined')?CATC:[];
-  var txt=Object.keys(it).map(function(k){var x=cats.find(function(y){return y[0]===k});return (x?x[1]:k)+' ×'+it[k]}).join(' · ');
+  var txt=Object.keys(it).map(function(k){var ca=(window.CATA||[]).find(function(y){return y.id===k});var x=cats.find(function(y){return y[0]===k});return (ca?((ca.emoji||'')+' '+String(ca.nom).split(' x')[0]):(x?x[1]:k))+' ×'+it[k]}).join(' · ');   /* 179: categorías reales */
   var huerfana=!c.conductor||!conds.some(function(u){return u.usuario===c.conductor});
   return '<div style="padding:9px 0;border-bottom:1px solid var(--linea)">'
   +'<b>'+(c.conductor||'(sin conductor)')+'</b> · '+(c.estado||'')+' · '+new Date(c.creado).toLocaleDateString("es-PE")
   +(huerfana&&c.estado==='pendiente'?' <span style="color:#B23B2E;font-weight:800">⚠ nadie la ve</span>':'')
-  +'<div style="opacity:.75;margin:3px 0">'+txt+'</div>'
+  +'<div style="opacity:.75;margin:3px 0">'+txt+'</div>'+(c.valor_costo!=null?('<div style="font-size:12px;margin-bottom:4px">Al costo: <b>S/'+Number(c.valor_costo).toFixed(2)+'</b>'+(c.sin_costo?(' <span style="color:#B23B2E">· '+c.sin_costo+' sin costo</span>'):'')+'</div>'):'')   /* 179 */
   +(c.estado==='pendiente'?'<div style="display:flex;gap:6px;flex-wrap:wrap"><select id="rc-'+c.id+'" style="flex:1;min-width:130px">'
     +conds.map(function(u){return '<option value="'+u.usuario+'"'+(u.usuario===c.conductor?' selected':'')+'>'+u.nombre+'</option>'}).join('')
     +'</select><button onclick="reasignarCarga('+c.id+')" style="background:#1D4ED8;color:#fff;border:none">Reasignar</button>'
@@ -2325,10 +2325,15 @@ window.cgEnviar=async function(){
   prods[x.id]=q;items[x.cat]=(items[x.cat]||0)+q;total+=q;
  });
  if(!total)return alert('Marca las cantidades con los botones + de cada producto antes de asignar.');
+ /* 179 · antes de asignar: qué se lleva y cuánto cuesta (al costo de compra) */
+ var cst=0,sinC=0;it.forEach(function(x){var cu=(typeof pkCosto==='function')?pkCosto(x.id):0;cst+=(Number(x.c)||0)*cu;if(!(cu>0))sinC++;});
+ var nom=(s.options&&s.selectedIndex>=0)?s.options[s.selectedIndex].text:s.value;
+ if(!confirm('Asignar carga a '+nom+':\n\n· '+Object.keys(prods).length+' productos, '+total+' unidades\n· Te cuesta: S/'+cst.toFixed(2)
+   +(sinC?('\n\n⚠️ '+sinC+' producto(s) sin costo (cuentan como S/0).'):'')+'\n\n¿Confirmas?'))return;
  var r=await apiA('/cargas',{conductor:s.value,items:items,prods:prods});
  if(r&&r.ok){
   try{localStorage.setItem('v5a_cgq_ult',JSON.stringify({fecha:new Date().toISOString(),cond:s.value,total:total}))}catch(e){}
-  alert('✓ Carga asignada: '+Object.keys(prods).length+' productos, '+total+' unidades.'
+  alert('✓ Carga asignada: '+Object.keys(prods).length+' productos, '+total+' unidades'+(r.valor_costo!=null?(' · al costo S/'+Number(r.valor_costo).toFixed(2)):'')+'.'
    +(r.aviso?('\n\n⚠️ '+r.aviso):'\n\nEl conductor la confirma en su app.'));
  }else alert('No se pudo asignar: '+((r&&r.error)||'sin respuesta del servidor'));
 };
@@ -4010,6 +4015,51 @@ document.addEventListener('DOMContentLoaded',pintaTabs);
 setTimeout(pintaTabs,800);
 })();
 </script>
+<style id="v5picker179">
+/* 179 · selector de productos (pedidos, carga, almacén, ajustes) */
+:is(#content,body) .pk-chips{display:flex!important;flex-wrap:wrap!important;gap:6px!important;margin-bottom:8px}
+:is(#content,body) button.pk-chip{flex:0 0 auto!important;width:auto!important;min-width:0!important;height:34px!important;min-height:0!important;padding:0 12px!important;border-radius:999px!important;font-size:12.5px!important;font-weight:650!important;display:inline-flex!important;align-items:center;gap:5px;border:1.5px solid rgba(128,128,128,.35)!important;background:transparent!important;color:inherit!important}
+:is(#content,body) button.pk-chip.tiene{border-color:rgba(29,78,216,.5)!important;font-weight:800!important}
+:is(#content,body) button.pk-chip.on{border-color:#1D4ED8!important;background:rgba(29,78,216,.14)!important;font-weight:800!important}
+:is(#content,body) .pk-chip .n{background:#1D4ED8;color:#fff;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:800}
+:is(#content,body) .pk-chip .f{width:7px;height:7px;border-radius:50%;background:#B23B2E;display:inline-block}
+:is(#content,body) [id$="-prods"]{max-height:340px!important}
+:is(#content,body) .pk-cab{font-size:11px;font-weight:800;opacity:.6;padding:7px 0 3px;letter-spacing:.2px}
+:is(#content,body) .pk-fila{display:flex!important;flex-wrap:nowrap!important;align-items:center;gap:8px;padding:8px 0!important;border-bottom:1px solid rgba(128,128,128,.15)}
+:is(#content,body) .pk-fila.agot{opacity:.45}
+:is(#content,body) .pk-info{flex:1 1 auto;min-width:0}
+:is(#content,body) .pk-nom{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:is(#content,body) .pk-sub{font-size:11.5px;display:flex;align-items:center;flex-wrap:wrap;gap:2px 5px;margin-top:3px}
+:is(#content,body) .pk-sub .t{opacity:.62}
+:is(#content,body) .pk-sub .v{color:#1D4ED8;font-weight:800}
+:is(#content,body) button.pk-b{flex:0 0 auto!important;width:36px!important;min-width:0!important;height:36px!important;min-height:0!important;padding:0!important;border-radius:10px!important;font-size:17px!important;font-weight:800!important;line-height:1;border:1.5px solid rgba(128,128,128,.35)!important;background:transparent!important;color:inherit!important}
+:is(#content,body) button.pk-b.mas{border-color:#1D4ED8!important;background:rgba(29,78,216,.12)!important;color:#1D4ED8!important}
+:is(#content,body) button.pk-b.chico{width:28px!important;height:28px!important;font-size:14px!important;border-radius:8px!important}
+:is(#content,body) input.pk-q{flex:0 0 auto!important;width:50px!important;height:36px!important;padding:0 2px!important;text-align:center!important;font-weight:800!important;font-size:14px!important}
+:is(#content,body) input.pk-q.lleva{color:#1D4ED8!important;border-color:#1D4ED8!important}
+:is(#content,body) input.pk-c{flex:0 0 auto!important;width:72px!important;height:30px!important;padding:0 6px!important;text-align:right!important;font-weight:800!important;font-size:13px!important}
+:is(#content,body) input.pk-c.falta{border-color:#B23B2E!important}
+:is(#content,body) input.pk-c.falta::placeholder{color:#B23B2E!important;opacity:.8}
+:is(#content,body) input.pk-c.hereda{font-style:italic;color:#8A6A2F!important}
+:is(#content,body) button.pk-x{flex:0 0 auto!important;width:28px!important;min-width:0!important;height:28px!important;min-height:0!important;padding:0!important;border:0!important;background:transparent!important;color:#B23B2E!important;font-size:15px!important}
+:is(#content,body) button.pk-link{flex:0 0 auto!important;width:auto!important;min-width:0!important;height:auto!important;min-height:0!important;padding:4px 6px!important;border:0!important;background:transparent!important;color:#B23B2E!important;font-size:12px!important;font-weight:800!important}
+:is(#content,body) button.pk-cta{flex:0 0 auto!important;width:auto!important;min-width:0!important;height:34px!important;min-height:0!important;padding:0 12px!important;border:0!important;color:#fff!important;font-size:12px!important;font-weight:800!important;border-radius:9px!important}
+:is(#content,body) .pk-catc{display:flex!important;flex-wrap:wrap!important;align-items:center;gap:6px 8px!important;background:rgba(185,122,31,.08);border:1px solid rgba(185,122,31,.35);border-radius:10px;padding:8px 10px;margin-bottom:8px;font-size:12px}
+:is(#content,body) .pk-resf{display:flex!important;flex-wrap:nowrap!important;align-items:center;gap:6px;padding:5px 0!important;border-bottom:1px solid rgba(128,128,128,.12)}
+:is(#content,body) .pk-resf .nm{flex:1 1 auto;min-width:0;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:is(#content,body) .pk-resf .sb{min-width:62px;text-align:right;font-size:12px;font-weight:800}
+:is(#content,body) .pk-gcab{display:flex!important;flex-wrap:nowrap!important;justify-content:space-between;align-items:center;font-size:11px;font-weight:800;letter-spacing:.3px;opacity:.8;text-transform:uppercase;padding:0 0 3px!important;margin-top:9px;border-bottom:1.5px solid rgba(29,78,216,.2)}
+:is(#content,body) .pk-lin{display:flex!important;flex-wrap:nowrap!important;justify-content:space-between;align-items:center;gap:8px}
+@media(max-width:820px){
+ /* 16px: el iPhone no hace zoom al tocar el campo */
+ :is(#content,body) input.pk-q,:is(#content,body) input.pk-c{font-size:16px!important}
+ :is(#content,body) input.pk-c{width:78px!important;height:34px!important}
+ :is(#content,body) button.pk-b{width:40px!important;height:40px!important}
+ :is(#content,body) button.pk-b.chico{width:32px!important;height:32px!important}
+ :is(#content,body) input.pk-q{width:52px!important;height:40px!important}
+ :is(#content,body) .pk-catc .pk-cta{flex:1 1 auto!important}
+}
+</style>
 <script id="v5picker2">
 (function(){
 /* ═══ Selector común, más claro: buscar, ver lo elegido y el total ═══
@@ -4033,9 +4083,13 @@ window.pkTipo=function(p){
  if(p==='pd'&&typeof tipoPedido==='function'){var t=tipoPedido();if(t)return t;}
  return (typeof tipoPorDefecto==='function')?tipoPorDefecto():'bodega';
 };
-window.pkCosto=function(id){
- var c=((window.CATE||{})[id]||{}).costo;
- return Number(c)||0;
+/* 179 · costo de compra = el del producto; si no tiene, el de su categoría */
+function catDeProd(id){return (window.CATA||[]).find(function(c){return (c.prods||[]).some(function(y){return y.id===id})})||{};}
+function costoPropio(id){return Number(((window.CATE||{})[id]||{}).costo)||0;}
+window.pkCosto=function(id,cat){
+ var c=costoPropio(id);if(c>0)return c;
+ cat=cat||catDeProd(id);
+ return Number(((PARAMS_A.costos||{})[cat&&cat.id])||0);
 };
 
 window.cargarStocks=async function(){
@@ -4067,37 +4121,59 @@ function limiteDe(p,pid){
  }
  return null;
 }
-window.pkBuscar=function(p,v){BUSCA[p]=String(v||'').toLowerCase();pkPinta(p)};
+window.pkBuscar=function(p,v){BUSCA[p]=String(v||'').toLowerCase();pkPinta(p)};   /* 179: pkPinta repinta chips, barra de costo, lista y resumen */
 
+/* ═══ 179 · Selector rediseñado ═══
+   · Carga, almacén y ajustes se valorizan al COSTO de compra (lo que cobra el proveedor):
+     de ahí sale la ganancia, según a cuánto se venda. Pedidos sigue con precio de venta.
+   · El costo se cambia ahí mismo, producto por producto o toda la categoría de un golpe,
+     y queda guardado en el catálogo.
+   · El resumen agrupa lo elegido por categoría: se ve de un vistazo qué se está llevando.
+   Medidas en <style id="v5picker179">. */
+var MODO_COSTO={cg:1,al:1,alm:1,aj:1};
+function esCosto(p){return !!MODO_COSTO[p];}
+function m2(n){return 'S/'+Number(n||0).toFixed(2);}
+function nomCorto(c){return String((c&&c.nom)||'').split(' x')[0];}
+function noSeVende(p,id,tipo){return p==='pd'&&tipo&&window.NOTIPOS&&(NOTIPOS[id]||[]).indexOf(tipo)>=0;}
 window.pintaProductos=function(p){
  var cont=document.getElementById(p+'-prods');if(!cont)return;
  var st=stDe(p);
  var q=BUSCA[p]||'';
- var lista=[];
+ var tipo=pkTipo(p),cos=esCosto(p);
+ var lista=[],ocultos=0,c0=CATA[st.cat];
  if(q){
   CATA.forEach(function(c){(c.prods||[]).forEach(function(pr){
    if(pr.n.toLowerCase().indexOf(q)>=0)lista.push({p:pr,c:c});})});
- }else{
-  var c0=CATA[st.cat];if(c0)(c0.prods||[]).forEach(function(pr){lista.push({p:pr,c:c0})});
- }
- var tipo=pkTipo(p);
- if(!lista.length){cont.innerHTML='<div style="font-size:12px;opacity:.65;padding:10px 2px">'+(q?'Ningún producto coincide con la búsqueda.':'Esta categoría no tiene productos.')+'</div>';return;}
- cont.innerHTML=lista.map(function(x){
-  var cant=(st.items[x.p.id]&&st.items[x.p.id].c)||0;
-  var lim=limiteDe(p,x.p.id);
-  var pu=precioPanel(x.p.id,x.c,tipo);
-  var sinStock=(lim!=null&&lim<=0);
-  return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(128,128,128,.15)'+(sinStock?';opacity:.45':'')+'">'
-   +'<div style="flex:1;min-width:0">'
-   +'<div style="font-size:12.5px;font-weight:'+(cant?'800':'500')+';overflow:hidden;text-overflow:ellipsis">'+x.p.n+'</div>'
-   +'<div style="font-size:10.5px;opacity:.65">'+(q?(x.c.emoji+' '+x.c.nom+' · '):'')
-   +(pu!=null?('S/'+pu.toFixed(2)+' c/u'):'')
-   +(lim!=null?((pu!=null?' · ':'')+'hay '+lim):'')
-   +(cant&&pu!=null?(' · <b style="color:#1D4ED8">S/'+(cant*pu).toFixed(2)+'</b>'):'')+'</div></div>'
-   +'<button onclick="pkAdd(\''+p+'\',\''+x.p.id+'\',-1)" style="width:32px;height:32px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:none;color:inherit;font-weight:800;font-size:16px">−</button>'
-   +'<input value="'+cant+'" inputmode="numeric" onchange="pkFijar(\''+p+'\',\''+x.p.id+'\',this.value)" '
-   +'style="width:46px;text-align:center;padding:7px 2px;border-radius:9px;border:1.5px solid rgba(128,128,128,.35);background:inherit;color:'+(cant?'#1D4ED8':'inherit')+';font-weight:800;font-size:13px">'
-   +'<button onclick="pkAdd(\''+p+'\',\''+x.p.id+'\',1)" style="width:32px;height:32px;border-radius:9px;border:1.5px solid #1D4ED8;background:rgba(29,78,216,.12);color:#1D4ED8;font-weight:800;font-size:16px">+</button></div>';
+ }else if(c0){(c0.prods||[]).forEach(function(pr){lista.push({p:pr,c:c0})});}
+ /* pedidos: no mostrar lo que no se vende a ese tipo de tienda */
+ lista=lista.filter(function(x){if(noSeVende(p,x.p.id,tipo)){ocultos++;return false}return true});
+ var cab='<div class="pk-cab">'+(q?('Búsqueda: '+lista.length+' producto(s)'):((c0?c0.nom:'')+(cos?' · costo de compra':' · precios de '+tipo)))
+   +(ocultos?(' · '+ocultos+' no se vende(n) a '+tipo):'')+'</div>';
+ if(!lista.length){cont.innerHTML=cab+'<div style="font-size:12px;opacity:.65;padding:10px 2px">'+(q?'Ningún producto coincide con la búsqueda.':'Esta categoría no tiene productos.')+'</div>';return;}
+ cont.innerHTML=cab+lista.map(function(x){
+  var id=x.p.id,cant=(st.items[id]&&st.items[id].c)||0;
+  var lim=limiteDe(p,id);
+  var pv=precioPanel(id,x.c,tipo);
+  var sub;
+  if(cos){
+   var cu=pkCosto(id,x.c),propio=costoPropio(id);
+   sub='<span class="t">Costo S/</span><input id="cst-'+p+'-'+id+'" class="pk-c'+(cu>0?(propio>0?'':' hereda'):' falta')+'" value="'+(cu>0?cu.toFixed(2):'')+'" placeholder="falta" inputmode="decimal" '
+    +'onchange="pkCostoProd(\''+p+'\',\''+id+'\',this.value)" '
+    +'title="'+(propio>0?'Costo de este producto':(cu>0?'Toma el costo de la categoría':'Sin costo cargado'))+'">'
+    +'<span class="t">venta '+m2(pv)+'</span>'
+    +(lim!=null?'<span class="t">· hay '+lim+'</span>':'')
+    +(cant?'<span class="v">= '+m2(cant*cu)+'</span>':'');
+  }else{
+   sub='<span class="t">'+m2(pv)+' c/u</span>'
+    +(lim!=null?'<span class="t">· hay '+lim+'</span>':'')
+    +(cant?'<span class="v">= '+m2(cant*pv)+'</span>':'');
+  }
+  return '<div class="pk-fila'+((lim!=null&&lim<=0)?' agot':'')+'">'
+   +'<div class="pk-info"><div class="pk-nom" style="font-weight:'+(cant?'800':'500')+'">'+(q?('<span style="opacity:.55">'+(x.c.emoji||'')+' </span>'):'')+x.p.n+'</div>'
+   +'<div class="pk-sub">'+sub+'</div></div>'
+   +'<button class="pk-b" onclick="pkAdd(\''+p+'\',\''+id+'\',-1)">−</button>'
+   +'<input class="pk-q'+(cant?' lleva':'')+'" value="'+cant+'" inputmode="numeric" onchange="pkFijar(\''+p+'\',\''+id+'\',this.value)">'
+   +'<button class="pk-b mas" onclick="pkAdd(\''+p+'\',\''+id+'\',1)">+</button></div>';
  }).join('');
 };
 window.pkFijar=function(p,id,v){
@@ -4107,40 +4183,142 @@ window.pkFijar=function(p,id,v){
  var st=stDe(p),cur=(st.items[id]&&st.items[id].c)||0;
  pkAdd(p,id,n-cur);
 };
-/* resumen fijo abajo de cada selector */
+/* chips de categoría: cuántas unidades vas llevando de cada una, y punto rojo si faltan costos */
+window.pintaChips=function(p){
+ var ch=document.getElementById(p+'-chips');if(!ch)return;
+ ch.classList.add('pk-chips');
+ var st=stDe(p),porCat={},cos=esCosto(p),q=BUSCA[p]||'';
+ Object.keys(st.items).forEach(function(k){var x=st.items[k];var cid=x.cat||catDeProd(x.id).id;porCat[cid]=(porCat[cid]||0)+Number(x.c||0);});
+ ch.innerHTML=CATA.map(function(c,i){
+  var on=(i===st.cat&&!q),n=porCat[c.id]||0;
+  var falta=cos&&(c.prods||[]).some(function(pr){return !(pkCosto(pr.id,c)>0)});
+  return '<button class="pk-chip'+(on?' on':'')+(n?' tiene':'')+'" onclick="pkCat(\''+p+'\','+i+')">'
+   +(c.emoji||'')+' '+nomCorto(c)
+   +(n?'<span class="n">'+n+'</span>':'')
+   +(falta?'<span class="f" title="Hay productos sin costo"></span>':'')
+   +'</button>';
+ }).join('');
+};
+/* barra del costo de toda la categoría (solo donde se valoriza al costo) */
+window.pintaCatCosto=function(p){
+ var prods=document.getElementById(p+'-prods');if(!prods||!prods.parentNode)return;
+ var bar=document.getElementById(p+'-catc');
+ var st=stDe(p),c=CATA[st.cat];
+ if(!esCosto(p)||BUSCA[p]||!c||!(c.prods||[]).length){if(bar)bar.remove();return;}
+ if(!bar){bar=document.createElement('div');bar.id=p+'-catc';bar.className='pk-catc';prods.parentNode.insertBefore(bar,prods);}
+ var cs=(c.prods||[]).map(function(pr){return costoPropio(pr.id)});
+ var todosIguales=cs.every(function(v){return v===cs[0]})&&cs[0]>0;
+ var pc=Number(((PARAMS_A.costos||{})[c.id])||0);
+ var val=todosIguales?cs[0]:(pc>0?pc:'');
+ var sinC=(c.prods||[]).filter(function(pr){return !(pkCosto(pr.id,c)>0)}).length;
+ var est=document.getElementById(p+'-cst-est'),txt=est?est.textContent:'';
+ bar.innerHTML='<b>Costo para toda la categoría</b><span style="opacity:.7">S/</span>'
+  +'<input id="'+p+'-ccat" class="pk-c" value="'+(val===''?'':Number(val).toFixed(2))+'" inputmode="decimal" placeholder="0.00">'
+  +'<button class="pk-cta" onclick="pkCostoCat(\''+p+'\')" style="background:#B97A1F">Aplicar a los '+c.prods.length+'</button>'
+  +(sinC?'<span style="color:#B23B2E;font-weight:800">'+sinC+' sin costo</span>':'<span style="opacity:.6">todos con costo</span>')
+  +'<span id="'+p+'-cst-est" style="margin-left:auto;font-size:11px;font-weight:800;color:#2F6B4F">'+txt+'</span>';
+};
+/* guardar costos: se juntan unos instantes y se mandan juntos */
+var COLA_C={},T_C=null;
+function avisoCosto(p,txt,mal){var e=document.getElementById(p+'-cst-est');if(e){e.style.color=mal?'#B23B2E':'#2F6B4F';e.textContent=txt;}}
+async function enviarCostos(p,cat){
+ var lote=COLA_C;COLA_C={};
+ if(!Object.keys(lote).length&&!cat)return;
+ avisoCosto(p,'Guardando…');
+ var r=await apiA('/admin/catalogo/costos',{costos:lote,categoria:cat||undefined});
+ if(r&&r.ok)avisoCosto(p,'✓ Guardado en el catálogo');
+ else{
+  /* no se guardó: vuelve a la cola para el próximo intento */
+  Object.keys(lote).forEach(function(k){if(COLA_C[k]==null)COLA_C[k]=lote[k]});
+  avisoCosto(p,'No se guardó',true);
+  alert('No se pudo guardar el costo: '+((r&&r.error)||'sin respuesta del servidor')+'\n\nSe intentará de nuevo al cambiar otro costo.');
+ }
+}
+window.pkCostoProd=function(p,id,v){
+ var n=Math.round((parseFloat(String(v).replace(',','.'))||0)*100)/100;if(n<0)n=0;
+ window.CATE=window.CATE||{};CATE[id]=Object.assign(CATE[id]||{},{costo:n});
+ COLA_C[id]=n;
+ if(T_C)clearTimeout(T_C);T_C=setTimeout(function(){T_C=null;enviarCostos(p)},450);
+ pkPinta(p);
+};
+window.pkCostoCat=async function(p){
+ var st=stDe(p),c=CATA[st.cat];if(!c)return;
+ var inp=document.getElementById(p+'-ccat');
+ var v=Math.round((parseFloat(String(inp&&inp.value||'').replace(',','.'))||0)*100)/100;
+ if(!(v>0))return alert('Escribe el costo de la categoría (lo que te cobra el proveedor por unidad).');
+ if(!confirm('¿Poner S/'+v.toFixed(2)+' como costo a los '+c.prods.length+' productos de '+c.nom+'?\n\nQueda guardado en el catálogo, y también como costo de la categoría para los productos nuevos.'))return;
+ window.CATE=window.CATE||{};
+ c.prods.forEach(function(pr){CATE[pr.id]=Object.assign(CATE[pr.id]||{},{costo:v});COLA_C[pr.id]=v;});
+ PARAMS_A.costos=PARAMS_A.costos||{};PARAMS_A.costos[c.id]=v;
+ if(T_C){clearTimeout(T_C);T_C=null;}
+ pkPinta(p);
+ await enviarCostos(p,{id:c.id,costo:v});
+};
+/* llevar al primer producto elegido que no tiene costo */
+window.pkIrSinCosto=function(p){
+ var st=stDe(p);
+ var x=pkItems(p).find(function(y){return !(pkCosto(y.id)>0)});if(!x)return;
+ var ci=CATA.findIndex(function(c){return (c.prods||[]).some(function(y){return y.id===x.id})});
+ if(ci>=0)st.cat=ci;BUSCA[p]='';var b=document.getElementById(p+'-busca');if(b)b.value='';
+ pkPinta(p);
+ setTimeout(function(){var i=document.getElementById('cst-'+p+'-'+x.id);if(i){i.scrollIntoView({block:'center'});i.focus();}},80);
+};
+/* resumen: lo elegido, agrupado por categoría, con su valor */
+var TITULO={cg:'Lo que lleva',al:'Lo que se mueve',alm:'Lo que se mueve',aj:'Ajuste',pd:'El pedido'};
 window.pintaResumenFijo=function(p){
  var res=document.getElementById(p+'-res');if(!res)return;
  var it=(typeof pkItems==='function')?pkItems(p):[];
- var tipo=pkTipo(p);
+ var tipo=pkTipo(p),cos=esCosto(p);
  if(!it.length){
   res.innerHTML='<div style="border:1.5px dashed rgba(128,128,128,.3);border-radius:12px;padding:12px;text-align:center;font-size:12px;opacity:.65">Nada seleccionado todavía. Usa + o escribe la cantidad.</div>';
   return;
  }
- var uni=0,tot=0,cos=0;
- var filas=it.map(function(x){
-  var cat=(CATA||[]).find(function(c){return (c.prods||[]).some(function(y){return y.id===x.id})})||{};
-  var pu=precioPanel(x.id,cat,tipo);
-  cos+=x.c*pkCosto(x.id);
-  uni+=x.c;tot+=x.c*pu;
-  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(128,128,128,.12)">'
-   +'<span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis">'+x.n+'</span>'
-   +'<b style="font-size:12px">×'+x.c+'</b>'
-   +'<span style="min-width:62px;text-align:right;font-size:11.5px;font-weight:800">S/'+(x.c*pu).toFixed(2)+'</span>'
-   +'<button onclick="pkAdd(\''+p+'\',\''+x.id+'\',-'+x.c+')" style="border:0;background:none;color:#B23B2E;font-size:15px;cursor:pointer;padding:0 2px">✕</button></div>';
+ var uni=0,venta=0,costo=0,sinC=0,grupos={};
+ it.forEach(function(x){
+  var cat=catDeProd(x.id),cid=cat.id||'—';
+  var pv=precioPanel(x.id,cat,tipo)||0,cu=pkCosto(x.id,cat);
+  var g=grupos[cid]||(grupos[cid]={cat:cat,filas:[],u:0,v:0,c:0});
+  g.filas.push({x:x,pv:pv,cu:cu});g.u+=x.c;g.v+=x.c*pv;g.c+=x.c*cu;
+  uni+=x.c;venta+=x.c*pv;costo+=x.c*cu;if(!(cu>0))sinC++;
+ });
+ var orden=CATA.map(function(c){return c.id}).concat(Object.keys(grupos).filter(function(k){return !CATA.some(function(c){return c.id===k})}));
+ var cuerpo=orden.filter(function(k){return grupos[k]}).map(function(k){
+  var g=grupos[k];
+  return '<div class="pk-gcab"><span>'+(g.cat.emoji||'')+' '+(nomCorto(g.cat)||'Otros')+'</span><span>'+g.u+' und · '+m2(cos?g.c:g.v)+'</span></div>'
+   +g.filas.map(function(f){
+     var sub=cos?f.x.c*f.cu:f.x.c*f.pv,falta=cos&&!(f.cu>0);
+     return '<div class="pk-resf">'
+      +'<span class="nm">'+f.x.n+(cos?'<span style="opacity:.55;font-size:11px"> · '+(falta?'<b style="color:#B23B2E">sin costo</b>':m2(f.cu))+'</span>':'')+'</span>'
+      +'<button class="pk-b chico" onclick="pkAdd(\''+p+'\',\''+f.x.id+'\',-1)">−</button>'
+      +'<b style="min-width:26px;text-align:center;font-size:13px">'+f.x.c+'</b>'
+      +'<button class="pk-b chico mas" onclick="pkAdd(\''+p+'\',\''+f.x.id+'\',1)">+</button>'
+      +'<span class="sb"'+(falta?' style="color:#B23B2E"':'')+'>'+(falta?'—':m2(sub))+'</span>'
+      +'<button class="pk-x" onclick="pkAdd(\''+p+'\',\''+f.x.id+'\',-'+f.x.c+')" title="Quitar">✕</button></div>';
+   }).join('');
  }).join('');
- res.innerHTML='<div style="border:1.5px solid #1D4ED8;border-radius:12px;padding:10px 12px;background:rgba(29,78,216,.05)">'
-  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-  +'<b style="font-size:12.5px">Seleccionado: '+it.length+' producto(s) · '+uni+' unidades</b>'
-  +'<button onclick="pkReset(\''+p+'\');pkPinta(\''+p+'\')" style="border:0;background:none;color:#B23B2E;font-size:11px;font-weight:800;cursor:pointer">Vaciar</button></div>'
-  +filas
-  +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:7px;border-top:1.5px solid rgba(29,78,216,.25)">'
-    +'<b style="font-size:13px">'+pkEtiqueta(p)+'</b><b style="font-size:17px;color:#1D4ED8">S/'+tot.toFixed(2)+'</b></div>'
-  +(p!=='pd'&&cos>0?('<div style="display:flex;justify-content:space-between;align-items:center;margin-top:3px">'
-    +'<span style="font-size:11.5px;opacity:.75">Costo de esa mercadería</span>'
-    +'<b style="font-size:12.5px;opacity:.85">S/'+cos.toFixed(2)+'</b></div>'):'')
-  +'<div style="font-size:10.5px;opacity:.65;margin-top:3px">Precios de <b>'+tipo+'</b> · desde Catálogo y precios'
-    +(p==='pd'?'':' · referencia, aquí no se cobra')+'</div>'
-  +'</div>';
+ var pie;
+ if(cos){
+  var gan=venta-costo;
+  pie='<div class="pk-lin" style="margin-top:10px;padding-top:8px;border-top:1.5px solid rgba(29,78,216,.3)">'
+    +'<b style="font-size:13px">'+(p==='cg'?'Te cuesta esta carga':'Valor al costo')+'</b><b style="font-size:18px;color:#1D4ED8">'+m2(costo)+'</b></div>'
+   +(p==='cg'
+     ?('<div class="pk-lin" style="font-size:12px;margin-top:4px"><span style="opacity:.75">Si vende todo a precio de '+tipo+'</span><b>'+m2(venta)+'</b></div>'
+      +'<div class="pk-lin" style="font-size:12.5px;margin-top:2px"><span style="opacity:.75">Ganancia estimada</span><b style="color:'+(gan>=0?'#2F6B4F':'#B23B2E')+'">'+m2(gan)+(venta>0?' ('+Math.round(gan/venta*100)+'%)':'')+'</b></div>')
+     :('<div class="pk-lin" style="font-size:11.5px;margin-top:3px;opacity:.75"><span>A precio de venta ('+tipo+')</span><span>'+m2(venta)+'</span></div>'))
+   +(sinC?('<div class="pk-lin" style="background:#FDEBE9;color:#B23B2E;border-radius:9px;padding:8px 10px;font-size:11.5px;margin-top:8px;flex-wrap:wrap!important">'
+      +'<span style="flex:1;min-width:150px">⚠️ '+sinC+' producto(s) sin costo: cuentan como S/0'+(p==='cg'?' y la ganancia sale inflada':'')+'.</span>'
+      +'<button class="pk-cta" onclick="pkIrSinCosto(\''+p+'\')" style="background:#B23B2E">Poner costos</button></div>'):'')
+   +'<div style="font-size:10.5px;opacity:.6;margin-top:6px;line-height:1.5">Costo = lo que te cobra el proveedor. Se cambia aquí mismo y queda guardado en el catálogo.</div>';
+ }else{
+  pie='<div class="pk-lin" style="margin-top:10px;padding-top:8px;border-top:1.5px solid rgba(29,78,216,.3)">'
+    +'<b style="font-size:13px">'+pkEtiqueta(p)+'</b><b style="font-size:18px;color:#1D4ED8">'+m2(venta)+'</b></div>'
+   +'<div style="font-size:10.5px;opacity:.65;margin-top:3px">Precios de <b>'+tipo+'</b> · desde Catálogo y precios</div>';
+ }
+ res.innerHTML='<div style="border:1.5px solid #1D4ED8;border-radius:12px;padding:10px 12px;background:rgba(29,78,216,.04)">'
+  +'<div class="pk-lin">'
+  +'<b style="font-size:13px">'+(TITULO[p]||'Seleccionado')+': '+it.length+' producto(s) · '+uni+' unidades</b>'
+  +'<button class="pk-link" onclick="if(confirm(\'¿Vaciar todo lo seleccionado?\')){pkReset(\''+p+'\');pkPinta(\''+p+'\')}">Vaciar</button></div>'
+  +cuerpo+pie+'</div>';
 };
 /* buscador arriba de cada selector */
 window.pintaBuscador=function(p){
@@ -4154,7 +4332,7 @@ window.pintaBuscador=function(p){
 };
 if(typeof pkPinta==='function'){var _pp=pkPinta;window.pkPinta=function(p){
  var r=_pp.apply(this,arguments);
- try{pintaBuscador(p);pintaProductos(p);pintaResumenFijo(p);}catch(e){console.error('picker:',e)}
+ try{pintaBuscador(p);pintaChips(p);pintaCatCosto(p);pintaProductos(p);pintaResumenFijo(p);}catch(e){console.error('picker:',e)}   /* 179 */
  return r;};}
 /* traer stocks al abrir las secciones que los necesitan */
 var _ir=window.ir;   /* 176 · antes window.irAdm, que no existe: esto nunca corría */
@@ -4163,6 +4341,81 @@ if(typeof _ir==='function'){window.ir=function(s){
  if(s==='almacen'||s==='kardex')cargarStocks().then(function(){try{['al','alm','cg'].forEach(function(k){if(document.getElementById(k+'-chips'))pkPinta(k)});}catch(e){}});
  return r;};}
 cargarStocks();
+})();
+</script>
+<script id="v5catcosto179">
+(function(){
+/* ═══ 179 · Catálogo: costo de compra rápido ═══
+   · «Poner costo a toda la categoría»: se guarda al instante en todos sus productos y como
+     costo de la categoría (para los productos nuevos).
+   · La casilla de costo vacía muestra en gris el costo de la categoría que se usará;
+     en rojo si no hay ninguno (la ganancia saldría inflada). */
+function decorar(){
+ if(typeof CUR==='undefined'||CUR!=='catalogo')return;
+ var pg=document.getElementById('pgen');if(!pg||!pg.parentNode)return;
+ var c=CATA[window.CATCAT||0];if(!c)return;
+ var pc=Number(((PARAMS_A.costos||{})[c.id])||0);
+ if(!document.getElementById('cgen-fila')){
+  var d=document.createElement('div');d.id='cgen-fila';
+  d.style.cssText='display:flex;gap:8px;align-items:center;margin:-2px 0 10px;flex-wrap:wrap';
+  d.innerHTML='<input id="cgen" type="number" step="0.01" inputmode="decimal" placeholder="Costo general" value="'+(pc>0?pc.toFixed(2):'')+'" style="width:130px">'
+   +'<button onclick="aplicarCostoGeneral()" style="background:#B97A1F;color:#fff;border:none">Poner costo a toda la categoría</button>'
+   +'<span id="cgen-est" style="font-size:11.5px;font-weight:700;color:#2F6B4F"></span>';
+  pg.parentNode.parentNode.insertBefore(d,pg.parentNode.nextSibling);
+ }
+ var sin=0;
+ (c.prods||[]).forEach(function(p){
+  var e=document.getElementById('pc-'+p.id);if(!e||e._179)return;e._179=1;
+  if(!(Number(e.value)>0)){
+   e.value='';
+   e.placeholder=pc>0?pc.toFixed(2):'falta';
+   e.title=pc>0?('Sin costo propio: usa el de la categoría (S/'+pc.toFixed(2)+')'):'Sin costo: la ganancia sale inflada';
+   if(!(pc>0)){sin++;e.style.setProperty('border-color','#B23B2E','important');}
+  }
+ });
+ var est=document.getElementById('cgen-est');
+ if(est&&!est.textContent&&sin){est.style.color='#B23B2E';est.textContent=sin+' producto(s) sin costo';}
+}
+window.aplicarCostoGeneral=async function(){
+ var c=CATA[window.CATCAT||0];if(!c)return;
+ var v=Math.round((parseFloat(String((document.getElementById('cgen')||{}).value||'').replace(',','.'))||0)*100)/100;
+ if(!(v>0))return alert('Escribe el costo (lo que te cobra el proveedor por unidad).');
+ var n=(c.prods||[]).length;
+ if(!confirm('¿Poner S/'+v.toFixed(2)+' como costo a los '+n+' productos de '+c.nom+'?\n\nSe guarda al instante, y también como costo de la categoría para los productos nuevos.'))return;
+ var costos={};(c.prods||[]).forEach(function(p){costos[p.id]=v;});
+ var est=document.getElementById('cgen-est');if(est){est.style.color='#2F6B4F';est.textContent='Guardando…';}
+ var r=await apiA('/admin/catalogo/costos',{costos:costos,categoria:{id:c.id,costo:v}});
+ if(r&&r.ok){
+  (c.prods||[]).forEach(function(p){
+   CATE[p.id]=Object.assign(CATE[p.id]||{},{costo:v});
+   var e=document.getElementById('pc-'+p.id);if(e){e.value=v;e.style.removeProperty('border-color');}
+  });
+  PARAMS_A.costos=PARAMS_A.costos||{};PARAMS_A.costos[c.id]=v;try{savePA()}catch(e){}
+  if(est){est.style.color='#2F6B4F';est.textContent='✓ Costo guardado en '+n+' productos';}
+ }else{
+  if(est){est.style.color='#B23B2E';est.textContent='No se guardó';}
+  alert('No se pudo guardar el costo: '+((r&&r.error)||'sin respuesta del servidor'));
+ }
+};
+/* Kardex → Registrar carga: las últimas cargas asignadas, con su valor al costo.
+   (La tarjeta «Cargas pendientes» de Configuración dejó de verse cuando se rehízo esa
+   sección; con esto vuelve a estar a mano, junto a donde se asigna.) */
+function cajaCargas(){
+ if(typeof CUR==='undefined'||CUR!=='kardex')return;
+ var w=document.getElementById('cg-wrap');if(!w||document.getElementById('cgs-box'))return;
+ var d=document.createElement('div');d.id='cgs-wrap';
+ d.style.cssText='border-top:1.5px solid rgba(128,128,128,.2);margin-top:12px;padding-top:10px';
+ d.innerHTML='<div style="display:flex;align-items:center;gap:8px"><b style="font-size:12.5px;flex:1">📦 Últimas cargas asignadas</b>'
+  +'<button onclick="verCargas()" style="background:none">Ver</button></div>'
+  +'<div id="cgs-box" style="font-size:12px;margin-top:6px;line-height:1.6"></div>';
+ w.appendChild(d);
+}
+if(typeof cgEnviar==='function'){var _ce=cgEnviar;window.cgEnviar=async function(){
+ var x=await _ce.apply(this,arguments);
+ try{if(document.getElementById('cgs-box'))verCargas();}catch(e){}
+ return x;};}
+var _r=window.render;
+window.render=function(){var x=_r.apply(this,arguments);setTimeout(function(){try{decorar()}catch(e){};try{cajaCargas()}catch(e){}},40);return x;};
 })();
 </script>
 <script id="v5almmover">
@@ -4202,8 +4455,7 @@ window.almMover=async function(modo){
  if(!d.total)return alert('Marca las cantidades con + antes de continuar.');
  var val=valoriza(d.det);
  var txt=(modo==='enviar'?'Enviar':'Pedir')+' '+d.total+' unidades ('+d.det.length+' producto(s)) '
-  +(modo==='enviar'?'a ':'a ')+cond+'.\n\nValor a precio de venta: S/'+val.venta.toFixed(2)
-  +(val.costo>0?('\nCosto de esa mercadería: S/'+val.costo.toFixed(2)):'')
+  +(modo==='enviar'?'a ':'a ')+cond+'.\n\nValor al costo: S/'+val.costo.toFixed(2)+'   (a precio de venta: S/'+val.venta.toFixed(2)+')'   /* 179 */
   +'\n\nEl stock se mueve recién cuando el conductor lo confirme en su app.';
  if(!confirm(txt))return;
  var r=await apiA('/admin/almacen/'+(modo==='enviar'?'enviar':'pedir'),{conductor:cond,prods:d.prods});
